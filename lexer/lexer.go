@@ -174,7 +174,11 @@ func (l *Lexer) countLeadingSpaces() (int, error) {
 	seenTab := false
 
 	for {
-		curr := l.peekAhead(count)
+		peekPos := l.position + count
+		if peekPos >= len(l.input){
+			break
+		}
+		curr := l.input[peekPos]
 
 		if curr == ' ' {
 			seenSpace = true
