@@ -1,6 +1,6 @@
 package parser
 
-type Node any 
+type Node any
 
 type Operator int
 
@@ -55,53 +55,52 @@ type Module struct {
 	Body []Statement
 }
 
-type FunctionDef struct{
+type FunctionDef struct {
 	Name string
 	Args []string
 	Body []Statement
 }
 
-func (f *FunctionDef) statementNode(){}
+func (f *FunctionDef) statementNode() {}
 
-type Return struct{
+type Return struct {
 	Value Expression
 }
 
-func (r *Return) statementNode(){}
+func (r *Return) statementNode() {}
 
 type If struct {
-	Test Expression
-	Body []Statement
+	Test   Expression
+	Body   []Statement
 	Orelse []Statement
 }
 
 func (i *If) statementNode() {}
 
-type For struct{
+type For struct {
 	Target Expression
-	Iter Expression
-	Body []Statement
+	Iter   Expression
+	Body   []Statement
 }
 
-func (f *For) statementNode(){}
-
+func (f *For) statementNode() {}
 
 type Call struct {
 	Func Expression
 	Args []Expression
 }
 
-func (c *Call) expressionNode(){}
-
+func (c *Call) expressionNode() {}
 
 type CompareOp int
+
 const (
-	Eq CompareOp = iota // ==
-	NotEq // !=
-	Lt // <
-	LtE // <=
-	Gt // >
-	GtE // >=
+	Eq    CompareOp = iota // ==
+	NotEq                  // !=
+	Lt                     // <
+	LtE                    // <=
+	Gt                     // >
+	GtE                    // >=
 )
 
 type UnaryOperator int
@@ -121,8 +120,8 @@ type UnaryOp struct {
 
 func (u *UnaryOp) expressionNode() {}
 
-type String struct{
+type String struct {
 	Value string
 }
 
-func (s *String) expressionNode(){}
+func (s *String) expressionNode() {}
