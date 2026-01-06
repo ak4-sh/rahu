@@ -357,9 +357,14 @@ func (l *Lexer) NextToken() Token {
 
 		if l.isChar() || l.ch == '_' {
 			literal := l.readIdentifier()
+			val, ok := Keywords[literal]
+			if ok{
+				tok.Type = val
+			} else {
+				tok.Type = NAME
+			}
 			tok.Literal = literal
-			tok.Type = NAME
-			tok.EndCol = l.position
+			tok.EndCol = l.col -1
 			return tok
 		}
 
