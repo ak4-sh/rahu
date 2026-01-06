@@ -1,25 +1,14 @@
 package main
 
 import (
-	"fmt"
-	"rahu/lexer"
+	"rahu/parser"
 	"rahu/utils"
-	"time"
 )
 
 func main() {
-	start := time.Now()
-	input := utils.ParseFile("test.py")
-	l := lexer.New(input)
+	input := "result = x + y"
+	p := parser.New(input) // Pass the same input
 
-	for {
-		tok := l.NextToken()
-
-		if tok.Type == lexer.EOF {
-			break
-		}
-	}
-
-	duration := time.Since(start)
-	fmt.Printf("lexed in %v\n", duration)
+	module := p.Parse()
+	utils.PrintAST(module, 0)
 }
