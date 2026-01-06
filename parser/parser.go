@@ -1,7 +1,15 @@
 package parser
 
 import (
+	"fmt"
 	"rahu/lexer"
+)
+
+const (
+	LOWEST = iota
+	SUM
+	PRODUCT
+	PREFIX
 )
 
 type Parser struct {
@@ -44,6 +52,9 @@ func (p *Parser) Parse() *Module {
 }
 
 func (p *Parser) parseStatement() Statement {
+	if p.current.Type == lexer.INDENT || p.current.Type == lexer.DEDENT{
+		p.advance()
+	}
 	if p.current.Type == lexer.NAME && p.peek.Type == lexer.EQUAL {
 		return p.parseAssignment()
 	}
@@ -53,15 +64,11 @@ func (p *Parser) parseStatement() Statement {
 }
 
 func (p *Parser) parseAssignment() Statement {
-	if p.current.Type == lexer.INDENT || p.current.Type == lexer.DEDENT {
-		p.advance()
-		return nil
-	}
 	target := &Name{Id: p.current.Literal}
 	// moving past name and equal
 	p.advanceBy(2)
 
-	value := p.parseExpression()
+	value := p.parseExpression(LOWEST)
 
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
@@ -73,37 +80,60 @@ func (p *Parser) parseAssignment() Statement {
 	}
 }
 
-func (p *Parser) parseExpression() Expression {
+func (p *Parser) parseExpression(minBP int) Expression{
 	left := p.parsePrimary()
+	for {
+		bp := infixBindingPower(p.current.Type)
+		if bp <= minBP{
+			break
+		}
 
-	if p.isOperator(p.current.Type) {
-		op := p.tokenTypeToOperator(p.current.Type)
+		opTok := p.current
 		p.advance()
 
-		right := p.parsePrimary()
-		return &BinOp{
+		right := p.parseExpression(bp)
+
+		left = &BinOp{
 			Left:  left,
-			Op:    op,
-			Right: right,
+			Op:  p.tokenTypeToOperator(opTok.Type),
+			Right:  right,
 		}
 	}
 
 	return left
 }
 
-func (p *Parser) parsePrimary() Expression {
-	if p.current.Type == lexer.NUMBER {
-		num := &Number{Value: p.current.Literal}
-		p.advance()
-		return num
+func infixBindingPower(t lexer.TokenType) int{
+	switch t{
+	case lexer.PLUS, lexer.MINUS:
+		return SUM
+	case lexer.STAR, lexer.SLASH, lexer.DOUBLESLASH:
+		return PRODUCT
+	default:
+		return LOWEST
 	}
+}
 
-	if p.current.Type == lexer.NAME {
-		name := &Name{Id: p.current.Literal}
-		p.advance()
-		return name
+func (p *Parser) parsePrimary() Expression {
+	switch p.current.Type{
+	case lexer.NUMBER:
+			n := &Number{Value:  p.current.Literal}
+			p.advance()
+			return n
+		case lexer.NAME:
+			n := &Name{Id: p.current.Literal}
+			p.advance()
+			return n
+		case lexer.LPAR:
+			p.advance()
+			expr := p.parseExpression(LOWEST)
+			if p.current.Type != lexer.RPAR{
+				panic("expected )")
+			}
+			p.advance()
+			return expr
 	}
-	return nil
+	panic(fmt.Sprintf("unexpected token %v\n", p.current))
 }
 
 func (p *Parser) isOperator(t lexer.TokenType) bool {
@@ -121,6 +151,8 @@ func (p *Parser) tokenTypeToOperator(t lexer.TokenType) Operator {
 	case lexer.SLASH:
 		return Div
 	case lexer.DOUBLESLASH:
+		return FloorDiv
+	case lexer.PERCENT:
 		return Mod
 	default:
 		return Add
