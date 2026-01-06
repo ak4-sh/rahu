@@ -104,15 +104,22 @@ const (
 	GtE // >=
 )
 
-type UnaryOp int
+type UnaryOperator int
 
 const (
-	UAdd UnaryOp = iota // +x
-	USub // -x
-	Not // not x
+	UAdd UnaryOperator = iota // +x
+	USub                      // -x
+	Not                       // not x
 )
 
-func (u *UnaryOp) expressionNode(){}
+func (u *UnaryOperator) expressionNode() {}
+
+type UnaryOp struct {
+	Op      UnaryOperator
+	Operand Expression
+}
+
+func (u *UnaryOp) expressionNode() {}
 
 type String struct{
 	Value string
