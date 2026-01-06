@@ -1,7 +1,6 @@
 package parser
 
-type Node interface {
-}
+type Node any 
 
 type Operator int
 
