@@ -15,7 +15,6 @@ const (
 	Pow
 )
 
-
 type Statement interface {
 	Node
 	statementNode()
@@ -39,8 +38,8 @@ type Name struct {
 func (n *Name) expressionNode() {}
 
 type BinOp struct {
-	Left Expression
-	Op Operator
+	Left  Expression
+	Op    Operator
 	Right Expression
 }
 
@@ -48,7 +47,7 @@ func (b *BinOp) expressionNode() {}
 
 type Assign struct {
 	Targets []Expression
-	Value Expression
+	Value   Expression
 }
 
 func (a *Assign) statementNode() {}
@@ -56,4 +55,3 @@ func (a *Assign) statementNode() {}
 type Module struct {
 	Body []Statement
 }
-
