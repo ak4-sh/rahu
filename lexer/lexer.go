@@ -88,7 +88,7 @@ func (l *Lexer) isMultiCharToken() (TokenType, int, bool) {
 	// Try 3-char token first (longest match)
 	if l.position+3 <= len(l.input) {
 		token := l.input[l.position : l.position+3]
-		if tokType, ok := multiCharOps[token]; ok {
+		if tokType, ok := MultiCharOps[token]; ok {
 			return tokType, 3, true
 		}
 	}
@@ -96,7 +96,7 @@ func (l *Lexer) isMultiCharToken() (TokenType, int, bool) {
 	// Try 2-char token
 	if l.position+2 <= len(l.input) {
 		token := l.input[l.position : l.position+2]
-		if tokType, ok := multiCharOps[token]; ok {
+		if tokType, ok := MultiCharOps[token]; ok {
 			return tokType, 2, true
 		}
 	}
@@ -378,7 +378,7 @@ func (l *Lexer) NextToken() Token {
 		}
 
 		// single char operator check
-		if val, ok := singleCharOps[string(l.ch)]; ok {
+		if val, ok := SingleCharOps[string(l.ch)]; ok {
 			tok.Type = val
 			tok.Literal = string(l.ch)
 			tok.EndCol = l.position

@@ -1,6 +1,6 @@
 package lexer
 
-var multiCharOps = map[string]TokenType{
+var MultiCharOps = map[string]TokenType{
 	// two char tokens
 	"==": EQEQUAL,
 	"!=": NOTEQUAL,
@@ -28,7 +28,7 @@ var multiCharOps = map[string]TokenType{
 	"...": ELLIPSIS,
 }
 
-var singleCharOps = map[string]TokenType{
+var SingleCharOps = map[string]TokenType{
 	"(": LPAR,
 	")": RPAR,
 	"[": LSQB,
