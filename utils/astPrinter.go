@@ -55,11 +55,11 @@ func PrintAST(node any, indent int) {
 	case *parser.Call:
 		fmt.Printf("%sCall:\n", prefix)
 		fmt.Printf("%s  Func:\n", prefix)
-		PrintAST(n.Func, indent + 4)
-		if len(n.Args) > 0{
+		PrintAST(n.Func, indent+4)
+		if len(n.Args) > 0 {
 			fmt.Printf("%s  Args:\n", prefix)
-			for i := range n.Args{
-				PrintAST(n.Args[i], indent + 4)
+			for i := range n.Args {
+				PrintAST(n.Args[i], indent+4)
 			}
 		} else {
 			fmt.Printf("%s  Args: []\n", prefix)
@@ -68,15 +68,15 @@ func PrintAST(node any, indent int) {
 	case *parser.If:
 		fmt.Printf("%sIf:\n", prefix)
 		fmt.Printf("%s  TestCondition:\n", prefix)
-		PrintAST(n.Test, indent + 4)
+		PrintAST(n.Test, indent+4)
 		fmt.Printf("%s  Body:\n", prefix)
-		for i := range n.Body{
-			PrintAST(n.Body[i], indent + 4)
+		for i := range n.Body {
+			PrintAST(n.Body[i], indent+4)
 		}
-		if len(n.Orelse) > 0{
+		if len(n.Orelse) > 0 {
 			fmt.Printf("%s  Orelse:\n", prefix)
-			for i := range n.Orelse{
-				PrintAST(n.Orelse[i], indent + 4)
+			for i := range n.Orelse {
+				PrintAST(n.Orelse[i], indent+4)
 			}
 		} else {
 			fmt.Printf("%s Orelse: nil\n", prefix)
@@ -84,8 +84,8 @@ func PrintAST(node any, indent int) {
 
 	case *parser.ExprStmt:
 		fmt.Printf("%sExprStmt:\n", prefix)
-		PrintAST(n.Value, indent + 2)
-	
+		PrintAST(n.Value, indent+2)
+
 	case string:
 		fmt.Printf("%s%s\n", prefix, n)
 
@@ -93,23 +93,22 @@ func PrintAST(node any, indent int) {
 		fmt.Printf("%sFunctionDef:\n", prefix)
 		fmt.Printf("%s  FuncName (%s)\n", prefix, n.Name)
 		fmt.Printf("%s  Args:\n", prefix)
-		for i := range n.Args{
-			PrintAST(n.Args[i], indent + 4)
+		for i := range n.Args {
+			PrintAST(n.Args[i], indent+4)
 		}
 
 		fmt.Printf("%s  Body:\n", prefix)
-		for i := range n.Body{
-			PrintAST(n.Body[i], indent + 4)
+		for i := range n.Body {
+			PrintAST(n.Body[i], indent+4)
 		}
 
 	case *parser.Return:
 		fmt.Printf("%sReturn:\n", prefix)
-		PrintAST(n.Value, indent + 2)
+		PrintAST(n.Value, indent+2)
 
-	
 	case parser.CompareOp:
 		fmt.Printf("%sCompareOp:\n", prefix)
-		switch n{
+		switch n {
 		case parser.Eq:
 			fmt.Printf("%s  Eq()\n", prefix)
 		case parser.Gt:
@@ -126,29 +125,28 @@ func PrintAST(node any, indent int) {
 		fmt.Printf("%sCompare:\n", prefix)
 		fmt.Printf("%s  Left:\n", prefix)
 
-		PrintAST(n.Left, indent + 4)
+		PrintAST(n.Left, indent+4)
 
 		fmt.Printf("%s  Ops:\n", prefix)
-		for i := range n.Ops{
-			PrintAST(n.Ops[i], indent + 4)
+		for i := range n.Ops {
+			PrintAST(n.Ops[i], indent+4)
 		}
 
 		fmt.Printf("%s  Right:\n", prefix)
 
-		for i := range n.Right{
-			PrintAST(n.Right[i], indent  + 4)
+		for i := range n.Right {
+			PrintAST(n.Right[i], indent+4)
 		}
-
 
 	case *parser.For:
 		fmt.Printf("%sFor:\n", prefix)
 		fmt.Printf("%s  Target:\n", prefix)
-		PrintAST(n.Target, indent + 4)
+		PrintAST(n.Target, indent+4)
 		fmt.Printf("%s  Iter:\n", prefix)
-		PrintAST(n.Iter, indent + 4)
+		PrintAST(n.Iter, indent+4)
 		fmt.Printf("%s  Body:\n", prefix)
-		for i := range n.Body{
-			PrintAST(n.Body[i], indent + 4)
+		for i := range n.Body {
+			PrintAST(n.Body[i], indent+4)
 		}
 	default:
 		fmt.Printf("%sUnknown(%T)\n", prefix, node)

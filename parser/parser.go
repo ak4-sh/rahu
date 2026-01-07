@@ -63,33 +63,33 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseAssignment()
 	}
 
-	if p.current.Type == lexer.IF{
+	if p.current.Type == lexer.IF {
 		// parsing conditional
 		p.advance()
 		return p.parseIf()
 	}
 
 	if p.current.Type == lexer.NAME || p.current.Type == lexer.NUMBER ||
-	p.current.Type == lexer.STRING {
+		p.current.Type == lexer.STRING {
 		expr := p.parseExpression(LOWEST)
-		if p.current.Type == lexer.NEWLINE{
+		if p.current.Type == lexer.NEWLINE {
 			p.advance()
 		}
-		return &ExprStmt{Value:  expr}
+		return &ExprStmt{Value: expr}
 	}
 
-	if p.current.Type == lexer.DEF{
+	if p.current.Type == lexer.DEF {
 		p.advance()
 		funcdef := p.parseFunc()
 		return funcdef
 	}
 
-	if p.current.Type == lexer.RETURN{
+	if p.current.Type == lexer.RETURN {
 		p.advance()
 		return p.parseReturn()
 	}
 
-	if p.current.Type == lexer.FOR{
+	if p.current.Type == lexer.FOR {
 		p.advance()
 		return p.parseFor()
 	}
@@ -99,23 +99,23 @@ func (p *Parser) parseStatement() Statement {
 }
 
 func (p *Parser) parseForTarget() Expression {
-	if p.current.Type != lexer.NAME{
+	if p.current.Type != lexer.NAME {
 		panic(`expected variable name`)
 	}
 
 	first := &Name{Id: p.current.Literal}
 	p.advance()
 
-	if p.current.Type == lexer.COMMA{
+	if p.current.Type == lexer.COMMA {
 		targets := []Expression{first}
 
-		for p.current.Type == lexer.COMMA{
+		for p.current.Type == lexer.COMMA {
 			p.advance()
 
-			if p.current.Type != lexer.NAME{
+			if p.current.Type != lexer.NAME {
 				panic(`expected variable name`)
 			}
-			targets = append(targets, &Name{Id:  p.current.Literal})
+			targets = append(targets, &Name{Id: p.current.Literal})
 			p.advance()
 		}
 		return &Tuple{Elts: targets}
@@ -123,12 +123,11 @@ func (p *Parser) parseForTarget() Expression {
 	return first
 }
 
-
-func(p *Parser) parseFor() Statement{
+func (p *Parser) parseFor() Statement {
 	forStmt := &For{}
 	forStmt.Target = p.parseForTarget()
 
-	if p.current.Type != lexer.IN{
+	if p.current.Type != lexer.IN {
 		panic(`expected 'in' after loop variable`)
 	}
 
@@ -136,7 +135,7 @@ func(p *Parser) parseFor() Statement{
 
 	forStmt.Iter = p.parseExpression(LOWEST)
 
-	if p.current.Type != lexer.COLON{ 
+	if p.current.Type != lexer.COLON {
 		fmt.Printf("%vfailed for token v\n", p.current)
 		panic(`expected ':' after for clause`)
 	}
@@ -148,7 +147,7 @@ func(p *Parser) parseFor() Statement{
 
 	p.advance()
 
-	if p.current.Type != lexer.INDENT{
+	if p.current.Type != lexer.INDENT {
 		panic(`expected indent after for statement`)
 	}
 
@@ -156,9 +155,9 @@ func(p *Parser) parseFor() Statement{
 
 	body := []Statement{}
 
-	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF{
+	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
-		if stmt != nil{
+		if stmt != nil {
 			body = append(body, stmt)
 		}
 	}
@@ -171,27 +170,26 @@ func(p *Parser) parseFor() Statement{
 	return forStmt
 }
 
-
 // return already consumed while receiving
-func (p *Parser) parseReturn() Statement{
-	if p.current.Type == lexer.NEWLINE{
+func (p *Parser) parseReturn() Statement {
+	if p.current.Type == lexer.NEWLINE {
 		p.advance()
-		return &Return{Value:  nil}
+		return &Return{Value: nil}
 	}
 
 	value := p.parseExpression(LOWEST)
 
-	if p.current.Type == lexer.NEWLINE{
+	if p.current.Type == lexer.NEWLINE {
 		p.advance()
 	}
 
 	return &Return{Value: value}
 }
 
-func (p *Parser) parseFunc() Statement{
+func (p *Parser) parseFunc() Statement {
 	funcDef := &FunctionDef{}
 
-	if p.current.Type != lexer.NAME{
+	if p.current.Type != lexer.NAME {
 		fmt.Printf("%v\n", p.current)
 		panic(`expected function name after "def"`)
 	}
@@ -199,24 +197,24 @@ func (p *Parser) parseFunc() Statement{
 	funcDef.Name = p.current.Literal
 	p.advance() // advance past func name
 
-	if p.current.Type != lexer.LPAR{
+	if p.current.Type != lexer.LPAR {
 		panic(`expected '(' after function name`)
 	}
-	
+
 	p.advance() // advanced past left parantheses
 
 	args := []string{}
 
-	if p.current.Type != lexer.RPAR{
-		if p.current.Type != lexer.NAME{
+	if p.current.Type != lexer.RPAR {
+		if p.current.Type != lexer.NAME {
 			panic("expected param name")
 		}
 		args = append(args, p.current.Literal)
 		p.advance()
-		for p.current.Type == lexer.COMMA{
+		for p.current.Type == lexer.COMMA {
 			p.advance()
 
-			if p.current.Type != lexer.NAME{
+			if p.current.Type != lexer.NAME {
 				panic("expected param name after comma")
 			}
 			args = append(args, p.current.Literal)
@@ -226,38 +224,38 @@ func (p *Parser) parseFunc() Statement{
 
 	funcDef.Args = args
 
-	if p.current.Type != lexer.RPAR{
+	if p.current.Type != lexer.RPAR {
 		panic(`expected ')' after params`)
 	}
 
 	p.advance()
 
-	if p.current.Type != lexer.COLON{
+	if p.current.Type != lexer.COLON {
 		panic(`expected ':' after function signature`)
 	}
 	p.advance()
 
-	if p.current.Type != lexer.NEWLINE{
+	if p.current.Type != lexer.NEWLINE {
 		panic(`expected newline after ':'`)
 	}
 
 	p.advance()
 
-	if p.current.Type != lexer.INDENT{
+	if p.current.Type != lexer.INDENT {
 		panic(`expected indentation after function signature`)
 	}
 	p.advance()
 
 	funcBody := []Statement{}
-	
-	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF{
+
+	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
-		if stmt != nil{
+		if stmt != nil {
 			funcBody = append(funcBody, stmt)
 		}
 	}
 
-	if p.current.Type ==  lexer.DEDENT{
+	if p.current.Type == lexer.DEDENT {
 		p.advance() // skip past dedent
 	}
 
@@ -266,81 +264,79 @@ func (p *Parser) parseFunc() Statement{
 	return funcDef
 }
 
-
-func (p * Parser) parseIf() Statement{
+func (p *Parser) parseIf() Statement {
 
 	ifExpr := &If{}
 	testCond := p.parseExpression(LOWEST)
 
 	ifExpr.Test = testCond
 
-	if p.current.Type != lexer.COLON{
+	if p.current.Type != lexer.COLON {
 		fmt.Printf("panicked with curr type : %v\n", p.current)
 		panic(`expected ':' after if condition %v`)
 	}
 
 	p.advance() // skip colon
 
-	if p.current.Type != lexer.NEWLINE{
+	if p.current.Type != lexer.NEWLINE {
 		panic(`expected newline after ":"`)
 	}
 	p.advance() // moving ahead of newline
 
-	if p.current.Type != lexer.INDENT{
-		panic ("expected indentation block after if condtion")
+	if p.current.Type != lexer.INDENT {
+		panic("expected indentation block after if condtion")
 	}
 	p.advance() // moving ahead of indent
 
 	body := []Statement{}
 
-	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF{
+	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
-		if stmt != nil{
+		if stmt != nil {
 			body = append(body, stmt)
 		}
 	}
 
 	ifExpr.Body = body
 
-	if p.current.Type == lexer.DEDENT{
+	if p.current.Type == lexer.DEDENT {
 		p.advance() // skip past dedent
 	}
 
 	orelse := []Statement{}
-	if p.current.Type == lexer.ELIF{
+	if p.current.Type == lexer.ELIF {
 		p.advance()
 		elifStmt := p.parseIf()
 		orelse = append(orelse, elifStmt)
-	} else if p.current.Type == lexer.ELSE{
+	} else if p.current.Type == lexer.ELSE {
 		p.advance()
 
-		if p.current.Type != lexer.COLON{
+		if p.current.Type != lexer.COLON {
 			panic(`expected ':' after else`)
 		}
 
 		p.advance() // advancing past 'else' block
 
-		if p.current.Type != lexer.NEWLINE{
+		if p.current.Type != lexer.NEWLINE {
 			panic(`expected NEWLINE after 'else:'`)
 		}
 
 		p.advance() // move past newline
 
-		if p.current.Type != lexer.INDENT{
+		if p.current.Type != lexer.INDENT {
 			panic(`expected indent block after "else:"`)
 		}
 
 		p.advance() // move past indent
 
-		for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF{
+		for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 			stmt := p.parseStatement()
-			if stmt != nil{
+			if stmt != nil {
 				orelse = append(orelse, stmt)
 			}
 		}
 
-
-		if p.current.Type == lexer.DEDENT{
+		if p.current.Type == lexer.DEDENT {
 			p.advance() // advance past dedent
 		}
 	}
@@ -374,7 +370,7 @@ func (p *Parser) parseExpression(minBP int) Expression {
 		ops := []CompareOp{}
 		rights := []Expression{}
 
-		for isCompareOp(p.current.Type){
+		for isCompareOp(p.current.Type) {
 			op := tokenTypeToCompareOp(p.current.Type)
 			p.advance()
 
@@ -385,7 +381,7 @@ func (p *Parser) parseExpression(minBP int) Expression {
 
 		return &Compare{
 			Left:  left,
-			Ops:  ops,
+			Ops:   ops,
 			Right: rights,
 		}
 	}
@@ -411,11 +407,12 @@ func (p *Parser) parseExpression(minBP int) Expression {
 	return left
 }
 
-func isCompareOp(t lexer.TokenType) bool{
-	switch t{
+func isCompareOp(t lexer.TokenType) bool {
+	switch t {
 	case lexer.EQEQUAL, lexer.NOTEQUAL, lexer.LESS, lexer.LESSEQUAL, lexer.GREATER, lexer.GREATEREQUAL:
 		return true
-	default:return false
+	default:
+		return false
 	}
 }
 
@@ -515,8 +512,8 @@ func (p *Parser) isOperator(t lexer.TokenType) bool {
 	return t == lexer.PLUS || t == lexer.MINUS || t == lexer.STAR || t == lexer.SLASH || t == lexer.DOUBLESLASH || t == lexer.PERCENT
 }
 
-func tokenTypeToCompareOp(t lexer.TokenType) CompareOp{
-	switch t{
+func tokenTypeToCompareOp(t lexer.TokenType) CompareOp {
+	switch t {
 	case lexer.EQEQUAL:
 		return Eq
 	case lexer.NOTEQUAL:

@@ -175,7 +175,7 @@ func (l *Lexer) countLeadingSpaces() (int, error) {
 
 	for {
 		peekPos := l.position + count
-		if peekPos >= len(l.input){
+		if peekPos >= len(l.input) {
 			break
 		}
 		curr := l.input[peekPos]
@@ -358,13 +358,13 @@ func (l *Lexer) NextToken() Token {
 		if l.isChar() || l.ch == '_' {
 			literal := l.readIdentifier()
 			val, ok := Keywords[literal]
-			if ok{
+			if ok {
 				tok.Type = val
 			} else {
 				tok.Type = NAME
 			}
 			tok.Literal = literal
-			tok.EndCol = l.col -1
+			tok.EndCol = l.col - 1
 			return tok
 		}
 
