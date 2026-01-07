@@ -55,6 +55,11 @@ type Module struct {
 	Body []Statement
 }
 
+type FuncArg struct{
+	Name string
+	Defauult Expression
+}
+
 type FunctionDef struct {
 	Name string
 	Args []string
@@ -77,6 +82,12 @@ type If struct {
 
 func (i *If) statementNode() {}
 
+type Tuple struct {
+	Elts []Expression
+}
+
+func (t *Tuple) expressionNode() {}
+ 
 type For struct {
 	Target Expression
 	Iter   Expression
@@ -91,6 +102,14 @@ type Call struct {
 }
 
 func (c *Call) expressionNode() {}
+
+type Compare struct{
+	Left Expression
+	Ops []CompareOp
+	Right []Expression
+}
+
+func (c *Compare) expressionNode(){}
 
 type CompareOp int
 
@@ -125,3 +144,10 @@ type String struct {
 }
 
 func (s *String) expressionNode() {}
+
+type ExprStmt struct {
+	Value Expression
+}
+
+
+func (e *ExprStmt) statementNode() {}
