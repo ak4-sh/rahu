@@ -1,3 +1,13 @@
+// Package utils contains small, reusable helpers that sit outside the core
+// compiler pipeline.
+//
+// It currently provides:
+//   - AST inspection utilities (pretty-printing and colored debugging output)
+//   - File parsing helpers for loading source files into memory
+//
+// The utilities in this package are intentionally side-effect free (except for
+// I/O) and do not participate in parsing, semantic analysis, or code generation.
+// They exist to support tooling, debugging, and developer ergonomics.
 package utils
 
 import (
