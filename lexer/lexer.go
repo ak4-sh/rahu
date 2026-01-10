@@ -1,3 +1,24 @@
+// Package lexer implements a lexical analyzer for Python source code.
+//
+// The lexer converts raw source text into a stream of tokens suitable for
+// consumption by the parser. It is indentation-aware and emits INDENT and
+// DEDENT tokens to model Python’s block structure, following rules similar
+// to CPython’s tokenizer.
+//
+// Features:
+//   - Tokenization of Python keywords, identifiers, literals, and operators
+//   - Support for single-, double-, and triple-quoted strings
+//   - Handling of multi-character operators with longest-match semantics
+//   - Line and column tracking for all tokens
+//   - Indentation tracking with explicit INDENT / DEDENT tokens
+//   - Detection of inconsistent or mixed indentation (tabs vs spaces)
+//
+// The lexer is stateful and processes input incrementally via NextToken().
+// It performs no syntactic or semantic validation beyond what is required
+// to produce a correct token stream.
+//
+// The output of this package is intended to be consumed by the parser
+// package to construct an abstract syntax tree (AST).
 package lexer
 
 import (
