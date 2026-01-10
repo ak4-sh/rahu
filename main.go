@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"rahu/parser"
 	"rahu/utils"
 )
@@ -11,5 +13,5 @@ func main() {
 	fmt.Printf("Going to parse input string\n%s\n\n\n", input)
 	p := parser.New(input) // Pass the same input
 	module := p.Parse()
-	utils.PrintAST(module, 0)
+	utils.PrintAST(os.Stdout, module)
 }
