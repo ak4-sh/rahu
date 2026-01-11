@@ -97,7 +97,7 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 		printAST(w, n.Right, indent+4, opts)
 
 	case *parser.Name:
-		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+n.Id+")"))
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+n.ID+")"))
 
 	case *parser.Number:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Number("+n.Value+")"))

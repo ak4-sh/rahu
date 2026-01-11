@@ -25,7 +25,7 @@ func TestSimpleAssignment(t *testing.T) {
 	}
 
 	target, ok := assign.Targets[0].(*Name)
-	if !ok || target.Id != "x" {
+	if !ok || target.ID != "x" {
 		t.Fatalf("expected target 'x', got %v", target)
 	}
 
@@ -371,7 +371,7 @@ func TestFunctionCall(t *testing.T) {
 	}
 
 	funcName, ok := call.Func.(*Name)
-	if !ok || funcName.Id != "add" {
+	if !ok || funcName.ID != "add" {
 		t.Fatalf("expected function 'add', got %v", call.Func)
 	}
 
@@ -474,7 +474,7 @@ func TestForLoop(t *testing.T) {
 	}
 
 	target, ok := forStmt.Target.(*Name)
-	if !ok || target.Id != "i" {
+	if !ok || target.ID != "i" {
 		t.Fatalf("expected target 'i', got %v", forStmt.Target)
 	}
 

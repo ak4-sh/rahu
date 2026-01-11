@@ -185,7 +185,7 @@ func (p *Parser) parseAssignment() Statement {
 	assgnStart := Position{Line: p.current.Line, Col: p.current.Col}
 	targetStart := Position{Line: p.current.Line, Col: p.current.Col}
 
-	target := &Name{Id: p.current.Literal}
+	target := &Name{ID: p.current.Literal}
 
 	p.advance()
 
@@ -358,7 +358,7 @@ func (p *Parser) parseForTarget() Expression {
 	}
 
 	first := &Name{
-		Id: p.current.Literal,
+		ID: p.current.Literal,
 		Pos: Range{
 			Start: Position{Line: p.current.Line, Col: p.current.Col},
 			End:   Position{Line: p.current.Line, Col: p.current.EndCol},
@@ -377,7 +377,7 @@ func (p *Parser) parseForTarget() Expression {
 			}
 			targets = append(
 				targets, &Name{
-					Id: p.current.Literal,
+					ID: p.current.Literal,
 					Pos: Range{
 						Start: Position{Line: p.current.Line, Col: p.current.Col},
 						End:   Position{Line: p.current.Line, Col: p.current.EndCol},

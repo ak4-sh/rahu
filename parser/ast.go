@@ -44,7 +44,7 @@ func (n *Number) expressionNode() {}
 func (n *Number) Position() Range { return n.Pos }
 
 type Name struct {
-	Id  string
+	ID  string
 	Pos Range
 }
 

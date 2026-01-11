@@ -120,7 +120,7 @@ func (p *Parser) parsePrimary() Expression {
 		return ret
 	case lexer.NAME:
 		n := &Name{
-			Id: p.current.Literal,
+			ID: p.current.Literal,
 			Pos: Range{
 				Start: Position{Line: p.current.Line, Col: p.current.Col},
 				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
