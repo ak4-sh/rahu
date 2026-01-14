@@ -186,6 +186,15 @@ func (p *Parser) parsePrimary() Expression {
 			Pos:     Range{Start: startPos, End: endPos},
 		}
 
+	case lexer.NONE:
+		startPos := Position{Line: p.current.Line, Col: p.current.Col}
+		endPos := Position{Line: p.current.Line, Col: p.current.EndCol}
+		p.advance()
+		return &Name{
+			ID:  "None",
+			Pos: Range{Start: startPos, End: endPos},
+		}
+
 	}
 	panic(fmt.Sprintf("unexpected token %v\n", p.current))
 }
