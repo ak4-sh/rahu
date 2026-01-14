@@ -13,6 +13,7 @@ const (
 	SUM
 	PRODUCT
 	PREFIX
+	POW
 )
 
 func infixBindingPower(t lexer.TokenType) int {
@@ -27,6 +28,8 @@ func infixBindingPower(t lexer.TokenType) int {
 		return OR
 	case lexer.AND:
 		return AND
+	case lexer.DOUBLESTAR:
+		return POW
 	default:
 		return LOWEST
 	}
@@ -59,6 +62,8 @@ func (p *Parser) tokenTypeToOperator(t lexer.TokenType) Operator {
 		return FloorDiv
 	case lexer.PERCENT:
 		return Mod
+	case lexer.DOUBLESTAR:
+		return Pow
 	default:
 		return Add
 	}
