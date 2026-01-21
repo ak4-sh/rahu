@@ -8,25 +8,30 @@ import (
 )
 
 type Conn struct {
-	r        *bufio.Reader
-	w        *bufio.Writer
-	closeFn  func() error
-	incoming chan Message
-	outgoing chan *Response
-	errors   chan error
-	once     sync.Once
-	done     chan struct{}
+	r         *bufio.Reader
+	w         *bufio.Writer
+	closeFn   func() error
+	incoming  chan Message
+	outgoing  chan *Response
+	errors    chan error
+	once      sync.Once
+	done      chan struct{}
+	writeDone chan struct{}
 }
 
 func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *Conn {
+	if closeFn == nil {
+		panic("closeFn must be provided to unblock reader")
+	}
 	return &Conn{
-		r:        reader,
-		w:        writer,
-		closeFn:  closeFn,
-		incoming: make(chan Message, 10),
-		outgoing: make(chan *Response, 10),
-		errors:   make(chan error, 2),
-		done:     make(chan struct{}),
+		r:         reader,
+		w:         writer,
+		closeFn:   closeFn,
+		incoming:  make(chan Message, 10),
+		outgoing:  make(chan *Response, 10),
+		errors:    make(chan error, 2),
+		done:      make(chan struct{}),
+		writeDone: make(chan struct{}),
 	}
 }
 
@@ -59,11 +64,16 @@ func (c *Conn) readLoop() {
 			c.fail(fmt.Errorf("read error: %w", err))
 			return
 		}
-		c.incoming <- msg
+		select {
+		case c.incoming <- msg:
+		case <-c.done:
+			return
+		}
 	}
 }
 
 func (c *Conn) writeLoop() {
+	defer close(c.writeDone)
 	for resp := range c.outgoing {
 		if err := c.Write(resp); err != nil {
 			c.fail(fmt.Errorf("write error: %w", err))
@@ -74,8 +84,15 @@ func (c *Conn) writeLoop() {
 
 func (c *Conn) SendResponse(resp *Response) error {
 	select {
+	case <-c.done:
+		return fmt.Errorf("connection closed")
+	default:
+	}
+
+	select {
 	case c.outgoing <- resp:
 		return nil
+
 	case <-c.done:
 		return fmt.Errorf("connection closed")
 	}
@@ -83,10 +100,6 @@ func (c *Conn) SendResponse(resp *Response) error {
 
 func (c *Conn) Incoming() <-chan Message {
 	return c.incoming
-}
-
-func (c *Conn) Errors() <-chan error {
-	return c.errors
 }
 
 func (c *Conn) Close() error {
@@ -115,11 +128,10 @@ func (c *Conn) fail(err error) {
 
 		close(c.outgoing)
 
-		if c.closeFn != nil {
-			_ = c.closeFn()
-		}
+		_ = c.closeFn()
 
 		close(c.done)
+		close(c.errors)
 	})
 }
 
@@ -127,4 +139,5 @@ func (c *Conn) fail(err error) {
 // unless closeFn unblocks the reader.
 func (c *Conn) Wait() {
 	<-c.done
+	<-c.writeDone
 }

@@ -82,6 +82,7 @@ func TestHeaderParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			sr := s.NewReader(tt.input)
 			r := bufio.NewReader(sr)
@@ -107,11 +108,11 @@ func TestHeaderParsing(t *testing.T) {
 }
 
 func TestReadBody_InvalidJSON(t *testing.T) {
-	input := "content-Length: 5\r\n\r\n{bad}"
+	input := "Content-Length: 5\r\n\r\n{bad}"
 	r := bufio.NewReader(s.NewReader(input))
 
 	_, err := readBody(r)
 	if err == nil {
-		t.Fatalf("expted parse error")
+		t.Fatalf("expected parse error")
 	}
 }
