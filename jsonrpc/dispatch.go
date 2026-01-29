@@ -1,5 +1,9 @@
 package jsonrpc
 
+import (
+	j "encoding/json"
+)
+
 func Dispatch(conn *Conn) {
 	for msg := range conn.Incoming() {
 		switch m := msg.(type) {
@@ -36,7 +40,20 @@ func dispatchRequest(conn *Conn, req *Request) {
 		return
 	}
 
-	result, err := handler(req.Params)
+	var (
+		result j.RawMessage
+		err    *Error
+	)
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = InternalError()
+			}
+		}()
+		result, err = handler(req.Params)
+	}()
+
 	if err != nil {
 		resp.Error = err
 	} else {
