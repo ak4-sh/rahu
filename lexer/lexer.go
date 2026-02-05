@@ -23,6 +23,7 @@ package lexer
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -33,6 +34,13 @@ type Token struct {
 	Col     int
 	EndCol  int
 	File    string
+}
+
+func (t *Token) String() string {
+	return fmt.Sprintf(
+		"Token{Type:%s Literal:%q Pos:%d:%d-%d}",
+		t.Type, t.Literal, t.Line, t.Col, t.EndCol,
+	)
 }
 
 type Lexer struct {

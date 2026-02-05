@@ -99,6 +99,10 @@ func (e TextDocumentContentChangeEvent) IsIncremental() bool {
 }
 
 type DidChangeTextDocumentParams struct {
-	TextDocument  VersionedDocumentIdentifier      `json:"textDocument"`
-	ContentChange []TextDocumentContentChangeEvent `json:"contentChanges"`
+	TextDocument   VersionedDocumentIdentifier      `json:"textDocument"`
+	ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
+}
+
+type DidCloseTextDocumentParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
 }

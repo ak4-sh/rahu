@@ -16,3 +16,11 @@ type Diagnostic struct {
 	Source   string   `json:"source,omitempty"`
 	Message  string   `json:"message"`
 }
+
+type DiagnosticError struct {
+	Msg string
+}
+
+func (d *DiagnosticError) error() string {
+	return d.Msg
+}

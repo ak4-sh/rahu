@@ -3,8 +3,10 @@ package server
 import (
 	"strings"
 
+	"rahu/analyser"
 	"rahu/jsonrpc"
 	"rahu/lsp"
+	"rahu/parser"
 )
 
 type Document struct {
@@ -12,6 +14,10 @@ type Document struct {
 	Version int
 	Text    string
 	Lines   []string
+
+	AST     *parser.Module
+	Symbols map[*parser.Name]*analyser.Symbol
+	SemErrs []analyser.SemanticError
 }
 
 func (s *Server) Open(item lsp.TextDocumentItem) {

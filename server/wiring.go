@@ -23,4 +23,24 @@ func Register(s *Server) {
 		"textDocument/didChange",
 		jsonrpc.AdaptNotification(s.DidChange),
 	)
+
+	jsonrpc.RegisterNofication(
+		"textDocument/didClose",
+		jsonrpc.AdaptNotification(s.DidClose),
+	)
+
+	jsonrpc.RegisterNofication(
+		"Initialized",
+		jsonrpc.AdaptNotification(s.Initialized),
+	)
+
+	jsonrpc.RegisterRequest(
+		"shutdown",
+		jsonrpc.AdaptRequest(s.Shutdown),
+	)
+
+	jsonrpc.RegisterNofication(
+		"exit",
+		jsonrpc.AdaptNotification(s.Exit),
+	)
 }

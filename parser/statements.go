@@ -194,6 +194,16 @@ func (p *Parser) parseAssignment() Statement {
 		End:   Position{Line: p.current.Line, Col: p.current.Col},
 	}
 
+	if p.current.Type != lexer.EQUAL {
+		p.error(
+			Range{
+				Start: targetStart,
+				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			},
+			"expected '=' in assignment",
+		)
+	}
+
 	p.advance()
 
 	// moved past '='
@@ -207,6 +217,14 @@ func (p *Parser) parseAssignment() Statement {
 
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
+	} else if p.current.Type != lexer.EOF {
+		p.error(
+			Range{
+				Start: assgnEnd,
+				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			},
+			"expected newline after assignment",
+		)
 	}
 
 	return &Assign{
