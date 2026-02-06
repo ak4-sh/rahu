@@ -24,3 +24,9 @@ type DiagnosticError struct {
 func (d *DiagnosticError) error() string {
 	return d.Msg
 }
+
+type PublishDiagnosticsParams struct {
+	URI         DocumentURI  `json:"uri"`
+	Version     *int         `json:"version,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
+}
