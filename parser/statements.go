@@ -1,8 +1,6 @@
 package parser
 
 import (
-	"fmt"
-
 	"rahu/lexer"
 )
 
@@ -19,19 +17,32 @@ func (p *Parser) parseIf() Statement {
 	ifExpr.Test = testCond
 
 	if p.current.Type != lexer.COLON {
-		fmt.Printf("panicked with curr type : %v and testCond: %v\n", p.current, testCond)
-		panic(`expected ':' after if condition`)
+		p.errorCurrent("expected ':' after if condition")
+		p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type == lexer.COLON {
+			p.advance()
+		}
+		return ifExpr
 	}
 
 	p.advance() // skip colon
 
 	if p.current.Type != lexer.NEWLINE {
-		panic(`expected newline after ":"`)
+		p.errorCurrent("expected newline after ':'")
+		p.syncTo(lexer.NEWLINE, lexer.EOF)
+		if p.current.Type == lexer.NEWLINE {
+			p.advance()
+		}
+		return ifExpr
 	}
 	p.advance() // moving ahead of newline
 
 	if p.current.Type != lexer.INDENT {
-		panic("expected indentation block after if condtion")
+		p.errorCurrent("expected indentation block after if condition")
+		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+		if p.current.Type != lexer.INDENT {
+			return ifExpr
+		}
 	}
 	p.advance() // moving ahead of indent
 
@@ -69,19 +80,31 @@ func (p *Parser) parseIf() Statement {
 		endPos.Col = p.current.Col
 		endPos.Line = p.current.Line
 		if p.current.Type != lexer.COLON {
-			panic(`expected ':' after else`)
+			p.errorCurrent("expected ':' after else")
+			p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
+			if p.current.Type != lexer.COLON {
+				return ifExpr
+			}
 		}
 
 		p.advance() // advancing past 'else' block
 
 		if p.current.Type != lexer.NEWLINE {
-			panic(`expected NEWLINE after 'else:'`)
+			p.errorCurrent("expected newline after 'else:'")
+			p.syncTo(lexer.NEWLINE, lexer.EOF)
+			if p.current.Type != lexer.NEWLINE {
+				return ifExpr
+			}
 		}
 
 		p.advance() // move past newline
 
 		if p.current.Type != lexer.INDENT {
-			panic(`expected indent block after "else:"`)
+			p.errorCurrent("expected indent block after 'else:'")
+			p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+			if p.current.Type != lexer.INDENT {
+				return ifExpr
+			}
 		}
 
 		p.advance() // move past indent
@@ -119,7 +142,11 @@ func (p *Parser) parseFor() Statement {
 	forStmt.Target = p.parseForTarget()
 
 	if p.current.Type != lexer.IN {
-		panic(`expected 'in' after loop variable`)
+		p.errorCurrent("expected 'in' after loop variable")
+		p.syncTo(lexer.IN, lexer.COLON, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.IN {
+			return forStmt
+		}
 	}
 
 	p.advance()
@@ -127,19 +154,30 @@ func (p *Parser) parseFor() Statement {
 	forStmt.Iter = p.parseExpression(LOWEST)
 
 	if p.current.Type != lexer.COLON {
-		fmt.Printf("%vfailed for token v\n", p.current)
-		panic(`expected ':' after for clause`)
+		p.errorCurrent("expected ':' after for clause")
+		p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.COLON {
+			return forStmt
+		}
 	}
 	p.advance()
 
 	if p.current.Type != lexer.NEWLINE {
-		panic(`expected newline after ':'`)
+		p.errorCurrent("expected newline after ':'")
+		p.syncTo(lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.NEWLINE {
+			return forStmt
+		}
 	}
 
 	p.advance()
 
 	if p.current.Type != lexer.INDENT {
-		panic(`expected indent after for statement`)
+		p.errorCurrent("expected indent after for statement")
+		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+		if p.current.Type != lexer.INDENT {
+			return forStmt
+		}
 	}
 
 	p.advance()
@@ -194,6 +232,16 @@ func (p *Parser) parseAssignment() Statement {
 		End:   Position{Line: p.current.Line, Col: p.current.Col},
 	}
 
+	if p.current.Type != lexer.EQUAL {
+		p.error(
+			Range{
+				Start: targetStart,
+				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			},
+			"expected '=' in assignment",
+		)
+	}
+
 	p.advance()
 
 	// moved past '='
@@ -207,6 +255,14 @@ func (p *Parser) parseAssignment() Statement {
 
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
+	} else if p.current.Type != lexer.EOF {
+		p.error(
+			Range{
+				Start: assgnEnd,
+				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			},
+			"expected newline after assignment",
+		)
 	}
 
 	return &Assign{
@@ -224,17 +280,29 @@ func (p *Parser) parseWhile() Statement {
 	whileStmt.Test = p.parseExpression(LOWEST)
 
 	if p.current.Type != lexer.COLON {
-		panic(`expected ':' after while condition`)
+		p.errorCurrent("expected ':' after while condition")
+		p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.COLON {
+			return whileStmt
+		}
 	}
 	p.advance()
 
 	if p.current.Type != lexer.NEWLINE {
-		panic(`expected newline after ':'`)
+		p.errorCurrent("expected newline after ':'")
+		p.syncTo(lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.NEWLINE {
+			return whileStmt
+		}
 	}
 	p.advance()
 
 	if p.current.Type != lexer.INDENT {
-		panic(`expected indent after while:`)
+		p.errorCurrent("expected indent after while:")
+		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+		if p.current.Type != lexer.INDENT {
+			return whileStmt
+		}
 	}
 	p.advance()
 
@@ -262,15 +330,20 @@ func (p *Parser) parseFunc() Statement {
 	funcDef := &FunctionDef{}
 
 	if p.current.Type != lexer.NAME {
-		fmt.Printf("%v\n", p.current)
-		panic(`expected function name after "def"`)
+		p.errorCurrent("expected function name after 'def'")
+		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
+		return funcDef
 	}
 
 	funcDef.Name = p.current.Literal
 	p.advance() // advance past func name
 
 	if p.current.Type != lexer.LPAR {
-		panic(`expected '(' after function name`)
+		p.errorCurrent("expected '(' after function name")
+		p.syncTo(lexer.LPAR, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.LPAR {
+			return funcDef
+		}
 	}
 
 	p.advance() // advanced past left parantheses
@@ -281,7 +354,13 @@ func (p *Parser) parseFunc() Statement {
 	if p.current.Type != lexer.RPAR {
 		for {
 			if p.current.Type != lexer.NAME {
-				panic("expected param name")
+				p.errorCurrent("expected parameter name")
+				p.syncTo(lexer.COMMA, lexer.RPAR, lexer.EOF)
+				if p.current.Type == lexer.COMMA {
+					p.advance()
+					continue
+				}
+				break
 			}
 
 			start := Position{Line: p.current.Line, Col: p.current.Col}
@@ -299,7 +378,12 @@ func (p *Parser) parseFunc() Statement {
 				p.advance()
 				arg.Default = p.parseExpression(LOWEST)
 			} else if seenDefault {
-				panic("non-default argumentn follows default argument")
+				p.errorCurrent("non-default argument follows default argument")
+				p.syncTo(lexer.COMMA, lexer.RPAR, lexer.EOF)
+				if p.current.Type == lexer.COMMA {
+					p.advance()
+					continue
+				}
 			}
 
 			args = append(args, arg)
@@ -315,24 +399,40 @@ func (p *Parser) parseFunc() Statement {
 	funcDef.Args = args
 
 	if p.current.Type != lexer.RPAR {
-		panic(`expected ')' after params`)
+		p.errorCurrent("expected ')' after params")
+		p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.RPAR {
+			return funcDef
+		}
 	}
 
 	p.advance()
 
 	if p.current.Type != lexer.COLON {
-		panic(`expected ':' after function signature`)
+		p.errorCurrent("expected ':' after function signature")
+		p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.COLON {
+			return funcDef
+		}
 	}
 	p.advance()
 
 	if p.current.Type != lexer.NEWLINE {
-		panic(`expected newline after ':'`)
+		p.errorCurrent("expected newline after ':'")
+		p.syncTo(lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.NEWLINE {
+			return funcDef
+		}
 	}
 
 	p.advance()
 
 	if p.current.Type != lexer.INDENT {
-		panic(`expected indentation after function signature`)
+		p.errorCurrent("expected indentation after function signature")
+		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+		if p.current.Type != lexer.INDENT {
+			return funcDef
+		}
 	}
 	p.advance()
 
@@ -358,7 +458,8 @@ func (p *Parser) parseFunc() Statement {
 
 func (p *Parser) parseForTarget() Expression {
 	if p.current.Type != lexer.NAME {
-		panic(`expected variable name`)
+		p.errorCurrent("expected variable name")
+		return nil
 	}
 
 	first := &Name{
@@ -377,7 +478,14 @@ func (p *Parser) parseForTarget() Expression {
 			p.advance()
 
 			if p.current.Type != lexer.NAME {
-				panic(`expected variable name`)
+				p.errorCurrent("expected variable name")
+				return &Tuple{
+					Elts: targets,
+					Pos: Range{
+						Start: first.Pos.Start,
+						End:   targets[len(targets)-1].Position().End,
+					},
+				}
 			}
 			targets = append(
 				targets, &Name{

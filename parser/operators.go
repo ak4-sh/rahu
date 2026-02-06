@@ -84,6 +84,6 @@ func tokenTypeToCompareOp(t lexer.TokenType) CompareOp {
 	case lexer.GREATEREQUAL:
 		return GtE
 	default:
-		panic("invalid compare operator")
+		return Eq
 	}
 }

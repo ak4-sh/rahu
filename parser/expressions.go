@@ -8,6 +8,9 @@ import (
 
 func (p *Parser) parseExpression(minBP int) Expression {
 	left := p.parsePrimary()
+	if left == nil {
+		return nil
+	}
 
 	for {
 		bp := infixBindingPower(p.current.Type)
@@ -27,6 +30,10 @@ func (p *Parser) parseExpression(minBP int) Expression {
 				p.advance()
 
 				right := p.parseExpression(COMPARE + 1)
+				if right == nil {
+					p.errorCurrent("expected expression after comparison operator")
+					return left
+				}
 				ops = append(ops, op)
 				rights = append(rights, right)
 			}
@@ -45,6 +52,10 @@ func (p *Parser) parseExpression(minBP int) Expression {
 		if opTok.Type == lexer.AND || opTok.Type == lexer.OR {
 			p.advance()
 			right := p.parseExpression(bp)
+			if right == nil {
+				p.errorCurrent("expected expression after boolean operator")
+				return left
+			}
 
 			if boolOp, ok := left.(*BooleanOp); ok {
 				if (opTok.Type == lexer.AND && boolOp.Operator == And) || (opTok.Type == lexer.OR && boolOp.Operator == Or) {
@@ -70,6 +81,10 @@ func (p *Parser) parseExpression(minBP int) Expression {
 		p.advance()
 
 		right := p.parseExpression(bp)
+		if right == nil {
+			p.errorCurrent("expected expression after operator")
+			return left
+		}
 
 		left = &BinOp{
 			Left:  left,
@@ -133,10 +148,19 @@ func (p *Parser) parsePrimary() Expression {
 		}
 		return n
 	case lexer.LPAR:
+		startPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
 		expr := p.parseExpression(LOWEST)
 		if p.current.Type != lexer.RPAR {
-			panic(`expected )`)
+			p.errorCurrent("expected ')' after expression")
+			p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
+			if p.current.Type == lexer.RPAR {
+				p.advance()
+			}
+			if expr == nil {
+				return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+			}
+			return expr
 		}
 		p.advance()
 		return expr
@@ -157,6 +181,10 @@ func (p *Parser) parsePrimary() Expression {
 		startPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
 		operand := p.parseExpression(PREFIX)
+		if operand == nil {
+			p.errorCurrent("expected expression after '-' ")
+			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+		}
 		endPos := operand.Position().End
 		return &UnaryOp{
 			Op:      USub,
@@ -168,6 +196,10 @@ func (p *Parser) parsePrimary() Expression {
 		startPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
 		operand := p.parseExpression(PREFIX)
+		if operand == nil {
+			p.errorCurrent("expected expression after '+'")
+			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+		}
 		endPos := operand.Position().End
 		return &UnaryOp{
 			Op:      UAdd,
@@ -179,6 +211,10 @@ func (p *Parser) parsePrimary() Expression {
 		startPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
 		expr := p.parseExpression(PREFIX)
+		if expr == nil {
+			p.errorCurrent("expected expression after 'not'")
+			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+		}
 		endPos := expr.Position().End
 		return &UnaryOp{
 			Op:      Not,
@@ -196,7 +232,9 @@ func (p *Parser) parsePrimary() Expression {
 		}
 
 	}
-	panic(fmt.Sprintf("unexpected token %v\n", p.current))
+	p.errorCurrent(fmt.Sprintf("unexpected token %v", p.current))
+	p.advance()
+	return nil
 }
 
 func (p *Parser) parseList() Expression {
@@ -205,7 +243,12 @@ func (p *Parser) parseList() Expression {
 	elts := []Expression{}
 
 	if p.current.Type != lexer.RSQB {
-		elts = append(elts, p.parseExpression(LOWEST))
+		first := p.parseExpression(LOWEST)
+		if first != nil {
+			elts = append(elts, first)
+		} else {
+			p.errorCurrent("expected expression in list")
+		}
 
 		for p.current.Type == lexer.COMMA {
 			p.advance()
@@ -214,12 +257,23 @@ func (p *Parser) parseList() Expression {
 				break
 			}
 
-			elts = append(elts, p.parseExpression(LOWEST))
+			elt := p.parseExpression(LOWEST)
+			if elt != nil {
+				elts = append(elts, elt)
+			} else {
+				p.errorCurrent("expected expression after ',' in list")
+				break
+			}
 		}
 	}
 
 	if p.current.Type != lexer.RSQB {
-		panic(`expected ']' after list elements`)
+		p.errorCurrent("expected ']' after list elements")
+		p.syncTo(lexer.RSQB, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type == lexer.RSQB {
+			p.advance()
+		}
+		return &List{Elts: elts, Pos: Range{Start: startPos, End: p.currentRange().End}}
 	}
 
 	endPos := Position{
@@ -236,16 +290,37 @@ func (p *Parser) parseCall(funcExpr Expression) Expression {
 	args := []Expression{}
 
 	if p.current.Type != lexer.RPAR {
-		args = append(args, p.parseExpression(LOWEST))
+		first := p.parseExpression(LOWEST)
+		if first != nil {
+			args = append(args, first)
+		} else {
+			p.errorCurrent("expected expression in argument list")
+		}
 
 		for p.current.Type == lexer.COMMA {
 			p.advance()
-			args = append(args, p.parseExpression(LOWEST))
+			arg := p.parseExpression(LOWEST)
+			if arg != nil {
+				args = append(args, arg)
+			} else {
+				p.errorCurrent("expected expression after ',' in argument list")
+				break
+			}
 		}
 	}
 
 	if p.current.Type != lexer.RPAR {
-		panic("expected ) after function arguments")
+		p.errorCurrent("expected ')' after function arguments")
+		p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type == lexer.RPAR {
+			p.advance()
+		}
+		endPos := p.currentRange().End
+		return &Call{
+			Func: funcExpr,
+			Args: args,
+			Pos:  Range{Start: startPos, End: endPos},
+		}
 	}
 	endPos := Position{Line: p.current.Line, Col: p.current.Col}
 	p.advance()

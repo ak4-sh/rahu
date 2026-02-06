@@ -1,17 +1,31 @@
 package jsonrpc
 
+import (
+	j "encoding/json"
+	"log"
+)
+
 func Dispatch(conn *Conn) {
+	log.Println("DISPATCH: started")
+
 	for msg := range conn.Incoming() {
+		log.Printf("DISPATCH: received message type %T", msg)
+
 		switch m := msg.(type) {
 		case *Request:
+			log.Printf("DISPATCH: request %s", m.Method)
 			go dispatchRequest(conn, m)
+
 		case *Notification:
+			log.Printf("DISPATCH: notification %s", m.Method)
 			go dispatchNotification(conn, m)
 
 		default:
-			// unreachable if framing is correct
+			log.Printf("DISPATCH: unknown message %+v", msg)
 		}
 	}
+
+	log.Println("DISPATCH: exiting")
 }
 
 func dispatchNotification(conn *Conn, notif *Notification) {
@@ -19,6 +33,12 @@ func dispatchNotification(conn *Conn, notif *Notification) {
 	if !ok {
 		return
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			conn.Close()
+		}
+	}()
 	handler(notif.Params)
 }
 
@@ -32,11 +52,26 @@ func dispatchRequest(conn *Conn, req *Request) {
 
 	if !ok {
 		resp.Error = MethodNotFoundError()
-		_ = conn.SendResponse(resp)
+		if err := conn.SendResponse(resp); err != nil {
+			conn.Close()
+		}
 		return
 	}
 
-	result, err := handler(req.Params)
+	var (
+		result j.RawMessage
+		err    *Error
+	)
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = InternalError()
+			}
+		}()
+		result, err = handler(req.Params)
+	}()
+
 	if err != nil {
 		resp.Error = err
 	} else {

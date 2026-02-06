@@ -34,12 +34,63 @@ package parser
 
 import (
 	"rahu/lexer"
+	"rahu/lsp"
 )
+
+type Error struct {
+	Span Range
+	Msg  string
+}
+
+func (p *Parser) Errors() []Error {
+	return p.errors
+}
 
 type Parser struct {
 	lexer   *lexer.Lexer
 	current lexer.Token
 	peek    lexer.Token
+
+	errors []Error
+}
+
+func (p *Parser) error(span Range, msg string) {
+	p.errors = append(p.errors, Error{Span: span, Msg: msg})
+}
+
+func (p *Parser) currentRange() Range {
+	return Range{
+		Start: Position{Line: p.current.Line, Col: p.current.Col},
+		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+	}
+}
+
+func (p *Parser) errorCurrent(msg string) {
+	p.error(p.currentRange(), msg)
+}
+
+func (p *Parser) syncTo(types ...lexer.TokenType) {
+	for p.current.Type != lexer.EOF {
+		for _, t := range types {
+			if p.current.Type == t {
+				return
+			}
+		}
+		p.advance()
+	}
+}
+
+func (r Range) ToLSPRange() lsp.Range {
+	return lsp.Range{
+		Start: lsp.Position{
+			Line:      r.Start.Line,
+			Character: r.Start.Col - 1,
+		},
+		End: lsp.Position{
+			Line:      r.End.Line - 1,
+			Character: r.End.Col - 1,
+		},
+	}
 }
 
 func New(input string) *Parser {
@@ -76,6 +127,11 @@ func (p *Parser) Parse() *Module {
 }
 
 func (p *Parser) parseStatement() Statement {
+	if p.current.Type == lexer.NEWLINE {
+		p.advance()
+		return nil
+	}
+
 	if p.current.Type == lexer.NAME && p.peek.Type == lexer.EQUAL {
 		return p.parseAssignment()
 	}
@@ -89,6 +145,8 @@ func (p *Parser) parseStatement() Statement {
 		expr := p.parseExpression(LOWEST)
 		if p.current.Type == lexer.NEWLINE {
 			p.advance()
+		} else if p.current.Type != lexer.EOF {
+			p.error(expr.Position(), "expected newline after expression")
 		}
 		return &ExprStmt{Value: expr, Pos: expr.Position()}
 	}
@@ -133,6 +191,13 @@ func (p *Parser) parseStatement() Statement {
 	if p.current.Type == lexer.WHILE {
 		return p.parseWhile()
 	}
+
+	p.error(Range{
+		Start: Position{Line: p.current.Line, Col: p.current.Col},
+		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+	},
+		"unexpected token: "+p.current.String(),
+	)
 
 	p.advance()
 	return nil

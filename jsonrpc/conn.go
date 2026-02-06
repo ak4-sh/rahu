@@ -2,95 +2,144 @@ package jsonrpc
 
 import (
 	"bufio"
+	"context"
 	j "encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 )
 
+type outbound struct {
+	payload []byte
+}
+
 type Conn struct {
-	r        *bufio.Reader
-	w        *bufio.Writer
-	closeFn  func() error
-	incoming chan Message
-	outgoing chan *Response
-	errors   chan error
-	once     sync.Once
-	done     chan struct{}
+	r         *bufio.Reader
+	w         *bufio.Writer
+	closeFn   func() error
+	incoming  chan Message
+	outgoing  chan outbound
+	errors    chan error
+	once      sync.Once
+	ctx       context.Context
+	cancel    context.CancelFunc
+	writeDone chan struct{}
 }
 
 func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *Conn {
+	if closeFn == nil {
+		panic("closeFn must be provided to unblock reader")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
-		r:        reader,
-		w:        writer,
-		closeFn:  closeFn,
-		incoming: make(chan Message, 10),
-		outgoing: make(chan *Response, 10),
-		errors:   make(chan error, 2),
-		done:     make(chan struct{}),
+		r:         reader,
+		w:         writer,
+		closeFn:   closeFn,
+		incoming:  make(chan Message, 100),
+		outgoing:  make(chan outbound, 100),
+		errors:    make(chan error, 2),
+		ctx:       ctx,
+		cancel:    cancel,
+		writeDone: make(chan struct{}),
 	}
 }
 
-func (c *Conn) Write(resp *Response) error {
-	content, err := j.Marshal(resp)
-	if err != nil {
-		return err
+func (c *Conn) enqueueBytes(b []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("connection closed")
+	case c.outgoing <- outbound{payload: b}:
+		return nil
 	}
-
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(content))
-
-	if _, err := c.w.WriteString(header); err != nil {
-		return err
-	}
-
-	if _, err := c.w.Write(content); err != nil {
-		return err
-	}
-
-	return c.w.Flush()
 }
 
 func (c *Conn) readLoop() {
 	defer func() {
+		if r := recover(); r != nil {
+			c.fail(fmt.Errorf("panic in readLoop: %v", r))
+		}
 		close(c.incoming)
 	}()
+
 	for {
 		msg, err := readBody(c.r)
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
 			c.fail(fmt.Errorf("read error: %w", err))
 			return
 		}
-		c.incoming <- msg
+
+		select {
+		case c.incoming <- msg:
+		case <-c.ctx.Done():
+			return
+		}
 	}
 }
 
 func (c *Conn) writeLoop() {
-	for resp := range c.outgoing {
-		if err := c.Write(resp); err != nil {
-			c.fail(fmt.Errorf("write error: %w", err))
+	defer func() {
+		if r := recover(); r != nil {
+			c.fail(fmt.Errorf("panic in writeLoop: %v", r))
+		}
+		close(c.writeDone)
+	}()
+
+	for msg := range c.outgoing {
+		header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg.payload))
+
+		if _, err := c.w.WriteString(header); err != nil {
+			c.fail(err)
+			return
+		}
+
+		if _, err := c.w.Write(msg.payload); err != nil {
+			c.fail(err)
+			return
+		}
+		if err := c.w.Flush(); err != nil {
+			c.fail(err)
 			return
 		}
 	}
-}
-
-func (c *Conn) SendResponse(resp *Response) error {
-	select {
-	case c.outgoing <- resp:
-		return nil
-	case <-c.done:
-		return fmt.Errorf("connection closed")
-	}
-}
-
-func (c *Conn) Incoming() <-chan Message {
-	return c.incoming
 }
 
 func (c *Conn) Errors() <-chan error {
 	return c.errors
 }
 
+func (c *Conn) Notify(method string, params any) error {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  method,
+		"params":  params,
+	}
+	b, err := j.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	return c.enqueueBytes(b)
+}
+
+func (c *Conn) SendResponse(resp *Response) error {
+	b, err := j.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	return c.enqueueBytes(b)
+}
+
+func (c *Conn) Incoming() <-chan Message {
+	return c.incoming
+}
+
 func (c *Conn) Close() error {
 	c.fail(nil)
+	c.Wait()
 	return nil
 }
 
@@ -115,16 +164,16 @@ func (c *Conn) fail(err error) {
 
 		close(c.outgoing)
 
-		if c.closeFn != nil {
-			_ = c.closeFn()
-		}
+		_ = c.closeFn()
 
-		close(c.done)
+		c.cancel()
+		close(c.errors)
 	})
 }
 
 // Wait blocks until shutdown is initiated (fail called). It does not guarantee readLoop exits
 // unless closeFn unblocks the reader.
 func (c *Conn) Wait() {
-	<-c.done
+	<-c.ctx.Done()
+	<-c.writeDone
 }

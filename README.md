@@ -57,9 +57,11 @@ The project prioritizes **correct semantics, clear architecture, and LSP-grade s
 
 * 🔄 **Language Server (LSP) Integration**
 
-  * Document lifecycle handling
+  * Document lifecycle handling (open/change/close)
   * Incremental re-analysis on edits
-  * Diagnostic publishing
+  * Diagnostic publishing (somewhat stable; still a lot of work to do)
+  * Initialization and capability negotiation are functional but evolving
+  * Error recovery and resilience are being tightened across the stack
 
 ---
 
@@ -71,6 +73,7 @@ The project prioritizes **correct semantics, clear architecture, and LSP-grade s
 * ⏳ Symbol indexing
 * ⏳ Incremental parsing optimizations
 * ⏳ Language expansion (attributes, subscripts, classes)
+* ⏳ Packaging and release automation
 
 ---
 
@@ -84,7 +87,7 @@ rahu/
 ├── lsp/            # LSP protocol implementation (in progress)
 ├── utils/          # Debug printers and helpers
 └── cmd/
-    └── rahu-lsp/   # LSP entry point (planned)
+    └── lsp/        # LSP entry point
 ```
 
 ---
@@ -99,6 +102,12 @@ rahu/
 
 ```bash
 go build
+```
+
+To build the language server binary explicitly:
+
+```bash
+go build -o rahu-lsp ./cmd/lsp
 ```
 
 ### Run Tests
@@ -195,4 +204,3 @@ MIT
 ## Author
 
 Akash Sivanandan
-

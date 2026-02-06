@@ -19,7 +19,7 @@ func TestConn_Read(t *testing.T) {
 	conn := NewConn(
 		bufio.NewReader(in),
 		bufio.NewWriter(out),
-		nil,
+		func() error { return nil },
 	)
 
 	conn.Start()
@@ -43,7 +43,7 @@ func TestConn_SendResponse(t *testing.T) {
 	conn := NewConn(
 		bufio.NewReader(in),
 		bufio.NewWriter(out),
-		nil,
+		func() error { return nil },
 	)
 
 	conn.Start()
