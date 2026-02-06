@@ -9,17 +9,19 @@ import (
 )
 
 func main() {
-	srv := server.New()
-	server.Register(srv)
-
 	in := bufio.NewReader(os.Stdin)
 	out := bufio.NewWriter(os.Stdout)
 
-	flush := func() error { return out.Flush() }
+	closeFn := func() error { return os.Stdin.Close() }
 
-	conn := jsonrpc.NewConn(in, out, flush)
+	conn := jsonrpc.NewConn(in, out, closeFn)
+
+	srv := server.New(conn)
+	server.Register(srv)
+
 	conn.Start()
-	jsonrpc.Dispatch(conn)
+
+	go jsonrpc.Dispatch(conn)
 
 	conn.Wait()
 }
