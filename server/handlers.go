@@ -4,12 +4,14 @@ import (
 	"rahu/jsonrpc"
 
 	"rahu/lsp"
-	"rahu/parser"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
 	s.Open(p.TextDocument)
-	s.publishDiagnostics(p.TextDocument.URI)
+	doc := s.Get(p.TextDocument.URI)
+	if doc == nil {
+		s.analyze(doc)
+	}
 }
 
 func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
@@ -29,28 +31,33 @@ func (s *Server) DidChange(p *lsp.DidChangeTextDocumentParams) {
 		p.ContentChanges,
 		p.TextDocument.Version,
 	)
+
+	doc := s.Get(p.TextDocument.URI)
+	if doc != nil {
+		s.analyze(doc)
+	}
 }
 
 func (s *Server) DidClose(p *lsp.DidCloseTextDocumentParams) {
 	s.Close(p.TextDocument.URI)
 }
 
-func (s *Server) publishDiagnostics(uri lsp.DocumentURI) {
-	doc := s.Get(uri)
-	if doc == nil {
+func (s *Server) publishDiagnostics(uri lsp.DocumentURI, diags []lsp.Diagnostic) {
+	// If document no longer exists, clear diagnostics
+	if s.Get(uri) == nil {
+		_ = s.conn.Notify("textDocument/publishDiagnostics",
+			lsp.PublishDiagnosticsParams{
+				URI:         uri,
+				Diagnostics: nil,
+			},
+		)
 		return
 	}
 
-	p := parser.New(doc.Text)
-	p.Parse()
-
-	diags := []lsp.Diagnostic{}
-	for _, err := range p.Errors() {
-		diags = append(diags, lsp.Diagnostic{
-			Range:    err.Span.ToLSPRange(),
-			Severity: lsp.SeverityWarning,
-		})
+	params := lsp.PublishDiagnosticsParams{
+		URI:         uri,
+		Diagnostics: diags,
 	}
 
-	s.conn.Notify()
+	_ = s.conn.Notify("textDocument/publishDiagnostics", params)
 }
