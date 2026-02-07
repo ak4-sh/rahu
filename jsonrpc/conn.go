@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"context"
 	j "encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"sync"
 )
 
@@ -25,6 +23,8 @@ type Conn struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	writeDone chan struct{}
+	closing   sync.Once
+	closed    chan struct{}
 }
 
 func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *Conn {
@@ -42,12 +42,20 @@ func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *
 		ctx:       ctx,
 		cancel:    cancel,
 		writeDone: make(chan struct{}),
+		closed:    make(chan struct{}),
 	}
+}
+
+func (c *Conn) markClosed() {
+	c.closing.Do(func() {
+		close(c.closed)
+		close(c.outgoing)
+	})
 }
 
 func (c *Conn) enqueueBytes(b []byte) error {
 	select {
-	case <-c.ctx.Done():
+	case <-c.closed:
 		return fmt.Errorf("connection closed")
 	case c.outgoing <- outbound{payload: b}:
 		return nil
@@ -65,10 +73,6 @@ func (c *Conn) readLoop() {
 	for {
 		msg, err := readBody(c.r)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			c.fail(fmt.Errorf("read error: %w", err))
 			return
 		}
 
@@ -89,6 +93,7 @@ func (c *Conn) writeLoop() {
 	}()
 
 	for msg := range c.outgoing {
+
 		header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg.payload))
 
 		if _, err := c.w.WriteString(header); err != nil {
@@ -104,6 +109,7 @@ func (c *Conn) writeLoop() {
 			c.fail(err)
 			return
 		}
+
 	}
 }
 
@@ -138,8 +144,10 @@ func (c *Conn) Incoming() <-chan Message {
 }
 
 func (c *Conn) Close() error {
-	c.fail(nil)
-	c.Wait()
+	c.markClosed()
+	<-c.writeDone
+	c.cancel()
+	_ = c.closeFn()
 	return nil
 }
 
@@ -161,13 +169,9 @@ func (c *Conn) reportError(err error) {
 func (c *Conn) fail(err error) {
 	c.once.Do(func() {
 		c.reportError(err)
-
-		close(c.outgoing)
-
-		_ = c.closeFn()
-
+		c.markClosed()
 		c.cancel()
-		close(c.errors)
+		_ = c.closeFn()
 	})
 }
 
