@@ -291,7 +291,13 @@ func (p *Parser) parseList() Expression {
 }
 
 func (p *Parser) parseCall(funcExpr Expression) Expression {
-	startPos := funcExpr.(*Name).Pos.Start
+	var startPos Position
+	if name, ok := funcExpr.(*Name); ok {
+		startPos = name.Pos.Start
+	} else {
+		startPos = funcExpr.Position().Start
+	}
+
 	p.advance()
 	args := []Expression{}
 
