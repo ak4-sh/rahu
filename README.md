@@ -4,76 +4,95 @@ A Python Language Server Protocol (LSP) implementation written in Go.
 
 ## About
 
-Rahu is a learning-focused project to understand how Python language servers work by building one from scratch. It implements a full frontend pipeline for Python code — from lexing and parsing to semantic analysis — and is now moving into LSP integration.
+Rahu is a from-scratch Python language server — lexer, parser, semantic analyser,
+JSON-RPC transport, and LSP server, all hand-written in Go with no third-party
+LSP libraries. It communicates over stdin/stdout using the LSP specification and
+can be connected to any editor that supports custom language servers.
 
-The project prioritizes **correct semantics, clear architecture, and LSP-grade source location tracking** over execution or runtime behavior.
+The project prioritizes **correct semantics, clear architecture, and LSP-grade
+source location tracking** over execution or runtime behavior. There is no
+interpreter or runtime — this is purely a static analysis tool.
 
 ---
 
 ## Current Status
 
-🚧 **Active Development** 🚧
+### What Works Today
 
-### Completed
+**Lexer** — full Python tokenization
 
-* ✅ **Lexer**: Full Python tokenization with INDENT/DEDENT support
+- All single and multi-character operators (`+`, `==`, `//`, `**`, `>>=`, etc.)
+- String literals (single-line and triple-quoted multi-line)
+- Number literals (integers and floats)
+- Identifier and keyword recognition
+- INDENT/DEDENT emission with tab/space consistency enforcement
+- 1-based line and column tracking on every token
 
-  * All Python operators (single and multi-character: `+`, `-`, `*`, `/`, `//`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, etc.)
-  * String literals (single-line and multi-line with `"""` and `'''`)
-  * Number, identifier, and keyword recognition
-  * Proper indentation tracking with tab/space consistency checking
-  * Accurate position tracking (line and column numbers)
-  * Comprehensive test coverage
+**Parser** — recursive descent with Pratt expression parsing
 
-* ✅ **Parser**: Complete recursive descent parser with AST generation
+- Statements: assignment, `if`/`elif`/`else`, `for` (with `else`), `while`,
+  `def` (with default arguments), `return`, `break`, `continue`
+- Expressions: binary operations, comparison chaining (`1 < x < 10`), boolean
+  `and`/`or`, unary `-`/`+`/`not`, function calls, list literals, tuple
+  unpacking
+- Right-associative `**` (power) operator
+- Error recovery — parsing continues after syntax errors, producing partial ASTs
+- Source ranges on every AST node
+- 40+ parser tests
 
-  * **Statements**: assignments, if/elif/else, for loops, while loops, function definitions, return, break, continue
-  * **Expressions**: binary operations, comparisons, boolean operations (`and`/`or`), unary operations, function calls, lists, tuples
-  * **Operator precedence**: Correct handling of arithmetic, comparison, and boolean precedence
-  * **Advanced parsing features**:
+**Semantic Analyser** — two-pass scope builder and name resolver
 
-    * Function default arguments
-    * Comparison chaining (`1 < x < 10`)
-    * Tuple unpacking in `for` loops
-    * Nested control structures
-  * 40+ tests covering syntax and AST structure
+- Lexical scope construction (builtin -> global -> function)
+- Python-style LEGB name resolution
+- Builtin scope with `print`, `range`, `len`, `input`, `int`, `str`, `float`,
+  `bool`, `list`, `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`,
+  `enumerate`, `zip`, `map`, `filter`, `open`, `super`, `hasattr`, `getattr`,
+  `setattr`
+- Symbol kinds: variable, function, parameter, builtin
+- Detects: undefined names, `return` outside function, `break`/`continue`
+  outside loop
+- Source spans on all symbols (LSP-ready)
+- Deterministic `*Name -> *Symbol` resolution map
 
-* ✅ **Semantic Analysis (Analyzer)**
+**LSP Server** — JSON-RPC 2.0 over stdio
 
-  * Lexical scope construction (builtin → global → function)
-  * Symbol tables with ownership of scopes
-  * Correct Python-style name resolution (LEGB)
-  * Builtin scope support (`print`, `range`, etc.)
-  * Read vs write name resolution
-  * Shadowing and parameter binding
-  * Control-flow legality checks (`return`, `break`, `continue`)
-  * Accurate source spans for all symbols (LSP-ready)
-  * Deterministic name → symbol resolution map
-  * Extensive semantic tests
+- Initialization and capability negotiation (`initialize` / `initialized`)
+- Document lifecycle (`didOpen`, `didChange`, `didClose`)
+- Full and incremental text synchronization (server advertises full sync,
+  but incremental edit application is implemented)
+- Diagnostic publishing — parse errors and semantic errors appear in the editor
+  on every change
+- Hover handler (registered and wired, currently returns stub data)
+- Graceful shutdown (`shutdown` / `exit`)
+
+**JSON-RPC Transport** — hand-written, no dependencies
+
+- LSP Content-Length framing
+- Request/response correlation
+- Notification dispatch
+- Panic recovery in handlers
+- Type-safe handler registration via generics
 
 ---
 
-### In Progress
+### Not Yet Implemented
 
-* 🔄 **Language Server (LSP) Integration**
+These are the significant gaps, roughly ordered by impact:
 
-  * Document lifecycle handling (open/change/close)
-  * Incremental re-analysis on edits
-  * Diagnostic publishing (somewhat stable; still a lot of work to do)
-  * Initialization and capability negotiation are functional but evolving
-  * Error recovery and resilience are being tightened across the stack
+**Python language features the parser does not handle:**
+classes, imports, attribute access (`obj.attr`), subscripts/slicing (`a[0]`),
+dictionaries, sets, `try`/`except`/`finally`, augmented assignment (`+=`),
+`*args`/`**kwargs`, `with`, `lambda`, comprehensions, decorators,
+`async`/`await`, `yield`, string escape sequences, bitwise operators
 
----
+**LSP features not yet implemented:**
+hover (stub exists, needs AST position lookup), go-to-definition, find
+references, completion, code actions, formatting, rename
 
-### Planned
-
-* ⏳ Go-to-definition
-* ⏳ Hover information
-* ⏳ Find references
-* ⏳ Symbol indexing
-* ⏳ Incremental parsing optimizations
-* ⏳ Language expansion (attributes, subscripts, classes)
-* ⏳ Packaging and release automation
+**Infrastructure gaps:**
+no debouncing of `didChange` analysis (full reparse on every keystroke),
+AST cache not persisted between edits (see `incremental-parsing.md`),
+no structured logging, no CI/CD
 
 ---
 
@@ -81,30 +100,25 @@ The project prioritizes **correct semantics, clear architecture, and LSP-grade s
 
 ```
 rahu/
-├── lexer/          # Tokenization
-├── parser/         # AST generation
-├── analyser/       # Scopes, symbols, name resolution
-├── lsp/            # LSP protocol implementation (in progress)
-├── utils/          # Debug printers and helpers
-└── cmd/
-    └── lsp/        # LSP entry point
+├── cmd/lsp/        # Entry point — wires stdin/stdout to the server
+├── jsonrpc/        # JSON-RPC 2.0 transport (framing, dispatch, handlers)
+├── lsp/            # LSP protocol type definitions
+├── server/         # LSP server logic (document storage, analysis, handlers)
+├── lexer/          # Python tokenizer
+├── parser/         # Recursive descent + Pratt parser, AST types
+├── analyser/       # Scope builder, symbol tables, name resolver
+└── utils/          # Debug printers
 ```
 
 ---
 
-## Building & Running
+## Building and Running
 
 ### Prerequisites
 
-* Go 1.21 or higher
+- Go 1.23 or higher
 
 ### Build
-
-```bash
-go build
-```
-
-To build the language server binary explicitly:
 
 ```bash
 go build -o rahu-lsp ./cmd/lsp
@@ -116,82 +130,58 @@ go build -o rahu-lsp ./cmd/lsp
 go test ./...
 ```
 
-### Debug the Frontend Pipeline
+### Connect to Neovim
 
-```bash
-go run main.go
+Add to your Neovim configuration:
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+    pattern = "python",
+    callback = function()
+        vim.lsp.start({
+            name = "rahu",
+            cmd = { "/path/to/rahu-lsp" },
+        })
+    end,
+})
 ```
 
-This prints:
-
-* the AST
-* scope tree
-* resolved names and symbols
-* semantic diagnostics
+Replace `/path/to/rahu-lsp` with the absolute path to the built binary.
 
 ---
 
-## Example
+## Architecture
 
-Given this Python code:
-
-```python
-def add(x):
-    return x + 1
-
-add(4)
-```
-
-Rahu produces:
-
-### Scopes
+The pipeline on every document change:
 
 ```
-Scope(global)
-  add : function
-  Scope(function)
-    x : parameter
+editor keystroke
+  -> JSON-RPC notification (textDocument/didChange)
+  -> update stored document text
+  -> lex entire file (lexer.Lexer)
+  -> parse token stream (parser.Parser -> *parser.Module)
+  -> build scope tree (analyser.BuildScopes)
+  -> resolve names (analyser.Resolve)
+  -> convert errors to LSP diagnostics
+  -> publish diagnostics to editor
 ```
 
-### Name Resolution
-
-```
-USE x    parameter  at 2:12 → DEF x    parameter at 1:9
-USE add  function   at 4:1  → DEF add  function  at 1:1
-```
-
-Builtins (e.g. `print`, `range`) resolve from a builtin scope per Python semantics.
+The lexer is pull-based (`NextToken()`), driven by the parser. The parser
+produces an AST with source ranges on every node. The analyser walks the AST
+twice: once to build scopes and define symbols, once to resolve every name
+reference to its definition. Parse errors and semantic errors are merged into
+LSP diagnostics and pushed to the editor.
 
 ---
 
 ## Design Principles
 
-* **No execution semantics** — this is a static analysis tool
-* **Clear phase separation**: lex → parse → analyze → LSP
-* **No special-casing** in the resolver (builtins are just a scope)
-* **LSP-grade accuracy** for spans and diagnostics
-* **Tests protect invariants**, not just coverage
-
----
-
-## Development Roadmap
-
-1. Lexer ✅
-2. Parser ✅
-3. Semantic analysis ✅
-4. LSP server 🔄
-5. Language expansion ⏳
-
----
-
-## Technical Highlights
-
-* Hand-written lexer and parser
-* Recursive descent + Pratt parsing
-* Python-style indentation handling
-* Explicit scope ownership model
-* Deterministic symbol resolution
-* Designed from day one for LSP consumption
+- **No execution semantics** — static analysis only
+- **Clear phase separation** — lex, parse, analyse, serve
+- **No special-casing** — builtins are just a scope, not hardcoded checks
+- **LSP-grade accuracy** for spans and diagnostics
+- **Zero third-party dependencies** for the core (only `golang.org/x/term` for
+  terminal handling)
 
 ---
 
