@@ -155,6 +155,13 @@ func (l *Lexer) isDigit() bool {
 	return false
 }
 
+func isDigit(val byte) bool {
+	if val >= '0' && val <= '9' {
+		return true
+	}
+	return false
+}
+
 func (l *Lexer) isChar() bool {
 	if (l.ch >= 'a' && l.ch <= 'z') || (l.ch >= 'A' && l.ch <= 'Z') {
 		return true
@@ -165,12 +172,17 @@ func (l *Lexer) isChar() bool {
 func (l *Lexer) readNumber() string {
 	var sb strings.Builder
 	sb.WriteByte(l.ch)
+	hasDot := false
 	for {
 		l.readChar()
-		if !l.isDigit() {
+		if l.ch == '.' && !hasDot && isDigit(l.peek()) {
+			hasDot = true
+			sb.WriteByte(l.ch)
+		} else if !l.isDigit() {
 			break
+		} else {
+			sb.WriteByte(l.ch)
 		}
-		sb.WriteByte(l.ch)
 	}
 	return sb.String()
 }
@@ -300,6 +312,8 @@ func (l *Lexer) NextToken() Token {
 			return Token{
 				Literal: "",
 				Type:    ILLEGAL,
+				Line:    l.line,
+				Col:     l.col,
 			}
 		}
 

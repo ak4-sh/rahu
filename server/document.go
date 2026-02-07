@@ -101,6 +101,9 @@ func (s *Server) ApplyIncremental(
 	if !ok {
 		return
 	}
+	if version <= doc.Version {
+		return
+	}
 
 	text := doc.Text
 

@@ -193,10 +193,63 @@ func (p *Parser) parseFor() Statement {
 
 	forStmt.Body = body
 
+	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+
 	if p.current.Type == lexer.DEDENT {
 		p.advance()
 	}
-	forStmt.Pos.End = Position{Line: p.current.Line, Col: p.current.Col}
+
+	orelse := []Statement{}
+	if p.current.Type == lexer.ELSE {
+		p.advance()
+
+		endPos = Position{Line: p.current.Line, Col: p.current.Col}
+		if p.current.Type != lexer.COLON {
+			p.errorCurrent("expected ':' after else")
+			p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
+			if p.current.Type != lexer.COLON {
+				return forStmt
+			}
+		}
+
+		p.advance()
+
+		if p.current.Type != lexer.NEWLINE {
+			p.errorCurrent("expected newline after 'else:'")
+			p.syncTo(lexer.NEWLINE, lexer.EOF)
+			if p.current.Type != lexer.NEWLINE {
+				return forStmt
+			}
+		}
+
+		p.advance()
+
+		if p.current.Type != lexer.INDENT {
+			p.errorCurrent("expected indent block after 'else:'")
+			p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+			if p.current.Type != lexer.INDENT {
+				return forStmt
+			}
+		}
+
+		p.advance()
+
+		for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
+			stmt := p.parseStatement()
+			if stmt != nil {
+				orelse = append(orelse, stmt)
+			}
+		}
+
+		endPos = Position{Line: p.current.Line, Col: p.current.Col}
+
+		if p.current.Type == lexer.DEDENT {
+			p.advance()
+		}
+	}
+
+	forStmt.Orelse = orelse
+	forStmt.Pos.End = endPos
 	return forStmt
 }
 
@@ -220,22 +273,21 @@ func (p *Parser) parseReturn() Statement {
 }
 
 func (p *Parser) parseAssignment() Statement {
-	assgnStart := Position{Line: p.current.Line, Col: p.current.Col}
-	targetStart := Position{Line: p.current.Line, Col: p.current.Col}
-
-	target := &Name{ID: p.current.Literal}
-
-	p.advance()
-
-	target.Pos = Range{
-		Start: targetStart,
-		End:   Position{Line: p.current.Line, Col: p.current.Col},
+	start := Position{Line: p.current.Line, Col: p.current.Col}
+	targets := []Expression{}
+	for {
+		target := p.parsePrimary()
+		targets = append(targets, target)
+		if p.current.Type != lexer.COMMA {
+			break
+		}
+		p.advance()
 	}
 
 	if p.current.Type != lexer.EQUAL {
 		p.error(
 			Range{
-				Start: targetStart,
+				Start: start,
 				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
 			},
 			"expected '=' in assignment",
@@ -266,9 +318,9 @@ func (p *Parser) parseAssignment() Statement {
 	}
 
 	return &Assign{
-		Targets: []Expression{target},
+		Targets: targets,
 		Value:   value,
-		Pos:     Range{Start: assgnStart, End: assgnEnd},
+		Pos:     Range{Start: start, End: assgnEnd},
 	}
 }
 

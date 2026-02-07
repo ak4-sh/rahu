@@ -126,6 +126,15 @@ func (p *Parser) Parse() *Module {
 	return &Module{Body: statements}
 }
 
+func canStartExpression(t lexer.TokenType) bool {
+	switch t {
+	case lexer.NAME, lexer.NUMBER, lexer.STRING, lexer.LPAR, lexer.LSQB, lexer.MINUS, lexer.PLUS, lexer.NOT, lexer.TRUE, lexer.FALSE, lexer.NONE:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) parseStatement() Statement {
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
@@ -140,8 +149,7 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseIf()
 	}
 
-	if p.current.Type == lexer.NAME || p.current.Type == lexer.NUMBER ||
-		p.current.Type == lexer.STRING || p.current.Type == lexer.LPAR {
+	if canStartExpression(p.current.Type) {
 		expr := p.parseExpression(LOWEST)
 		if p.current.Type == lexer.NEWLINE {
 			p.advance()
