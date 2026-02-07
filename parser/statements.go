@@ -220,22 +220,21 @@ func (p *Parser) parseReturn() Statement {
 }
 
 func (p *Parser) parseAssignment() Statement {
-	assgnStart := Position{Line: p.current.Line, Col: p.current.Col}
-	targetStart := Position{Line: p.current.Line, Col: p.current.Col}
-
-	target := &Name{ID: p.current.Literal}
-
-	p.advance()
-
-	target.Pos = Range{
-		Start: targetStart,
-		End:   Position{Line: p.current.Line, Col: p.current.Col},
+	start := Position{Line: p.current.Line, Col: p.current.Col}
+	targets := []Expression{}
+	for {
+		target := p.parsePrimary()
+		targets = append(targets, target)
+		if p.current.Type != lexer.COMMA {
+			break
+		}
+		p.advance()
 	}
 
 	if p.current.Type != lexer.EQUAL {
 		p.error(
 			Range{
-				Start: targetStart,
+				Start: start,
 				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
 			},
 			"expected '=' in assignment",
@@ -266,9 +265,9 @@ func (p *Parser) parseAssignment() Statement {
 	}
 
 	return &Assign{
-		Targets: []Expression{target},
+		Targets: targets,
 		Value:   value,
-		Pos:     Range{Start: assgnStart, End: assgnEnd},
+		Pos:     Range{Start: start, End: assgnEnd},
 	}
 }
 
