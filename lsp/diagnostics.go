@@ -31,3 +31,12 @@ type PublishDiagnosticsParams struct {
 	Version     *int         `json:"version,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
+
+type DocumentDiagnosticParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type DocumentDiagnosticReport struct {
+	Kind  string       `json:"kind"`
+	Items []Diagnostic `json:"items"`
+}

@@ -277,9 +277,8 @@ func TestInitializeParamsMarshalUnmarshal(t *testing.T) {
 func TestInitializeResultMarshalUnmarshal(t *testing.T) {
 	original := InitializeResult{
 		Capabilities: ServerCapabilities{
-			TextDocumentSync:   TDSKFull,
-			HoverProvider:      true,
-			DiagnosticProvider: true,
+			TextDocumentSync: TDSKFull,
+			HoverProvider:    true,
 		},
 		ServerInfo: &ClientInfo{
 			Name:    "rahu",

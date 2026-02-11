@@ -42,6 +42,15 @@ func (s *Server) DidClose(p *lsp.DidCloseTextDocumentParams) {
 	s.Close(p.TextDocument.URI)
 }
 
+// Diagnostic is a stub handler for textDocument/diagnostic (pull model).
+// Real diagnostics are delivered via publishDiagnostics (push model).
+func (s *Server) Diagnostic(p *lsp.DocumentDiagnosticParams) (*lsp.DocumentDiagnosticReport, *jsonrpc.Error) {
+	return &lsp.DocumentDiagnosticReport{
+		Kind:  "full",
+		Items: []lsp.Diagnostic{},
+	}, nil
+}
+
 func (s *Server) publishDiagnostics(uri lsp.DocumentURI, diags []lsp.Diagnostic) {
 	// If document no longer exists, clear diagnostics
 	if s.Get(uri) == nil {
