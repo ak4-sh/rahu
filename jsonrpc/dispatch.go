@@ -51,6 +51,7 @@ func dispatchRequest(conn *Conn, req *Request) {
 	handler, ok := requestHandlers[req.Method]
 
 	if !ok {
+		log.Printf("DISPATCH: method not found: %s", req.Method)
 		resp.Error = MethodNotFoundError()
 		if err := conn.SendResponse(resp); err != nil {
 			conn.Close()
