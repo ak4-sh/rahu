@@ -30,7 +30,7 @@ func Register(s *Server) {
 	)
 
 	jsonrpc.RegisterNotification(
-		"Initialized",
+		"initialized",
 		jsonrpc.AdaptNotification(s.Initialized),
 	)
 
