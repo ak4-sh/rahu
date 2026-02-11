@@ -208,6 +208,10 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseWhile()
 	}
 
+	if p.current.Type == lexer.CLASS {
+		return p.parseClass()
+	}
+
 	p.error(Range{
 		Start: Position{Line: p.current.Line, Col: p.current.Col},
 		End:   Position{Line: p.current.Line, Col: p.current.EndCol},

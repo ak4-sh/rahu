@@ -235,3 +235,20 @@ type Continue struct {
 }
 
 func (c *Continue) statementNode() {}
+
+type KeywordArg struct {
+	Name  string
+	Value Expression
+	Pos   Range
+}
+
+type ClassDef struct {
+	Pos        Range
+	Name       string
+	Bases      []Expression
+	Keywords   []KeywordArg
+	Body       []Statement
+	Decorators []Expression
+}
+
+func (c *ClassDef) statementNode() {}

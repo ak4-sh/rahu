@@ -560,3 +560,124 @@ func (p *Parser) parseForTarget() Expression {
 	}
 	return first
 }
+
+func (p *Parser) parseClass() Statement {
+	// advance past `class`
+	def := ClassDef{}
+	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	p.advance()
+
+	if p.current.Type != lexer.NAME {
+		p.errorCurrent("expected classname after `class`")
+		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
+		def.Pos = Range{
+			Start: startPos,
+			End:   Position{Col: p.current.Col, Line: p.current.Line},
+		}
+		return &def
+	}
+
+	def.Name = p.current.Literal
+
+	p.advance()
+
+	if p.current.Type != lexer.COLON && (p.current.Type != lexer.LPAR) {
+		p.errorCurrent("expected `(` or `:` after class name")
+		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
+		def.Pos = Range{
+			Start: startPos,
+			End:   Position{Col: p.current.Col, Line: p.current.Line},
+		}
+		return &def
+	}
+
+	if p.current.Type == lexer.LPAR {
+		p.advance() // advance past `(`
+		for p.current.Type != lexer.RPAR && p.current.Type != lexer.EOF {
+			if p.current.Type == lexer.NAME {
+				name := Name{
+					ID: p.current.Literal,
+					Pos: Range{
+						Start: Position{Line: p.current.Line, Col: p.current.Col},
+						End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+					},
+				}
+
+				def.Bases = append(def.Bases, &name)
+				p.advance()
+			} else if p.current.Type == lexer.COMMA {
+				p.advance()
+			} else {
+				p.errorCurrent("unexpected token in class base list")
+				p.syncTo(lexer.EOF, lexer.RPAR, lexer.COLON)
+				break
+			}
+		}
+
+		if p.current.Type == lexer.RPAR {
+			p.advance()
+		}
+	}
+
+	if p.current.Type != lexer.COLON {
+		p.errorCurrent("expected `:` after class header")
+		p.syncTo(lexer.COLON, lexer.EOF, lexer.RPAR)
+		if p.current.Type != lexer.COLON {
+			def.Pos = Range{
+				Start: startPos,
+				End: Position{
+					Line: p.current.Line,
+					Col:  p.current.Col,
+				},
+			}
+			return &def
+		}
+	}
+
+	p.advance() // advance past colon
+
+	if p.current.Type != lexer.NEWLINE {
+		p.errorCurrent("expected newline after `:`")
+		p.syncTo(lexer.EOF, lexer.NEWLINE)
+		if p.current.Type != lexer.NEWLINE {
+			def.Pos = Range{
+				Start: startPos,
+				End:   Position{Line: p.current.Line, Col: p.current.Col},
+			}
+			return &def
+		}
+	}
+	p.advance() // advance past newline
+
+	if p.current.Type != lexer.INDENT {
+		p.errorCurrent("expected indent after class definition")
+		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
+		if p.current.Type != lexer.INDENT {
+			def.Pos = Range{
+				Start: startPos,
+				End:   Position{Line: p.current.Line, Col: p.current.Col},
+			}
+
+			return &def
+		}
+	}
+
+	p.advance() // move past indent
+
+	body := []Statement{}
+	for p.current.Type != lexer.EOF && p.current.Type != lexer.DEDENT {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+	}
+
+	if p.current.Type == lexer.DEDENT {
+		p.advance()
+	}
+
+	def.Body = body
+	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	def.Pos = Range{Start: startPos, End: endPos}
+	return &def
+}
