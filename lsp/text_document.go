@@ -106,3 +106,10 @@ type DidChangeTextDocumentParams struct {
 type DidCloseTextDocumentParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 }
+
+type DefinitionParams struct {
+	WorkDoneToken      ProgressToken          `json:"workDoneToken,omitempty"`
+	PartialResultToken *ProgressToken         `json:"partialResultToken,omitempty"`
+	TextDocument       TextDocumentIdentifier `json:"textDocument"`
+	Position           Position               `json:"position"`
+}

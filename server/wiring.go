@@ -43,4 +43,9 @@ func Register(s *Server) {
 		"exit",
 		jsonrpc.AdaptNotification(s.Exit),
 	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/definition",
+		jsonrpc.AdaptRequest(s.Definition),
+	)
 }

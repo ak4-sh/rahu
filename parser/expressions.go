@@ -159,6 +159,7 @@ func (p *Parser) parsePrimary() Expression {
 		}
 		return n
 	case lexer.LPAR:
+		// TODO: need to add handling for tuples here
 		startPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
 		expr := p.parseExpression(LOWEST)

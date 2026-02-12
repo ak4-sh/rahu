@@ -22,3 +22,7 @@ type Hover struct {
 type WorkDoneProgressParams struct {
 	WorkDoneToken ProgressToken `json:"workDoneToken,omitempty"`
 }
+
+type PartialResultParams struct {
+	PartialResultToken *ProgressToken `json:"partialResultToken,omitempty"`
+}
