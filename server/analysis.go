@@ -26,7 +26,7 @@ func toDiagnostics(parseErrs []parser.Error, semErrs []analyser.SemanticError) [
 
 	for _, e := range parseErrs {
 		diags = append(diags, lsp.Diagnostic{
-			Range:    toRange(e.Span),
+			Range:    ToRange(e.Span),
 			Severity: lsp.SeverityError,
 			Message:  e.Msg,
 			Source:   "parser",
@@ -35,7 +35,7 @@ func toDiagnostics(parseErrs []parser.Error, semErrs []analyser.SemanticError) [
 
 	for _, e := range semErrs {
 		diags = append(diags, lsp.Diagnostic{
-			Range:    toRange(e.Span),
+			Range:    ToRange(e.Span),
 			Severity: lsp.SeverityError,
 			Message:  e.Msg,
 			Source:   "semantic",
@@ -43,17 +43,4 @@ func toDiagnostics(parseErrs []parser.Error, semErrs []analyser.SemanticError) [
 	}
 
 	return diags
-}
-
-func toRange(r parser.Range) lsp.Range {
-	return lsp.Range{
-		Start: lsp.Position{
-			Line:      r.Start.Line,
-			Character: r.Start.Col,
-		},
-		End: lsp.Position{
-			Line:      r.End.Line,
-			Character: r.End.Col,
-		},
-	}
 }
