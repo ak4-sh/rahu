@@ -1,4 +1,6 @@
-# Notes
+# Note
 
-The ideas and direction in these notes are human-generated. The body text and
-detailed write-ups were produced with the help of an AI assistant.
+In the interest of full disclosure: the bullk of the notes in this directory are
+written by AI, but the intial ideas / direction is human generated. I hate
+writing long technical documents, and this is (hopefully) just a stopgap
+solutio

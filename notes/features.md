@@ -118,6 +118,8 @@ textDocument/completion
 textDocument/definition
 ```
 
+See [goto-definition-roadmap.md](./goto-definition-roadmap.md) for implementation details.
+
 3. **References**
 
 ```

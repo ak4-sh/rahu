@@ -114,6 +114,8 @@ The three most impactful LSP features are not implemented. The analyser already 
 
 **Impact:** The LSP is not yet productive for daily use.
 
+**Roadmap:** See detailed implementation plan at [goto-definition-roadmap.md](./goto-definition-roadmap.md)
+
 ---
 
 ## Medium Priority — Code Quality
