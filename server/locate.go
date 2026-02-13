@@ -75,6 +75,15 @@ func nameInStmt(stmt parser.Statement, pos parser.Position) *parser.Name {
 		}
 		return nil
 
+	case *parser.ExprStmt:
+		return nameInExpr(v.Value, pos)
+
+	case *parser.Return:
+		if v.Value != nil {
+			return nameInExpr(v.Value, pos)
+		}
+		return nil
+
 	}
 
 	return nil
