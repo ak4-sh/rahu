@@ -103,7 +103,7 @@ func (b *ScopeBuilder) visitClassDef(c *parser.ClassDef) {
 
 func (b *ScopeBuilder) visitFunctionDef(f *parser.FunctionDef) {
 	fnSym := &Symbol{
-		Name: f.Name,
+		Name: f.Name.ID,
 		Kind: SymFunction,
 		Span: f.NamePos,
 	}
@@ -117,7 +117,7 @@ func (b *ScopeBuilder) visitFunctionDef(f *parser.FunctionDef) {
 
 	for _, arg := range f.Args {
 		_ = b.current.Define(&Symbol{
-			Name: arg.Name,
+			Name: arg.Name.ID,
 			Kind: SymParameter,
 			Span: arg.Pos,
 		})

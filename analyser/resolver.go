@@ -87,9 +87,10 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 			}
 		}
 
-		fnSym := r.current.Symbols[s.Name]
+		fnSym := r.current.Symbols[s.Name.ID]
+		r.Resolved[s.Name] = fnSym
 		if fnSym == nil || fnSym.Inner == nil {
-			r.error(s.Pos, "internal compiler error: missing function symbol or scope for "+s.Name)
+			r.error(s.Pos, "internal compiler error: missing function symbol or scope for "+s.Name.ID)
 			return
 		}
 

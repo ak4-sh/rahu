@@ -1,6 +1,9 @@
 package server
 
 import (
+	"fmt"
+	"strings"
+
 	"rahu/jsonrpc"
 
 	a "rahu/analyser"
@@ -22,8 +25,58 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 		return nil, jsonrpc.InvalidParamsError(nil)
 	}
 
+	pos := parser.Position{
+		Line: p.Position.Line + 1,
+		Col:  p.Position.Character + 1,
+	}
+
+	name := nameAtPos(doc.AST, pos)
+	if name == nil {
+		return nil, nil
+	}
+
+	sym, ok := doc.Symbols[name]
+	if !ok || sym == nil {
+		return nil, nil
+	}
+
+	var kind string
+	switch sym.Kind {
+	case a.SymVariable:
+		kind = "variable"
+	case a.SymParameter:
+		kind = "parameter"
+	case a.SymFunction:
+		kind = "function"
+	case a.SymClass:
+		kind = "class"
+	case a.SymBuiltin:
+		kind = "builtin"
+	case a.SymType:
+		kind = "type"
+	default:
+		kind = "symbol"
+	}
+
+	value := fmt.Sprintf("**%s** `%s`", kind, sym.Name)
+
+	if sym.Kind == a.SymFunction && sym.Inner != nil {
+		params := []string{}
+		for _, s := range sym.Inner.Symbols {
+			if s.Kind == a.SymParameter {
+				params = append(params, s.Name)
+			}
+		}
+		value = fmt.Sprintf("```python\n%s(%s)\n```", sym.Name, strings.Join(params, ", "))
+	}
+
+	value += fmt.Sprintf("\n\nDefined at line %d", sym.Span.Start.Line)
+
 	return &lsp.Hover{
-		Contents: "ok",
+		Contents: lsp.MarkupContent{
+			Kind:  "markdown",
+			Value: value,
+		},
 	}, nil
 }
 

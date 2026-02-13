@@ -33,6 +33,9 @@ func nameInStmt(stmt parser.Statement, pos parser.Position) *parser.Name {
 		}
 
 	case *parser.FunctionDef:
+		if contains(v.NamePos, pos) {
+			return v.Name
+		}
 		for _, args := range v.Args {
 			if name := nameInExpr(args.Default, pos); name != nil {
 				return name

@@ -81,13 +81,13 @@ type Module struct {
 }
 
 type FuncArg struct {
-	Name    string
+	Name    *Name
 	Default Expression
 	Pos     Range
 }
 
 type FunctionDef struct {
-	Name    string
+	Name    *Name
 	NamePos Range
 	Args    []FuncArg
 	Body    []Statement

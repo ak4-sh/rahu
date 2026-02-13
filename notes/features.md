@@ -1,41 +1,38 @@
 ---
 
-## Phase 0 – Stabilize the Core (you are here)
+## Phase 0 – Stabilize the Core (COMPLETED)
 
 **Goal:** reliable editor interaction
 
-* Handshake already works
+* Handshake works
 * Hover stub works
 * Document storage implemented
+* `didChange` end-to-end works
+* Version handling implemented
+* Diagnostics publishing works
 
-**Remaining cleanup**
-
-* Verify `didChange` end-to-end
-* Ensure version handling
-* Add basic logging
-
-**Exit criteria**
+**Verification**
 
 * Edit file in Neovim
-* Trigger hover
-* Hover reflects latest text
+* Diagnostics appear on save
+* Edit triggers re-analysis
 
 ---
 
-# Phase 1 – Text Synchronization (highest priority)
+## Phase 1 – Text Synchronization (COMPLETED)
 
 **Implement properly**
 
 1. `textDocument/didChange`
 
-   * call `ApplyFullChange`
-   * confirm updates work
+   * call `ApplyFullChange` — implemented
+   * incremental sync also implemented
 
 2. `textDocument/didClose`
 
-   * remove document state
+   * remove document state — implemented
 
-3. Add version checks
+3. Version checks — implemented
 
 **Test cases**
 
@@ -43,25 +40,23 @@
 * Multiple sequential edits
 * Close → reopen
 
-**Exit criteria**
-
-Server state always matches editor text.
+**Status: Done**
 
 ---
 
-# Phase 2 – Diagnostics Foundation
+## Phase 2 – Diagnostics Foundation (COMPLETED)
 
 **Goal:** show visible feedback in editor
 
-1. Integrate lexer
+1. Integrate lexer — done
 
    * tokenize document on change
 
-2. Integrate parser
+2. Integrate parser — done
 
    * build AST
 
-3. Implement:
+3. Implemented:
 
 ```
 textDocument/publishDiagnostics
@@ -73,38 +68,28 @@ textDocument/publishDiagnostics
 text → parse → collect errors → publish
 ```
 
-**Exit criteria**
-
-Syntax errors appear in editor.
+**Status: Done**
 
 ---
 
-# Phase 3 – Real Hover
+## Phase 3 – Real Hover (COMPLETED!)
 
-Replace stub logic:
+Implementation:
 
-1. Map LSP position → offset
-2. Offset → token
-3. Token → AST node
-4. AST node → information string
+1. Map LSP position → parser position ✅
+2. Find Name node in AST via nameAtPos ✅
+3. Look up symbol in doc.Symbols ✅
+4. Return hover with symbol kind and definition location ✅
 
-Implement:
-
-```
-hover shows symbol under cursor
-```
-
-**Exit criteria**
-
-Hover displays meaningful info.
+**Status: DONE** — hover now shows symbol kind and line number
 
 ---
 
-# Phase 4 – Core Language Features
+## Phase 4 – Core Language Features (PARTIALLY COMPLETED)
 
 Add in order:
 
-1. **Completion**
+1. ~~**Completion**~~ — not started
 
 ```
 textDocument/completion
@@ -112,7 +97,7 @@ textDocument/completion
 
 * based on AST symbols
 
-2. **Go to definition**
+2. ~~**Go to definition**~~ — DONE!
 
 ```
 textDocument/definition
@@ -120,17 +105,17 @@ textDocument/definition
 
 See [goto-definition-roadmap.md](./goto-definition-roadmap.md) for implementation details.
 
-3. **References**
+3. **References** — not started
 
 ```
 textDocument/references
 ```
 
-These three make the server actually productive.
+**Status: Go-to-definition implemented, others pending**
 
 ---
 
-# Phase 5 – Performance
+## Phase 5 – Performance
 
 * Incremental parsing
 * Background analysis queue
@@ -139,7 +124,7 @@ These three make the server actually productive.
 
 ---
 
-# Phase 6 – Robustness
+## Phase 6 – Robustness
 
 * Logging subsystem
 * Panic recovery
@@ -152,7 +137,7 @@ These three make the server actually productive.
 
 ---
 
-# Phase 7 – Polish
+## Phase 7 – Polish
 
 * Incremental text sync
 * Code actions
@@ -163,21 +148,11 @@ These three make the server actually productive.
 
 ## Immediate Next Action (today)
 
-Implement and verify:
+Implement real hover:
 
 ```
-didChange → ApplyFullChange → hover shows updated text
+didChange → ApplyFullChange → hover shows symbol info
 ```
 
-That unlocks all later features.
-
----
-
-### Short roadmap summary
-
-```
-sync → diagnostics → real hover → completion → definition → references
-```
-
-Follow this order and progress will be steady and measurable.
+This builds on the AST position lookup already done for goto-definition.
 

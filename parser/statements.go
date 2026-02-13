@@ -387,7 +387,14 @@ func (p *Parser) parseFunc() Statement {
 		return funcDef
 	}
 
-	funcDef.Name = p.current.Literal
+	// funcDef.Name = p.current.Literal
+	funcDef.Name = &Name{
+		ID: p.current.Literal,
+		Pos: Range{
+			Start: Position{Line: p.current.Line, Col: p.current.Col},
+			End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+		},
+	}
 	funcDef.NamePos = Range{
 		Start: Position{Line: p.current.Line, Col: p.current.Col},
 		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
@@ -423,8 +430,12 @@ func (p *Parser) parseFunc() Statement {
 			end := Position{Line: p.current.Line, Col: p.current.EndCol}
 
 			arg := FuncArg{
-				Name: p.current.Literal,
-				Pos:  Range{Start: start, End: end},
+				// Name: p.current.Literal,
+				Name: &Name{
+					ID:  p.current.Literal,
+					Pos: Range{Start: start, End: end},
+				},
+				Pos: Range{Start: start, End: end},
 			}
 
 			p.advance()

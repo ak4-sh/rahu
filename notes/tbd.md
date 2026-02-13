@@ -2,7 +2,7 @@
 
 This document tracks bugs, correctness issues, and improvements across the entire codebase.
 
-Last updated: 2026-02-11
+Last updated: 2026-02-12
 
 ---
 
@@ -83,38 +83,32 @@ Augmented assignment operators are not handled in the parser.
 
 ---
 
-### 13. Hover Is a Stub
+### 13. Hover Is Implemented ✅
 
-**Location:** `server/handlers.go:24`
+**Location:** `server/handlers.go:19-79`
 
-**Problem:**
-The hover handler always returns `{"contents": "ok"}` regardless of cursor position. The infrastructure (AST, symbol resolution with source spans) exists to make this real.
+**What works:**
+- Maps LSP position to parser position
+- Finds Name node via nameAtPos
+- Looks up symbol in doc.Symbols
+- Returns hover with symbol kind (variable, function, parameter, etc.)
+- Shows function signature for functions
+- Shows definition line number
 
-**Impact:** Hover provides no useful information to the user.
-
----
-
-### 13b. `textDocument/diagnostic` Handler Is a Stub
-
-**Location:** `server/handlers.go:45-51`
-
-**Problem:**
-The pull-diagnostic handler (`textDocument/diagnostic`) always returns an empty `{"kind": "full", "items": []}` report. It was added to silence `MethodNotFound` errors from clients that use the LSP 3.17 pull diagnostics model. Real diagnostics are still delivered only via the push model (`textDocument/publishDiagnostics`).
-
-**Fix:** Return cached diagnostics from the `Document` instead of an empty list. Requires storing `[]Diagnostic` on the `Document` struct during `analyze()`.
-
-**Impact:** Clients using pull diagnostics get no results; push diagnostics still work.
+**Status:** IMPLEMENTED ✅
 
 ---
 
-### 14. No Go-to-Definition, Completion, or References
+### 14. No Completion or References
 
 **Problem:**
-The three most impactful LSP features are not implemented. The analyser already builds a `Resolved` map (`*Name -> *Symbol` with source spans) that could support go-to-definition and find-references relatively quickly.
+The most impactful LSP features are not implemented. The analyser already builds a `Resolved` map (`*Name -> *Symbol` with source spans) that could support find-references relatively quickly.
 
-**Impact:** The LSP is not yet productive for daily use.
+- ~~Go-to-definition~~ — **IMPLEMENTED** ✅
+- Completion — not implemented
+- Find references — not implemented
 
-**Roadmap:** See detailed implementation plan at [goto-definition-roadmap.md](./goto-definition-roadmap.md)
+**Impact:** The LSP is not yet fully productive for daily use.
 
 ---
 
@@ -278,37 +272,39 @@ The following issues from the original `tbd.md` have been resolved:
 | Expression statements limited in starting tokens | `ac37a55` |
 | Tuple unpacking not supported in assignments | `f668b2c` |
 | For-else clause not supported | `a93d796` |
+| Go-to-definition not implemented | 2026-02-12 |
 
 ---
 
 ## Summary Table
 
-| # | Priority | Issue | Category |
-|---|----------|-------|----------|
-| 1 | Critical | Inverted nil check in `DidOpen` | Server bug |
-| 2 | Critical | `DiagnosticSeverity` off by one | LSP spec violation |
-| 3 | Critical | JSON tag casing on `DiagnosticProvider` | LSP spec violation |
-| 4 | High | No escape sequences in strings | Lexer |
-| 5 | High | No `*args` / `**kwargs` | Parser |
-| 6 | High | No class definitions | Parser |
-| 7 | High | No import statements | Parser |
-| 8 | High | No attribute access | Parser |
-| 9 | High | No subscript / slicing | Parser |
-| 10 | High | No dict / set literals | Parser |
-| 11 | High | No try / except / finally | Parser |
-| 12 | High | No augmented assignment | Parser |
-| 13 | High | Hover is a stub | Server |
-| 13b | High | `textDocument/diagnostic` is a stub | Server |
-| 14 | High | No go-to-def, completion, references | Server |
-| 15 | Medium | `panic()` instead of error returns | Code quality |
-| 16 | Medium | Silently ignored errors (9 instances) | Code quality |
-| 17 | Medium | Panic recovery discards info | Code quality |
-| 18 | Medium | Global mutable handler maps | Architecture |
-| 19 | Medium | Position calculation edge cases | Parser |
-| 20 | Medium | Bitwise operators not parsed | Parser |
-| 21 | Medium | No logging infrastructure | Server |
-| 22 | Medium | Missing `with`, `lambda`, comprehensions, etc. | Parser |
-| 23 | Low | Typo: `RegisterNofication` | Cleanup |
-| 24 | Low | Dead code (6 functions, 15+ types) | Cleanup |
-| 25 | Low | Broken benchmarks | Testing |
-| 26 | Low | Thin test coverage | Testing |
+| # | Priority | Issue | Category | Status |
+|---|----------|-------|----------|--------|
+| 1 | Critical | Inverted nil check in `DidOpen` | Server bug | ? |
+| 2 | Critical | `DiagnosticSeverity` off by one | LSP spec violation | ? |
+| 3 | Critical | JSON tag casing on `DiagnosticProvider` | LSP spec violation | ? |
+| 4 | High | No escape sequences in strings | Lexer | ? |
+| 5 | High | No `*args` / `**kwargs` | Parser | Open |
+| 6 | High | No class definitions | Parser | Open |
+| 7 | High | No import statements | Parser | Open |
+| 8 | High | No attribute access | Parser | Open |
+| 9 | High | No subscript / slicing | Parser | Open |
+| 10 | High | No dict / set literals | Parser | Open |
+| 11 | High | No try / except / finally | Parser | Open |
+| 12 | High | No augmented assignment | Parser | Open |
+| 13 | High | Hover is a stub | Server | Open |
+| 14 | High | Go-to-definition | Server | **DONE** ✅ |
+| 14b | High | Completion | Server | Open |
+| 14c | High | Find references | Server | Open |
+| 15 | Medium | `panic()` instead of error returns | Code quality | Open |
+| 16 | Medium | Silently ignored errors (9 instances) | Code quality | Open |
+| 17 | Medium | Panic recovery discards info | Code quality | Open |
+| 18 | Medium | Global mutable handler maps | Architecture | Open |
+| 19 | Medium | Position calculation edge cases | Parser | Open |
+| 20 | Medium | Bitwise operators not parsed | Parser | Open |
+| 21 | Medium | No logging infrastructure | Server | Open |
+| 22 | Medium | Missing `with`, `lambda`, comprehensions, etc. | Parser | Open |
+| 23 | Low | Typo: `RegisterNofication` | Cleanup | Open |
+| 24 | Low | Dead code (6 functions, 15+ types) | Cleanup | Open |
+| 25 | Low | Broken benchmarks | Testing | Open |
+| 26 | Low | Thin test coverage | Testing | Open |
