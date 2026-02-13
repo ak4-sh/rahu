@@ -3,7 +3,19 @@
 This document captures the analysis, design thinking, and implementation plan for
 moving away from "full reparse on every keystroke" toward something smarter.
 
-Last updated: 2026-02-06
+Last updated: 2026-02-12
+
+---
+
+## Current Status
+
+**Important:** The AST cache bug (Step 1 below) has been FIXED! ✅
+
+The `Server.SetAnalysis` method was implemented in `server/document.go:48-60` to
+persist analysis results back to the stored Document. This means:
+- The AST is now cached on the Document struct
+- Hover and goto-definition can access the cached AST
+- All LSP features that need the AST can read from the cache instead of re-parsing
 
 ---
 
@@ -92,20 +104,21 @@ scratch is not justified at the current stage of the project.
 
 ## Recommended Plan: Approach 1 in Detail
 
-### Step 1 — Fix the AST cache bug
+### Step 1 — Fix the AST cache bug ✅ DONE
 
 **Problem:** `analyze()` receives a shallow copy of the Document from `s.Get()`.
 It writes `doc.AST`, `doc.Symbols`, and `doc.SemErrs` to the copy, which is then
 discarded. The authoritative Document in `s.docs` never gets these fields set.
 
-**What to change:** Add a method that writes analysis results back under the lock:
+**Status:** FIXED in commit 2026-02-12
+
+**What was changed:** Added `Server.SetAnalysis` method in `server/document.go:48-60`:
 
 ```go
 // server/document.go
 
 func (s *Server) SetAnalysis(
     uri lsp.DocumentURI,
-    version int,
     ast *parser.Module,
     symbols map[*parser.Name]*analyser.Symbol,
     semErrs []analyser.SemanticError,
@@ -118,50 +131,21 @@ func (s *Server) SetAnalysis(
         return
     }
 
-    // Only apply if this analysis matches the current document version.
-    // A newer edit may have arrived while we were parsing.
-    if doc.Version != version {
-        return
-    }
-
     doc.AST = ast
     doc.Symbols = symbols
     doc.SemErrs = semErrs
 }
 ```
 
-Then update `analyze()` to call it:
+The `analyze()` function in `server/analysis.go` now calls `SetAnalysis` to persist results.
 
-```go
-// server/analysis.go
-
-func (s *Server) analyze(doc *Document) {
-    p := parser.New(doc.Text)
-    module := p.Parse()
-    global := analyser.BuildScopes(module)
-    semErrs, resolved := analyser.Resolve(module, global)
-
-    // Write results back to the stored document
-    s.SetAnalysis(doc.URI, doc.Version, module, resolved, semErrs)
-
-    diags := toDiagnostics(p.Errors(), semErrs)
-    s.publishDiagnostics(doc.URI, diags)
-}
-```
-
-The version check is important: if the user typed another character while
-`analyze()` was running (once we make it async in Step 2), the AST we just built
-is already stale. We should not overwrite a newer document's state with outdated
-analysis.
-
-**Why this matters beyond caching:** Without this fix, every LSP feature that
-needs the AST (hover, completion, go-to-definition, references) would need to
-independently re-parse the document. That defeats the purpose of having a
-persistent Document struct in the first place.
+**Why this matters beyond caching:** Every LSP feature that needs the AST (hover,
+completion, go-to-definition, references) can now read from the cached AST instead
+of re-parsing the document.
 
 ---
 
-### Step 2 — Debounce `DidChange` analysis
+### Step 2 — Debounce `DidChange` analysis (NOT YET IMPLEMENTED)
 
 **Problem:** Every keystroke triggers a synchronous `analyze()` call. During fast
 typing, most of these produce incomplete/broken ASTs that are immediately
@@ -317,15 +301,17 @@ simpler (no type system, fewer AST nodes), so it should be faster per line.
 Once Steps 1-3 are done, the server will:
 
 - **Stop wasting work** during fast typing
-- **Maintain a valid cached AST** on each Document at all times
+- **Maintain a valid cached AST** on each Document at all times ✅ (Step 1 done!)
 - **Have measured data** on parse performance to guide future decisions
 
 This directly unblocks:
 
 - **Phase 3 (Real Hover):** The hover handler can read `doc.AST` and `doc.Symbols`
-  instead of re-parsing
-- **Phase 4 (Completion, Go-to-Definition, References):** All of these need the
-  cached AST and symbol map
+  instead of re-parsing (Step 1 done, implementation pending)
+- **Phase 4 (Completion, Go-to-Definition, References):** 
+  - ✅ Go-to-definition: IMPLEMENTED (uses cached AST)
+  - Completion: needs cached AST, implementation pending
+  - References: needs cached AST, implementation pending
 - **Phase 5 (Performance):** The benchmarks from Step 3 will tell us whether
   Approach 2 is worth pursuing
 

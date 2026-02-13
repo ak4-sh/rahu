@@ -62,8 +62,11 @@ interpreter or runtime — this is purely a static analysis tool.
   but incremental edit application is implemented)
 - Diagnostic publishing — parse errors and semantic errors appear in the editor
   on every change
-- Hover handler (registered and wired, currently returns stub data)
+- Hover provider registered (stub implementation returns "ok")
+- Go-to-definition (`textDocument/definition`) — jumps to symbol definition
+  for variables, functions, and parameters
 - Graceful shutdown (`shutdown` / `exit`)
+- DefinitionProvider capability advertised
 
 **JSON-RPC Transport** — hand-written, no dependencies
 
@@ -86,8 +89,8 @@ dictionaries, sets, `try`/`except`/`finally`, augmented assignment (`+=`),
 `async`/`await`, `yield`, string escape sequences, bitwise operators
 
 **LSP features not yet implemented:**
-hover (stub exists, needs AST position lookup), go-to-definition, find
-references, completion, code actions, formatting, rename
+hover (stub returns "ok"), find references, completion, code actions,
+formatting, rename
 
 **Infrastructure gaps:**
 no debouncing of `didChange` analysis (full reparse on every keystroke),
