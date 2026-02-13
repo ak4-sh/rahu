@@ -168,7 +168,7 @@ func contains(rng parser.Range, pos parser.Position) bool {
 		return false
 	}
 
-	if pos.Line == rng.End.Line && pos.Col > rng.End.Col {
+	if pos.Line == rng.End.Line && pos.Col > rng.End.Col+1 {
 		return false
 	}
 
