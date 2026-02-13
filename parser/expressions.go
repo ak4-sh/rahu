@@ -162,20 +162,42 @@ func (p *Parser) parsePrimary() Expression {
 		// TODO: need to add handling for tuples here
 		startPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
-		expr := p.parseExpression(LOWEST)
-		if p.current.Type != lexer.RPAR {
-			p.errorCurrent("expected ')' after expression")
-			p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
-			if p.current.Type == lexer.RPAR {
-				p.advance()
-			}
-			if expr == nil {
-				return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
-			}
-			return expr
+
+		// empty tuple
+		if p.current.Type == lexer.RPAR {
+			endPos := Position{Line: p.current.Line, Col: p.current.Col}
+			p.advance()
+			return &Tuple{Elts: []Expression{}, Pos: Range{Start: startPos, End: endPos}}
 		}
+
+		first := p.parseExpression(LOWEST)
+		if first == nil {
+			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+		}
+
+		if p.current.Type != lexer.COMMA {
+			p.advance() // expecting a RPAR now
+			return first
+		}
+
+		elts := []Expression{first}
+		for p.current.Type == lexer.COMMA {
+			p.advance()
+
+			if p.current.Type == lexer.RPAR {
+				break
+			}
+
+			elt := p.parseExpression(LOWEST)
+			if elt != nil {
+				elts = append(elts, elt)
+			}
+		}
+
+		endPos := Position{Line: p.current.Line, Col: p.current.Col}
 		p.advance()
-		return expr
+		return &Tuple{Elts: elts, Pos: Range{Start: startPos, End: endPos}}
+
 	case lexer.LSQB:
 		return p.parseList()
 	case lexer.STRING:

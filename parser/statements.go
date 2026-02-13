@@ -388,6 +388,10 @@ func (p *Parser) parseFunc() Statement {
 	}
 
 	funcDef.Name = p.current.Literal
+	funcDef.NamePos = Range{
+		Start: Position{Line: p.current.Line, Col: p.current.Col},
+		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+	}
 	p.advance() // advance past func name
 
 	if p.current.Type != lexer.LPAR {

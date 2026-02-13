@@ -14,6 +14,13 @@ type Range struct {
 	End   Position
 }
 
+func (r Range) IsEmpty() bool {
+	return r.Start.Line == 0 &&
+		r.Start.Col == 0 &&
+		r.End.Line == 0 &&
+		r.End.Col == 0
+}
+
 const (
 	Add Operator = iota
 	Sub
@@ -80,10 +87,11 @@ type FuncArg struct {
 }
 
 type FunctionDef struct {
-	Name string
-	Args []FuncArg
-	Body []Statement
-	Pos  Range
+	Name    string
+	NamePos Range
+	Args    []FuncArg
+	Body    []Statement
+	Pos     Range
 }
 
 func (f *FunctionDef) statementNode() {}
