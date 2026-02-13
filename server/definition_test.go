@@ -618,3 +618,60 @@ func TestDefinitionComplexExpressions(t *testing.T) {
 		})
 	}
 }
+
+func TestDefinition_Shadowing(t *testing.T) {
+	code := `x = 1
+def foo():
+    x = 2
+    return x
+y = x
+`
+
+	s := &Server{
+		docs: make(map[lsp.DocumentURI]*Document),
+	}
+
+	uri := lsp.DocumentURI("file:///test.py")
+
+	p := parser.New(code)
+	module := p.Parse()
+	global := analyser.BuildScopes(module)
+	_, resolved := analyser.Resolve(module, global)
+
+	s.docs[uri] = &Document{
+		URI:     uri,
+		Version: 1,
+		Text:    code,
+		AST:     module,
+		Symbols: resolved,
+	}
+
+	tests := []struct {
+		line         int
+		character    int
+		expectedLine int
+		expectedChar int
+	}{
+		{3, 11, 2, 4},
+		{4, 4, 0, 0},
+	}
+
+	for _, tt := range tests {
+		params := &lsp.DefinitionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			Position: lsp.Position{
+				Line:      tt.line,
+				Character: tt.character,
+			},
+		}
+
+		location, err := s.Definition(params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if location.Range.Start.Line != tt.expectedLine {
+			t.Errorf("expected line %d, got %d", tt.expectedLine, location.Range.Start.Line)
+		}
+	}
+}
