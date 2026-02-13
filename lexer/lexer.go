@@ -423,22 +423,35 @@ func (l *Lexer) NextToken() Token {
 		// 2. Is it a word?
 		// 3. Is it a
 		if l.isDigit() {
-			tok.Literal = l.readNumber()
+			startCol := l.col
+			startLine := l.line
+
+			literal := l.readNumber()
+
 			tok.Type = NUMBER
-			tok.EndCol = l.col - 1
+			tok.Literal = literal
+			tok.Line = startLine
+			tok.Col = startCol
+			tok.EndCol = startCol + len(literal) - 1
 			return tok
 		}
 
 		if l.isChar() || l.ch == '_' {
+			startCol := l.col
+			startLine := l.line
+
 			literal := l.readIdentifier()
-			val, ok := Keywords[literal]
-			if ok {
+
+			if val, ok := Keywords[literal]; ok {
 				tok.Type = val
 			} else {
 				tok.Type = NAME
 			}
+
 			tok.Literal = literal
-			tok.EndCol = l.col - 1
+			tok.Line = startLine
+			tok.Col = startCol
+			tok.EndCol = startCol + len(literal) - 1
 			return tok
 		}
 
