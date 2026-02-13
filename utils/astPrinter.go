@@ -187,6 +187,12 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, e, indent+2, opts)
 		}
 
+	case *parser.Tuple:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Tuple:"))
+		for _, e := range n.Elts {
+			printAST(w, e, indent+2, opts)
+		}
+
 	case *parser.BooleanOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "BooleanOp:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Operator:"))
