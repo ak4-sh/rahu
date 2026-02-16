@@ -4,6 +4,9 @@ This document tracks bugs, correctness issues, and improvements across the entir
 
 Last updated: 2026-02-12
 
+
+**imp** Add s upport for x++ and x+=1
+
 ---
 
 ## High Priority — Missing Core Python Features

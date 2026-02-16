@@ -272,6 +272,31 @@ func (p *Parser) parseReturn() Statement {
 	return &Return{Value: value, Pos: Range{Start: startPos, End: endPos}}
 }
 
+func (p *Parser) parseAugAssign() Statement {
+	start := Position{Line: p.current.Line, Col: p.current.Col}
+	target := p.parsePrimary()
+	op := p.current.Type
+	p.advance() // consume op
+
+	value := p.parseExpression(LOWEST)
+
+	end := Position{
+		Line: p.current.Line,
+		Col:  p.current.Col,
+	}
+
+	if p.current.Type == lexer.NEWLINE {
+		p.advance()
+	}
+
+	return &AugAssign{
+		Target: target,
+		Op:     op,
+		Value:  value,
+		Pos:    Range{Start: start, End: end},
+	}
+}
+
 func (p *Parser) parseAssignment() Statement {
 	start := Position{Line: p.current.Line, Col: p.current.Col}
 	targets := []Expression{}
@@ -592,7 +617,11 @@ func (p *Parser) parseClass() Statement {
 		return &def
 	}
 
-	def.Name = p.current.Literal
+	// def.Name = p.current.Literal
+	def.Name = &Name{
+		ID:  p.current.Literal,
+		Pos: Range{Start: startPos, End: Position{Col: p.current.Col, Line: p.current.Line}},
+	}
 
 	p.advance()
 

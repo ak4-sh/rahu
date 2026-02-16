@@ -137,6 +137,15 @@ func canStartExpression(t lexer.TokenType) bool {
 	}
 }
 
+func (p *Parser) isAugAssign() bool {
+	switch p.peek.Type {
+	case lexer.PLUSEQUAL, lexer.MINEQUAL, lexer.SLASHEQUAL, lexer.STAREQUAL, lexer.DOUBLESLASHEQUAL, lexer.DOUBLESTAREQUAL, lexer.AMPEREQUAL, lexer.NOTEQUAL, lexer.LEFTSHIFTEQUAL, lexer.RIGHTSHIFTEQUAL:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) parseStatement() Statement {
 	if p.current.Type == lexer.UNTERMINATED_STRING {
 		p.errorCurrent("unterminated string literal")
@@ -149,8 +158,12 @@ func (p *Parser) parseStatement() Statement {
 		return nil
 	}
 
-	if p.current.Type == lexer.NAME && p.peek.Type == lexer.EQUAL {
-		return p.parseAssignment()
+	if p.current.Type == lexer.NAME {
+		if p.isAugAssign() {
+			return p.parseAugAssign()
+		} else if p.peek.Type == lexer.EQUAL {
+			return p.parseAssignment()
+		}
 	}
 
 	if p.current.Type == lexer.IF {

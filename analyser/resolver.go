@@ -43,6 +43,11 @@ func (r *Resolver) visitModule(m *parser.Module) {
 
 func (r *Resolver) visitStmt(stmt parser.Statement) {
 	switch s := stmt.(type) {
+	case *parser.AugAssign:
+		r.visitExpr(s.Target, Read)
+		r.visitExpr(s.Value, Read)
+		r.visitExpr(s.Target, Write)
+
 	case *parser.Assign:
 		r.visitExpr(s.Value, Read)
 
@@ -57,10 +62,11 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 			}
 		}
 
-		classSym := r.current.Symbols[s.Name]
+		classSym := r.current.Symbols[s.Name.ID]
+		r.Resolved[s.Name] = classSym
 
 		if classSym == nil || classSym.Inner == nil {
-			r.error(s.Pos, "internal compiler error: missing class symbol or scope for: "+s.Name)
+			r.error(s.Pos, "internal compiler error: missing class symbol or scope for: "+s.Name.ID)
 			return
 		}
 
