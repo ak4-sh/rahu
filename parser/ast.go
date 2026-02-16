@@ -1,5 +1,7 @@
 package parser
 
+import "rahu/lexer"
+
 type Node any
 
 type Operator int
@@ -75,6 +77,15 @@ type Assign struct {
 }
 
 func (a *Assign) statementNode() {}
+
+type AugAssign struct {
+	Target Expression
+	Op     lexer.TokenType
+	Value  Expression
+	Pos    Range
+}
+
+func (a *AugAssign) statementNode() {}
 
 type Module struct {
 	Body []Statement
@@ -171,9 +182,11 @@ const (
 type UnaryOperator int
 
 const (
-	UAdd UnaryOperator = iota // +x
-	USub                      // -x
-	Not                       // not x
+	UAdd      UnaryOperator = iota // +x
+	USub                           // -x
+	Not                            // not x
+	Increment                      // x++ / ++x
+	Decrement                      // x-- / --x
 )
 
 type UnaryOp struct {
@@ -245,14 +258,14 @@ type Continue struct {
 func (c *Continue) statementNode() {}
 
 type KeywordArg struct {
-	Name  string
+	Name  *Name
 	Value Expression
 	Pos   Range
 }
 
 type ClassDef struct {
 	Pos        Range
-	Name       string
+	Name       *Name
 	Bases      []Expression
 	Keywords   []KeywordArg
 	Body       []Statement
