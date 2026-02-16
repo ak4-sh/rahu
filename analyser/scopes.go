@@ -84,7 +84,7 @@ func (b *ScopeBuilder) visitAssign(a *parser.Assign) {
 
 func (b *ScopeBuilder) visitClassDef(c *parser.ClassDef) {
 	classSym := &Symbol{
-		Name: c.Name,
+		Name: c.Name.ID,
 		Kind: SymClass,
 		Span: c.Pos,
 	}

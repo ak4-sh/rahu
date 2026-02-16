@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"rahu/jsonrpc"
 
@@ -160,4 +161,20 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		URI:   doc.URI,
 		Range: ToRange(sym.Span),
 	}, nil
+}
+
+func (s *Server) scheduleAnalysis(uri lsp.DocumentURI) {
+	s.mu.Lock()
+	if t, ok := s.debounce[uri]; ok {
+		t.Stop()
+	}
+
+	s.debounce[uri] = time.AfterFunc(80*time.Millisecond, func() {
+		doc := s.Get(uri)
+		if doc != nil {
+			s.analyze(doc)
+		}
+	})
+
+	s.mu.Unlock()
 }
