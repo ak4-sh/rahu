@@ -314,15 +314,15 @@ func TestFunctionDefinition(t *testing.T) {
 		t.Fatalf("expected FunctionDef, got %T", module.Body[0])
 	}
 
-	if funcDef.Name != "add" {
-		t.Fatalf("expected name 'add', got %q", funcDef.Name)
+	if funcDef.Name.ID != "add" {
+		t.Fatalf("expected name 'add', got %q", funcDef.Name.ID)
 	}
 
 	if len(funcDef.Args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(funcDef.Args))
 	}
 
-	if funcDef.Args[0].Name != "x" || funcDef.Args[1].Name != "y" {
+	if funcDef.Args[0].Name.ID != "x" || funcDef.Args[1].Name.ID != "y" {
 		t.Fatalf("unexpected arg names: %v", funcDef.Args)
 	}
 

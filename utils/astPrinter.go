@@ -125,14 +125,14 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 		printAST(w, n.Value, indent+2, opts)
 
 	case parser.FuncArg:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FuncArg("+n.Name+")"))
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FuncArg("+n.Name.ID+")"))
 		if n.Default != nil {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Default:"))
 			printAST(w, n.Default, indent+4, opts)
 		}
 
 	case *parser.FunctionDef:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+n.Name+"):"))
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+n.Name.ID+"):"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Args:"))
 		for _, a := range n.Args {
 			printAST(w, a, indent+4, opts)
