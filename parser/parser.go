@@ -35,6 +35,7 @@ package parser
 import (
 	"rahu/lexer"
 	"rahu/lsp"
+	"rahu/source"
 )
 
 type Error struct {
@@ -60,8 +61,8 @@ func (p *Parser) error(span Range, msg string) {
 
 func (p *Parser) currentRange() Range {
 	return Range{
-		Start: Position{Line: p.current.Line, Col: p.current.Col},
-		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+		Start: p.current.Start,
+		End:   p.current.End,
 	}
 }
 
@@ -80,15 +81,18 @@ func (p *Parser) syncTo(types ...lexer.TokenType) {
 	}
 }
 
-func (r Range) ToLSPRange() lsp.Range {
+func (r Range) ToLSPRange(li *source.LineIndex) lsp.Range {
+	startLine, startCol := li.OffsetToPosition(r.Start)
+	endLine, endCol := li.OffsetToPosition(r.End)
+
 	return lsp.Range{
 		Start: lsp.Position{
-			Line:      r.Start.Line,
-			Character: r.Start.Col - 1,
+			Line:      startLine,
+			Character: startCol,
 		},
 		End: lsp.Position{
-			Line:      r.End.Line - 1,
-			Character: r.End.Col - 1,
+			Line:      endLine,
+			Character: endCol,
 		},
 	}
 }
@@ -187,8 +191,8 @@ func (p *Parser) parseStatement() Statement {
 
 	if p.current.Type == lexer.BREAK {
 		pos := Range{
-			Start: Position{Line: p.current.Line, Col: p.current.Col},
-			End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			Start: p.current.Start,
+			End:   p.current.End,
 		}
 		p.advance()
 		if p.current.Type == lexer.NEWLINE {
@@ -199,8 +203,8 @@ func (p *Parser) parseStatement() Statement {
 
 	if p.current.Type == lexer.CONTINUE {
 		pos := Range{
-			Start: Position{Line: p.current.Line, Col: p.current.Col},
-			End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			Start: p.current.Start,
+			End:   p.current.End,
 		}
 		p.advance()
 		if p.current.Type == lexer.NEWLINE {
@@ -226,8 +230,8 @@ func (p *Parser) parseStatement() Statement {
 	}
 
 	p.error(Range{
-		Start: Position{Line: p.current.Line, Col: p.current.Col},
-		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+		Start: p.current.Start,
+		End:   p.current.End,
 	},
 		"unexpected token: "+p.current.String(),
 	)
