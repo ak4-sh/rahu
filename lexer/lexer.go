@@ -5,11 +5,17 @@
 // DEDENT tokens to model Python’s block structure, following rules similar
 // to CPython’s tokenizer.
 //
+// All token positions are represented as byte offsets into the original
+// source text. Each token records a half-open range [Start, End), where
+// Start is the offset of the first byte belonging to the token and End is
+// the offset immediately after the last byte. Line and column information
+// is deliberately not tracked in the lexer and is derived later at API
+// boundaries using a line index.
+//
 // Features:
 //   - Tokenization of Python keywords, identifiers, literals, and operators
 //   - Support for single-, double-, and triple-quoted strings
 //   - Handling of multi-character operators with longest-match semantics
-//   - Line and column tracking for all tokens
 //   - Indentation tracking with explicit INDENT / DEDENT tokens
 //   - Detection of inconsistent or mixed indentation (tabs vs spaces)
 //
@@ -18,7 +24,8 @@
 // to produce a correct token stream.
 //
 // The output of this package is intended to be consumed by the parser
-// package to construct an abstract syntax tree (AST).
+// package to construct an abstract syntax tree (AST), which also operates
+// exclusively on byte-offset source ranges.
 package lexer
 
 import (
@@ -28,19 +35,15 @@ import (
 )
 
 type Token struct {
-	Type    TokenType
+	Start   int
 	Literal string
-	Line    int
-	Col     int
-	EndCol  int
+	Type    TokenType
 	File    string
+	End     int
 }
 
 func (t *Token) String() string {
-	return fmt.Sprintf(
-		"Token{Type:%s Literal:%q Pos:%d:%d-%d}",
-		t.Type, t.Literal, t.Line, t.Col, t.EndCol,
-	)
+	return fmt.Sprintf("Tok {Type: %v, Literal: %s}", t.Type, t.Literal)
 }
 
 type Lexer struct {
@@ -48,8 +51,6 @@ type Lexer struct {
 	position      int
 	readPosition  int
 	ch            byte
-	line          int
-	col           int
 	indentStack   []int
 	atLineStart   bool
 	pendingTokens []Token
@@ -59,19 +60,16 @@ type Lexer struct {
 func New(input string) *Lexer {
 	l := &Lexer{
 		input:         input,
-		line:          1,
-		col:           0,
-		atLineStart:   true,
+		position:      0,
+		readPosition:  0,
 		indentStack:   []int{0},
 		pendingTokens: []Token{},
-		indentChar:    0,
+		atLineStart:   true,
 	}
 	l.readChar()
 	return l
 }
 
-// Read next character. If we exceed input len, return ASCII nil.
-// If valid char exists, advance position and readPosition
 func (l *Lexer) readChar() {
 	if l.readPosition >= len(l.input) {
 		l.ch = 0
@@ -81,12 +79,6 @@ func (l *Lexer) readChar() {
 
 	l.position = l.readPosition
 	l.readPosition++
-	if l.ch == '\n' {
-		l.col = 0
-		l.line++
-	} else {
-		l.col++
-	}
 }
 
 func (l *Lexer) peek() byte {
@@ -113,7 +105,7 @@ func (l *Lexer) skipComment() {
 func (l *Lexer) skipWhitespaceAndComments() {
 	for {
 		switch l.ch {
-		case ' ', '\t':
+		case ' ':
 			l.readChar()
 		case '#':
 			l.skipComment()
@@ -123,9 +115,6 @@ func (l *Lexer) skipWhitespaceAndComments() {
 	}
 }
 
-// Checks if there exists a multi char token from current position.
-// If no multichar token exists, return 0.
-// If multi char token exists, return 2 or 3
 func (l *Lexer) isMultiCharToken() (TokenType, int, bool) {
 	// Try 3-char token first (longest match)
 	if l.position+3 <= len(l.input) {
@@ -240,6 +229,31 @@ func (l *Lexer) readString(quoteType byte) (string, TokenType) {
 	return sb.String(), STRING
 }
 
+func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
+	var sb strings.Builder
+	// skipping all quotes
+	for range 3 {
+		l.readChar()
+	}
+
+	for {
+		if l.ch == 0 {
+			return sb.String(), UNTERMINATED_STRING
+		}
+
+		if l.ch == quoteType && l.peek() == quoteType && l.peekAhead(1) == quoteType {
+			// found endstring
+			for range 3 {
+				l.readChar()
+			}
+			return sb.String(), STRING
+		}
+
+		sb.WriteByte(l.ch)
+		l.readChar()
+	}
+}
+
 func (l *Lexer) countLeadingSpaces() (int, error) {
 	count := 0
 	seenSpace := false
@@ -290,34 +304,7 @@ func (l *Lexer) countLeadingSpaces() (int, error) {
 	return count, nil
 }
 
-func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
-	var sb strings.Builder
-	// skipping all quotes
-	for range 3 {
-		l.readChar()
-	}
-
-	for {
-		if l.ch == 0 {
-			return sb.String(), UNTERMINATED_STRING
-		}
-
-		if l.ch == quoteType && l.peek() == quoteType && l.peekAhead(1) == quoteType {
-			// found endstring
-			for range 3 {
-				l.readChar()
-			}
-			return sb.String(), STRING
-		}
-
-		sb.WriteByte(l.ch)
-		l.readChar()
-	}
-}
-
 func (l *Lexer) NextToken() Token {
-	var tok Token
-
 	if len(l.pendingTokens) > 0 {
 		tok := l.pendingTokens[0]
 		l.pendingTokens = l.pendingTokens[1:]
@@ -327,61 +314,62 @@ func (l *Lexer) NextToken() Token {
 	if l.atLineStart {
 		spaces, err := l.countLeadingSpaces()
 		if err != nil {
+			pos := l.position
 			return Token{
-				Literal: "",
-				Type:    ILLEGAL,
-				Line:    l.line,
-				Col:     l.col,
+				Type:  ILLEGAL,
+				Start: pos,
+				End:   pos,
 			}
 		}
 
-		// 2. Check if it's a blank line or comment
-		//    (Don't process indentation for these)
-		if l.ch == '\n' || l.ch == '#' {
-			// Skip blank lines and comments - don't change indentation
-			// Just let normal tokenization continue
-			// Don't set atLineStart = false yet
-		} else {
-			// 3. This is a real line with content - process indentation
+		if l.ch != '\n' && l.ch != '#' {
+			current := l.indentStack[len(l.indentStack)-1]
+			pos := l.position
 
-			// Get current indentation level (top of stack)
-			currentIndent := l.indentStack[len(l.indentStack)-1]
-
-			// Compare spaces to current indent
-			if spaces > currentIndent {
+			if spaces > current {
 				l.indentStack = append(l.indentStack, spaces)
-				tok.Type = INDENT
-				tok.Line = l.line
-				tok.Col = l.col
-				tok.Literal = ""
-				l.atLineStart = false
+
+				tok := Token{
+					Type:  INDENT,
+					Start: pos,
+					End:   pos,
+				}
 
 				for range spaces {
 					l.readChar()
 				}
+
+				l.atLineStart = false
 				return tok
-			} else if spaces < currentIndent {
+			}
+
+			if spaces < current {
 				dedentCount := 0
-				for len(l.indentStack) > 0 && l.indentStack[len(l.indentStack)-1] > spaces {
+				for len(l.indentStack) > 1 &&
+					l.indentStack[len(l.indentStack)-1] > spaces {
 					l.indentStack = l.indentStack[:len(l.indentStack)-1]
 					dedentCount++
 				}
 
 				if l.indentStack[len(l.indentStack)-1] != spaces {
-					return Token{Type: ILLEGAL, Literal: "Indentation error"}
+					return Token{
+						Type:  ILLEGAL,
+						Start: pos,
+						End:   pos,
+					}
 				}
 
-				tok.Type = DEDENT
-				tok.Literal = ""
-				tok.Line = l.line
-				tok.Col = l.col
+				tok := Token{
+					Type:  DEDENT,
+					Start: pos,
+					End:   pos,
+				}
 
 				for i := 1; i < dedentCount; i++ {
 					l.pendingTokens = append(l.pendingTokens, Token{
-						Type:    DEDENT,
-						Literal: "",
-						Line:    l.line,
-						Col:     l.col,
+						Type:  DEDENT,
+						Start: pos,
+						End:   pos,
 					})
 				}
 
@@ -391,126 +379,118 @@ func (l *Lexer) NextToken() Token {
 
 				l.atLineStart = false
 				return tok
-			} else {
-				for range spaces {
-					l.readChar()
-				}
-				l.atLineStart = false
-				// spaces == currentIndent
-				// Same level - no indent/dedent token needed
-				// Just consume the whitespace and continue
 			}
+
+			for range spaces {
+				l.readChar()
+			}
+			l.atLineStart = false
 		}
 	}
 
 	l.skipWhitespaceAndComments()
 
-	tok.Line = l.line
-	tok.Col = l.col
+	if l.ch == 0 {
+		pos := l.position
+		return Token{
+			Type:  EOF,
+			Start: pos,
+			End:   pos,
+		}
+	}
 
-	tokType, tokLen, ok := l.isMultiCharToken()
-	if ok {
-		tok.EndCol = l.col + tokLen - 1
-		tok.Type = tokType
-		tok.Literal = l.input[l.position : l.position+tokLen]
+	if l.ch == '\n' {
+		start := l.position
+		l.readChar()
+		l.atLineStart = true
+		return Token{
+			Type:  NEWLINE,
+			Start: start,
+			End:   l.position,
+		}
+	}
+
+	if tokType, tokLen, ok := l.isMultiCharToken(); ok {
+		start := l.position
+		literal := l.input[start : start+tokLen]
 		for range tokLen {
 			l.readChar()
 		}
-		return tok
-	} else {
-		// not a multichar token, need to check other cases
-		// 1. Is it a number?
-		// 2. Is it a word?
-		// 3. Is it a
-		if l.isDigit() {
-			startCol := l.col
-			startLine := l.line
-
-			literal := l.readNumber()
-
-			tok.Type = NUMBER
-			tok.Literal = literal
-			tok.Line = startLine
-			tok.Col = startCol
-			tok.EndCol = startCol + len(literal) - 1
-			return tok
+		return Token{
+			Type:    tokType,
+			Literal: literal,
+			Start:   start,
+			End:     l.position,
 		}
-
-		if l.isChar() || l.ch == '_' {
-			startCol := l.col
-			startLine := l.line
-
-			literal := l.readIdentifier()
-
-			if val, ok := Keywords[literal]; ok {
-				tok.Type = val
-			} else {
-				tok.Type = NAME
-			}
-
-			tok.Literal = literal
-			tok.Line = startLine
-			tok.Col = startCol
-			tok.EndCol = startCol + len(literal) - 1
-			return tok
-		}
-
-		if l.ch == '\n' {
-			tok.Literal = "\n"
-			tok.Type = NEWLINE
-			l.readChar()
-			l.atLineStart = true
-			return tok
-		}
-
-		if l.ch == 0 {
-			tok.Literal = ""
-			tok.Type = EOF
-			return tok
-		}
-
-		// single char operator check
-		if val, ok := SingleCharOps[string(l.ch)]; ok {
-			tok.Type = val
-			tok.Literal = string(l.ch)
-			tok.EndCol = l.col
-			l.readChar()
-			return tok
-		}
-
-		if l.ch == '"' || l.ch == '\'' {
-			startCol := l.col
-			if l.ch == '\'' && l.peek() == '\'' && l.peekAhead(1) == '\'' {
-				tokStr, tokType := l.readMultilineString('\'')
-				tok.Type = tokType
-				tok.Literal = tokStr
-				tok.Line = l.line
-				tok.EndCol = l.col - 1
-				tok.Col = startCol
-				return tok
-			} else if l.ch == '"' && l.peek() == '"' && l.peekAhead(1) == '"' {
-				tokStr, tokType := l.readMultilineString('"')
-				tok.Type = tokType
-				tok.Literal = tokStr
-				tok.Line = l.line
-				tok.EndCol = l.col - 1
-				tok.Col = startCol
-				return tok
-			} else {
-				// normal string
-				openingQuote := l.ch
-				tokStr, tokType := l.readString(openingQuote)
-				tok.Type = tokType
-				tok.Literal = tokStr
-				tok.EndCol = l.col - 1
-				tok.Col = startCol
-				return tok
-			}
-		}
-
 	}
-	tok.Type = ILLEGAL
-	tok.Literal = string(l.ch)
+
+	if l.isDigit() {
+		start := l.position
+		lit := l.readNumber()
+		return Token{
+			Type:    NUMBER,
+			Literal: lit,
+			Start:   start,
+			End:     l.position,
+		}
+	}
+
+	if l.isChar() || l.ch == '_' {
+		start := l.position
+		lit := l.readIdentifier()
+		typ := NAME
+		if kw, ok := Keywords[lit]; ok {
+			typ = kw
+		}
+		return Token{
+			Type:    typ,
+			Literal: lit,
+			Start:   start,
+			End:     l.position,
+		}
+	}
+
+	if typ, ok := SingleCharOps[string(l.ch)]; ok {
+		start := l.position
+		lit := string(l.ch)
+		l.readChar()
+		return Token{
+			Type:    typ,
+			Literal: lit,
+			Start:   start,
+			End:     l.position,
+		}
+	}
+
+	if l.ch == '"' || l.ch == '\'' {
+		start := l.position
+
+		var lit string
+		var typ TokenType
+
+		if l.ch == '\'' && l.peek() == '\'' && l.peekAhead(1) == '\'' {
+			lit, typ = l.readMultilineString('\'')
+		} else if l.ch == '"' && l.peek() == '"' && l.peekAhead(1) == '"' {
+			lit, typ = l.readMultilineString('"')
+		} else {
+			lit, typ = l.readString(l.ch)
+		}
+
+		return Token{
+			Type:    typ,
+			Literal: lit,
+			Start:   start,
+			End:     l.position,
+		}
+	}
+
+	start := l.position
+	ch := l.ch
 	l.readChar()
-	return tok
+	return Token{
+		Type:    ILLEGAL,
+		Literal: string(ch),
+		Start:   start,
+		End:     l.position,
+	}
 }
