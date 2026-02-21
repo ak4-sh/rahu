@@ -5,10 +5,7 @@ import (
 )
 
 func (p *Parser) parseIf() Statement {
-	startPos := Position{
-		Line: p.current.Line,
-		Col:  p.current.Col,
-	}
+	startPos := p.current.Start
 
 	p.advance()
 	ifExpr := &If{}
@@ -57,10 +54,7 @@ func (p *Parser) parseIf() Statement {
 
 	ifExpr.Body = body
 
-	endPos := Position{
-		Line: p.current.Line,
-		Col:  p.current.Col,
-	}
+	endPos := p.current.Start
 
 	if p.current.Type == lexer.DEDENT {
 		p.advance() // skip past dedent
@@ -77,8 +71,7 @@ func (p *Parser) parseIf() Statement {
 	} else if p.current.Type == lexer.ELSE {
 		p.advance()
 
-		endPos.Col = p.current.Col
-		endPos.Line = p.current.Line
+		endPos = p.current.End
 		if p.current.Type != lexer.COLON {
 			p.errorCurrent("expected ':' after else")
 			p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
@@ -116,10 +109,7 @@ func (p *Parser) parseIf() Statement {
 			}
 		}
 
-		endPos = Position{
-			Line: p.current.Line,
-			Col:  p.current.Col,
-		}
+		endPos = p.current.End
 
 		if p.current.Type == lexer.DEDENT {
 			p.advance() // advance past dedent
@@ -136,7 +126,7 @@ func (p *Parser) parseIf() Statement {
 }
 
 func (p *Parser) parseFor() Statement {
-	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	startPos := p.current.Start
 	forStmt := &For{Pos: Range{Start: startPos}}
 	p.advance()
 	forStmt.Target = p.parseForTarget()
@@ -193,7 +183,7 @@ func (p *Parser) parseFor() Statement {
 
 	forStmt.Body = body
 
-	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	endPos := p.current.Start
 
 	if p.current.Type == lexer.DEDENT {
 		p.advance()
@@ -203,7 +193,7 @@ func (p *Parser) parseFor() Statement {
 	if p.current.Type == lexer.ELSE {
 		p.advance()
 
-		endPos = Position{Line: p.current.Line, Col: p.current.Col}
+		endPos = p.current.Start
 		if p.current.Type != lexer.COLON {
 			p.errorCurrent("expected ':' after else")
 			p.syncTo(lexer.COLON, lexer.NEWLINE, lexer.EOF)
@@ -241,7 +231,7 @@ func (p *Parser) parseFor() Statement {
 			}
 		}
 
-		endPos = Position{Line: p.current.Line, Col: p.current.Col}
+		endPos = p.current.Start
 
 		if p.current.Type == lexer.DEDENT {
 			p.advance()
@@ -254,16 +244,16 @@ func (p *Parser) parseFor() Statement {
 }
 
 func (p *Parser) parseReturn() Statement {
-	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	startPos := p.current.Start
 	p.advance()
 	if p.current.Type == lexer.NEWLINE || p.current.Type == lexer.EOF {
-		endPos := Position{Line: p.current.Line, Col: p.current.Col}
+		endPos := p.current.Start
 		p.advance()
 		return &Return{Value: nil, Pos: Range{Start: startPos, End: endPos}}
 	}
 
 	value := p.parseExpression(LOWEST)
-	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	endPos := p.current.Start
 
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
@@ -273,17 +263,14 @@ func (p *Parser) parseReturn() Statement {
 }
 
 func (p *Parser) parseAugAssign() Statement {
-	start := Position{Line: p.current.Line, Col: p.current.Col}
+	start := p.current.Start
 	target := p.parsePrimary()
 	op := p.current.Type
 	p.advance() // consume op
 
 	value := p.parseExpression(LOWEST)
 
-	end := Position{
-		Line: p.current.Line,
-		Col:  p.current.Col,
-	}
+	end := p.current.Start
 
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
@@ -298,7 +285,7 @@ func (p *Parser) parseAugAssign() Statement {
 }
 
 func (p *Parser) parseAssignment() Statement {
-	start := Position{Line: p.current.Line, Col: p.current.Col}
+	start := p.current.Start
 	targets := []Expression{}
 	for {
 		target := p.parsePrimary()
@@ -313,7 +300,7 @@ func (p *Parser) parseAssignment() Statement {
 		p.error(
 			Range{
 				Start: start,
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				End:   p.current.Start,
 			},
 			"expected '=' in assignment",
 		)
@@ -325,10 +312,7 @@ func (p *Parser) parseAssignment() Statement {
 
 	value := p.parseExpression(LOWEST)
 
-	assgnEnd := Position{
-		Line: p.current.Line,
-		Col:  p.current.Col,
-	}
+	assgnEnd := p.current.Start
 
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
@@ -336,7 +320,7 @@ func (p *Parser) parseAssignment() Statement {
 		p.error(
 			Range{
 				Start: assgnEnd,
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				End:   p.current.End,
 			},
 			"expected newline after assignment",
 		)
@@ -350,7 +334,7 @@ func (p *Parser) parseAssignment() Statement {
 }
 
 func (p *Parser) parseWhile() Statement {
-	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	startPos := p.current.Start
 	p.advance()
 	whileStmt := &WhileLoop{}
 
@@ -392,7 +376,7 @@ func (p *Parser) parseWhile() Statement {
 	}
 	whileStmt.Body = body
 
-	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	endPos := p.current.Start
 	if p.current.Type == lexer.DEDENT {
 		p.advance()
 	}
@@ -402,7 +386,7 @@ func (p *Parser) parseWhile() Statement {
 }
 
 func (p *Parser) parseFunc() Statement {
-	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	startPos := p.current.Start
 	p.advance()
 	funcDef := &FunctionDef{}
 
@@ -416,13 +400,13 @@ func (p *Parser) parseFunc() Statement {
 	funcDef.Name = &Name{
 		ID: p.current.Literal,
 		Pos: Range{
-			Start: Position{Line: p.current.Line, Col: p.current.Col},
-			End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			Start: p.current.Start,
+			End:   p.current.End,
 		},
 	}
 	funcDef.NamePos = Range{
-		Start: Position{Line: p.current.Line, Col: p.current.Col},
-		End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+		Start: p.current.Start,
+		End:   p.current.End,
 	}
 	p.advance() // advance past func name
 
@@ -451,8 +435,8 @@ func (p *Parser) parseFunc() Statement {
 				break
 			}
 
-			start := Position{Line: p.current.Line, Col: p.current.Col}
-			end := Position{Line: p.current.Line, Col: p.current.EndCol}
+			start := p.current.Start
+			end := p.current.End
 
 			arg := FuncArg{
 				// Name: p.current.Literal,
@@ -542,7 +526,7 @@ func (p *Parser) parseFunc() Statement {
 	}
 
 	funcDef.Body = funcBody
-	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	endPos := p.current.Start
 	funcDef.Pos = Range{Start: startPos, End: endPos}
 
 	return funcDef
@@ -557,8 +541,8 @@ func (p *Parser) parseForTarget() Expression {
 	first := &Name{
 		ID: p.current.Literal,
 		Pos: Range{
-			Start: Position{Line: p.current.Line, Col: p.current.Col},
-			End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+			Start: p.current.Start,
+			End:   p.current.End,
 		},
 	}
 	p.advance()
@@ -583,8 +567,8 @@ func (p *Parser) parseForTarget() Expression {
 				targets, &Name{
 					ID: p.current.Literal,
 					Pos: Range{
-						Start: Position{Line: p.current.Line, Col: p.current.Col},
-						End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+						Start: p.current.Start,
+						End:   p.current.End,
 					},
 				})
 			p.advance()
@@ -604,7 +588,7 @@ func (p *Parser) parseForTarget() Expression {
 func (p *Parser) parseClass() Statement {
 	// advance past `class`
 	def := ClassDef{}
-	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	startPos := p.current.Start
 	p.advance()
 
 	if p.current.Type != lexer.NAME {
@@ -612,7 +596,7 @@ func (p *Parser) parseClass() Statement {
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
 		def.Pos = Range{
 			Start: startPos,
-			End:   Position{Col: p.current.Col, Line: p.current.Line},
+			End:   p.current.End,
 		}
 		return &def
 	}
@@ -620,7 +604,7 @@ func (p *Parser) parseClass() Statement {
 	// def.Name = p.current.Literal
 	def.Name = &Name{
 		ID:  p.current.Literal,
-		Pos: Range{Start: startPos, End: Position{Col: p.current.Col, Line: p.current.Line}},
+		Pos: Range{Start: startPos, End: p.current.End},
 	}
 
 	p.advance()
@@ -630,7 +614,7 @@ func (p *Parser) parseClass() Statement {
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
 		def.Pos = Range{
 			Start: startPos,
-			End:   Position{Col: p.current.Col, Line: p.current.Line},
+			End:   p.current.End,
 		}
 		return &def
 	}
@@ -642,8 +626,8 @@ func (p *Parser) parseClass() Statement {
 				name := Name{
 					ID: p.current.Literal,
 					Pos: Range{
-						Start: Position{Line: p.current.Line, Col: p.current.Col},
-						End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+						Start: p.current.Start,
+						End:   p.current.End,
 					},
 				}
 
@@ -669,10 +653,7 @@ func (p *Parser) parseClass() Statement {
 		if p.current.Type != lexer.COLON {
 			def.Pos = Range{
 				Start: startPos,
-				End: Position{
-					Line: p.current.Line,
-					Col:  p.current.Col,
-				},
+				End:   p.current.End,
 			}
 			return &def
 		}
@@ -686,7 +667,7 @@ func (p *Parser) parseClass() Statement {
 		if p.current.Type != lexer.NEWLINE {
 			def.Pos = Range{
 				Start: startPos,
-				End:   Position{Line: p.current.Line, Col: p.current.Col},
+				End:   p.current.End,
 			}
 			return &def
 		}
@@ -699,7 +680,7 @@ func (p *Parser) parseClass() Statement {
 		if p.current.Type != lexer.INDENT {
 			def.Pos = Range{
 				Start: startPos,
-				End:   Position{Line: p.current.Line, Col: p.current.Col},
+				End:   p.current.End,
 			}
 
 			return &def
@@ -721,7 +702,7 @@ func (p *Parser) parseClass() Statement {
 	}
 
 	def.Body = body
-	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	endPos := p.current.End
 	def.Pos = Range{Start: startPos, End: endPos}
 	return &def
 }
