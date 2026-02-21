@@ -3,30 +3,31 @@ package server
 import (
 	"rahu/lsp"
 	"rahu/parser"
+	"rahu/source"
 )
 
-func ToRange(r parser.Range) lsp.Range {
+func ToRange(li *source.LineIndex, r parser.Range) lsp.Range {
+	sl, sc := li.OffsetToPosition(r.Start)
+	el, ec := li.OffsetToPosition(r.End)
+
 	return lsp.Range{
 		Start: lsp.Position{
-			Line:      r.Start.Line - 1,
-			Character: r.Start.Col - 1,
+			Line:      sl,
+			Character: sc,
 		},
 		End: lsp.Position{
-			Line:      r.End.Line - 1,
-			Character: r.End.Col - 1,
+			Line:      el,
+			Character: ec,
 		},
 	}
 }
 
-func FromRange(r lsp.Range) parser.Range {
+func FromRange(li *source.LineIndex, r lsp.Range) parser.Range {
+	start := li.PositionToOffset(r.Start.Line, r.Start.Character)
+	end := li.PositionToOffset(r.End.Line, r.End.Character)
+
 	return parser.Range{
-		Start: parser.Position{
-			Line: r.Start.Line,
-			Col:  r.Start.Character,
-		},
-		End: parser.Position{
-			Line: r.End.Line + 1,
-			Col:  r.End.Character + 1,
-		},
+		Start: start,
+		End:   end,
 	}
 }

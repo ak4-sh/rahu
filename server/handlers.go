@@ -9,7 +9,6 @@ import (
 
 	a "rahu/analyser"
 	"rahu/lsp"
-	"rahu/parser"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
@@ -26,12 +25,12 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 		return nil, jsonrpc.InvalidParamsError(nil)
 	}
 
-	pos := parser.Position{
-		Line: p.Position.Line + 1,
-		Col:  p.Position.Character + 1,
-	}
+	offset := doc.LineIndex.PositionToOffset(
+		p.Position.Line,
+		p.Position.Character,
+	)
 
-	name := nameAtPos(doc.AST, pos)
+	name := nameAtPos(doc.AST, offset)
 	if name == nil {
 		return nil, nil
 	}
@@ -68,10 +67,15 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 				params = append(params, s.Name)
 			}
 		}
-		value = fmt.Sprintf("```python\n%s(%s)\n```", sym.Name, strings.Join(params, ", "))
+		value = fmt.Sprintf(
+			"```python\n%s(%s)\n```",
+			sym.Name,
+			strings.Join(params, ", "),
+		)
 	}
 
-	value += fmt.Sprintf("\n\nDefined at line %d", sym.Span.Start.Line)
+	line, _ := doc.LineIndex.OffsetToPosition(sym.Span.Start)
+	value += fmt.Sprintf("\n\nDefined at line %d", line+1)
 
 	return &lsp.Hover{
 		Contents: lsp.MarkupContent{
@@ -134,16 +138,16 @@ func (s *Server) publishDiagnostics(uri lsp.DocumentURI, diags []lsp.Diagnostic)
 
 func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Error) {
 	doc := s.Get(p.TextDocument.URI)
-
 	if doc == nil {
 		return nil, jsonrpc.InvalidParamsError(nil)
 	}
-	pos := parser.Position{
-		Line: p.Position.Line + 1,
-		Col:  p.Position.Character + 1,
-	}
 
-	name := nameAtPos(doc.AST, pos)
+	offset := doc.LineIndex.PositionToOffset(
+		p.Position.Line,
+		p.Position.Character,
+	)
+
+	name := nameAtPos(doc.AST, offset)
 	if name == nil {
 		return nil, jsonrpc.InvalidParamsError(nil)
 	}
@@ -153,13 +157,16 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		return nil, jsonrpc.InvalidParamsError(nil)
 	}
 
-	if sym.Kind == a.SymBuiltin || sym.Kind == a.SymConstant || sym.Kind == a.SymType || sym.Span.IsEmpty() {
+	if sym.Kind == a.SymBuiltin ||
+		sym.Kind == a.SymConstant ||
+		sym.Kind == a.SymType ||
+		sym.Span.IsEmpty() {
 		return nil, jsonrpc.InvalidParamsError(nil)
 	}
 
 	return &lsp.Location{
 		URI:   doc.URI,
-		Range: ToRange(sym.Span),
+		Range: ToRange(doc.LineIndex, sym.Span),
 	}, nil
 }
 
