@@ -117,8 +117,8 @@ func (p *Parser) parsePrimary() Expression {
 		n := &Number{
 			Value: p.current.Literal,
 			Pos: Range{
-				Start: Position{Line: p.current.Line, Col: p.current.Col},
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				Start: p.current.Start,
+				End:   p.current.End,
 			},
 		}
 		p.advance()
@@ -127,8 +127,8 @@ func (p *Parser) parsePrimary() Expression {
 		ret := &Boolean{
 			Value: true,
 			Pos: Range{
-				Start: Position{Line: p.current.Line, Col: p.current.Col},
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				Start: p.current.Start,
+				End:   p.current.End,
 			},
 		}
 		p.advance()
@@ -138,8 +138,8 @@ func (p *Parser) parsePrimary() Expression {
 		ret := &Boolean{
 			Value: false,
 			Pos: Range{
-				Start: Position{Line: p.current.Line, Col: p.current.Col},
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				Start: p.current.Start,
+				End:   p.current.End,
 			},
 		}
 		p.advance()
@@ -148,8 +148,8 @@ func (p *Parser) parsePrimary() Expression {
 		n := &Name{
 			ID: p.current.Literal,
 			Pos: Range{
-				Start: Position{Line: p.current.Line, Col: p.current.Col},
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				Start: p.current.Start,
+				End:   p.current.End,
 			},
 		}
 		p.advance()
@@ -160,12 +160,12 @@ func (p *Parser) parsePrimary() Expression {
 		return n
 	case lexer.LPAR:
 		// TODO: need to add handling for tuples here
-		startPos := Position{Line: p.current.Line, Col: p.current.Col}
+		startPos := p.current.Start
 		p.advance()
 
 		// empty tuple
 		if p.current.Type == lexer.RPAR {
-			endPos := Position{Line: p.current.Line, Col: p.current.Col}
+			endPos := p.current.Start
 			p.advance()
 			return &Tuple{Elts: []Expression{}, Pos: Range{Start: startPos, End: endPos}}
 		}
@@ -194,7 +194,7 @@ func (p *Parser) parsePrimary() Expression {
 			}
 		}
 
-		endPos := Position{Line: p.current.Line, Col: p.current.Col}
+		endPos := p.current.Start
 		p.advance()
 		return &Tuple{Elts: elts, Pos: Range{Start: startPos, End: endPos}}
 
@@ -204,15 +204,15 @@ func (p *Parser) parsePrimary() Expression {
 		s := &String{
 			Value: p.current.Literal,
 			Pos: Range{
-				Start: Position{Line: p.current.Line, Col: p.current.Col},
-				End:   Position{Line: p.current.Line, Col: p.current.EndCol},
+				Start: p.current.Start,
+				End:   p.current.End,
 			},
 		}
 		p.advance()
 		return s
 
 	case lexer.MINUS:
-		startPos := Position{Line: p.current.Line, Col: p.current.Col}
+		startPos := p.current.Start
 		p.advance()
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
@@ -227,7 +227,7 @@ func (p *Parser) parsePrimary() Expression {
 		}
 
 	case lexer.PLUS:
-		startPos := Position{Line: p.current.Line, Col: p.current.Col}
+		startPos := p.current.Start
 		p.advance()
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
@@ -242,7 +242,7 @@ func (p *Parser) parsePrimary() Expression {
 		}
 
 	case lexer.NOT:
-		startPos := Position{Line: p.current.Line, Col: p.current.Col}
+		startPos := p.current.Start
 		p.advance()
 		expr := p.parseExpression(PREFIX)
 		if expr == nil {
@@ -257,8 +257,8 @@ func (p *Parser) parsePrimary() Expression {
 		}
 
 	case lexer.NONE:
-		startPos := Position{Line: p.current.Line, Col: p.current.Col}
-		endPos := Position{Line: p.current.Line, Col: p.current.EndCol}
+		startPos := p.current.Start
+		endPos := p.current.End
 		p.advance()
 		return &Name{
 			ID:  "None",
@@ -272,7 +272,7 @@ func (p *Parser) parsePrimary() Expression {
 }
 
 func (p *Parser) parseList() Expression {
-	startPos := Position{Line: p.current.Line, Col: p.current.Col}
+	startPos := p.current.Start
 	p.advance()
 	elts := []Expression{}
 
@@ -310,16 +310,13 @@ func (p *Parser) parseList() Expression {
 		return &List{Elts: elts, Pos: Range{Start: startPos, End: p.currentRange().End}}
 	}
 
-	endPos := Position{
-		Line: p.current.Line,
-		Col:  p.current.Col,
-	}
+	endPos := p.current.Start
 	p.advance()
 	return &List{Elts: elts, Pos: Range{Start: startPos, End: endPos}}
 }
 
 func (p *Parser) parseCall(funcExpr Expression) Expression {
-	var startPos Position
+	var startPos int
 	if name, ok := funcExpr.(*Name); ok {
 		startPos = name.Pos.Start
 	} else {
@@ -387,7 +384,7 @@ func (p *Parser) parseCall(funcExpr Expression) Expression {
 			Pos:  Range{Start: startPos, End: endPos},
 		}
 	}
-	endPos := Position{Line: p.current.Line, Col: p.current.Col}
+	endPos := p.current.Start
 	p.advance()
 
 	return &Call{
