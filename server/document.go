@@ -7,13 +7,14 @@ import (
 	"rahu/jsonrpc"
 	"rahu/lsp"
 	"rahu/parser"
+	"rahu/source"
 )
 
 type Document struct {
-	URI     lsp.DocumentURI
-	Version int
-	Text    string
-	Lines   []string
+	URI       lsp.DocumentURI
+	Version   int
+	Text      string
+	LineIndex *source.LineIndex
 
 	AST     *parser.Module
 	Symbols map[*parser.Name]*analyser.Symbol
@@ -25,10 +26,10 @@ func (s *Server) Open(item lsp.TextDocumentItem) {
 	defer s.mu.Unlock()
 
 	s.docs[item.URI] = &Document{
-		URI:     item.URI,
-		Version: item.Version,
-		Text:    item.Text,
-		Lines:   strings.Split(item.Text, "\n"),
+		URI:       item.URI,
+		Version:   item.Version,
+		Text:      item.Text,
+		LineIndex: source.NewLineIndex(item.Text),
 	}
 }
 
@@ -81,7 +82,7 @@ func (s *Server) Update(uri lsp.DocumentURI, text string, version int) {
 
 	doc.Text = text
 	doc.Version = version
-	doc.Lines = strings.Split(text, "\n")
+	doc.LineIndex = source.NewLineIndex(text)
 }
 
 func (s *Server) ApplyFullChange(
@@ -132,7 +133,7 @@ func (s *Server) ApplyIncremental(
 
 	doc.Text = text
 	doc.Version = version
-	doc.Lines = strings.Split(text, "\n")
+	doc.LineIndex = source.NewLineIndex(text)
 }
 
 func applyRangeEdit(old string, r lsp.Range, newText string) string {
