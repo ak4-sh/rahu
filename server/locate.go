@@ -4,7 +4,7 @@ import (
 	"rahu/parser"
 )
 
-func nameAtPos(module *parser.Module, pos parser.Position) *parser.Name {
+func nameAtPos(module *parser.Module, pos int) *parser.Name {
 	if module == nil {
 		return nil
 	}
@@ -16,7 +16,7 @@ func nameAtPos(module *parser.Module, pos parser.Position) *parser.Name {
 	return nil
 }
 
-func nameInStmt(stmt parser.Statement, pos parser.Position) *parser.Name {
+func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 	if stmt == nil {
 		return nil
 	}
@@ -101,7 +101,7 @@ func nameInStmt(stmt parser.Statement, pos parser.Position) *parser.Name {
 	return nil
 }
 
-func nameInExpr(expr parser.Expression, pos parser.Position) *parser.Name {
+func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 	switch e := expr.(type) {
 	case *parser.Name:
 		if contains(e.Pos, pos) {
