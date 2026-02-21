@@ -171,18 +171,6 @@ func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 	return nil
 }
 
-func contains(rng parser.Range, pos parser.Position) bool {
-	if pos.Line < rng.Start.Line || pos.Line > rng.End.Line {
-		return false
-	}
-
-	if pos.Line == rng.Start.Line && pos.Col < rng.Start.Col {
-		return false
-	}
-
-	if pos.Line == rng.End.Line && pos.Col > rng.End.Col+1 {
-		return false
-	}
-
-	return true
+func contains(rng parser.Range, pos int) bool {
+	return pos >= rng.Start && pos <= rng.End
 }
