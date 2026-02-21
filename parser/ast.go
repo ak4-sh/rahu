@@ -6,21 +6,13 @@ type Node any
 
 type Operator int
 
-type Position struct {
-	Line int
-	Col  int
-}
-
 type Range struct {
-	Start Position
-	End   Position
+	Start int
+	End   int
 }
 
 func (r Range) IsEmpty() bool {
-	return r.Start.Line == 0 &&
-		r.Start.Col == 0 &&
-		r.End.Line == 0 &&
-		r.End.Col == 0
+	return r.Start == 0 && r.End == 0
 }
 
 const (
