@@ -26,11 +26,19 @@ type SemanticError struct {
 	Msg  string
 }
 
-func Resolve(m *parser.Module, global *Scope) ([]SemanticError, map[*parser.Name]*Symbol) {
-	r := &Resolver{
-		current:  global,
-		Resolved: make(map[*parser.Name]*Symbol),
+func newResolver(global *Scope) *Resolver {
+	return &Resolver{
+		current:    global,
+		errors:     nil,
+		loopDepth:  0,
+		Resolved:   make(map[*parser.Name]*Symbol),
+		inFunction: false,
+		inClass:    false,
 	}
+}
+
+func Resolve(m *parser.Module, global *Scope) ([]SemanticError, map[*parser.Name]*Symbol) {
+	r := newResolver(global)
 	r.visitModule(m)
 	return r.errors, r.Resolved
 }
