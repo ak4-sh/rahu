@@ -197,5 +197,3 @@ MIT
 ## Author
 
 Akash Sivanandan
-```
-
