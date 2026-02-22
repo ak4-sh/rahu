@@ -1,0 +1,23 @@
+name: rahu-ci
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    if: github.actor == 'ak4-sh'
+    runs-on: [self-hosted, rahu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
