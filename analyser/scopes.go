@@ -1,14 +1,14 @@
 package analyser
 
 import (
-	"rahu/parser"
+	"rahu/parser/ast"
 )
 
 type ScopeBuilder struct {
 	current *Scope
 }
 
-func BuildScopes(module *parser.Module) *Scope {
+func BuildScopes(module *ast.Module) *Scope {
 	builtins := NewBuiltinScope()
 	global := NewScope(builtins, ScopeGlobal)
 	b := &ScopeBuilder{current: global}
@@ -16,38 +16,38 @@ func BuildScopes(module *parser.Module) *Scope {
 	return global
 }
 
-func (b *ScopeBuilder) visitModule(m *parser.Module) {
+func (b *ScopeBuilder) visitModule(m *ast.Module) {
 	for _, stmt := range m.Body {
 		b.visitStmt(stmt)
 	}
 }
 
-func (b *ScopeBuilder) visitStmt(stmt parser.Statement) {
+func (b *ScopeBuilder) visitStmt(stmt ast.Statement) {
 	switch s := stmt.(type) {
-	case *parser.Assign:
+	case *ast.Assign:
 		b.visitAssign(s)
-	case *parser.FunctionDef:
+	case *ast.FunctionDef:
 		b.visitFunctionDef(s)
-	case *parser.If:
+	case *ast.If:
 		b.visitIf(s)
-	case *parser.For:
+	case *ast.For:
 		b.visitFor(s)
 
-	case *parser.WhileLoop:
+	case *ast.WhileLoop:
 		b.visitWhile(s)
-	case *parser.ClassDef:
+	case *ast.ClassDef:
 		b.visitClassDef(s)
 	}
 }
 
-func (b *ScopeBuilder) visitWhile(w *parser.WhileLoop) {
+func (b *ScopeBuilder) visitWhile(w *ast.WhileLoop) {
 	for _, stmt := range w.Body {
 		b.visitStmt(stmt)
 	}
 }
 
-func (b *ScopeBuilder) visitFor(f *parser.For) {
-	if name, ok := f.Target.(*parser.Name); ok {
+func (b *ScopeBuilder) visitFor(f *ast.For) {
+	if name, ok := f.Target.(*ast.Name); ok {
 		_ = b.current.Define(&Symbol{
 			Name: name.ID,
 			Kind: SymVariable,
@@ -60,7 +60,7 @@ func (b *ScopeBuilder) visitFor(f *parser.For) {
 	}
 }
 
-func (b *ScopeBuilder) visitIf(i *parser.If) {
+func (b *ScopeBuilder) visitIf(i *ast.If) {
 	for _, stm := range i.Body {
 		b.visitStmt(stm)
 	}
@@ -70,9 +70,9 @@ func (b *ScopeBuilder) visitIf(i *parser.If) {
 	}
 }
 
-func (b *ScopeBuilder) visitAssign(a *parser.Assign) {
+func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 	for _, t := range a.Targets {
-		if name, ok := t.(*parser.Name); ok {
+		if name, ok := t.(*ast.Name); ok {
 			_ = b.current.Define(&Symbol{
 				Name: name.ID,
 				Kind: SymVariable,
@@ -82,7 +82,7 @@ func (b *ScopeBuilder) visitAssign(a *parser.Assign) {
 	}
 }
 
-func (b *ScopeBuilder) visitClassDef(c *parser.ClassDef) {
+func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
 	classSym := &Symbol{
 		Name: c.Name.ID,
 		Kind: SymClass,
@@ -101,7 +101,7 @@ func (b *ScopeBuilder) visitClassDef(c *parser.ClassDef) {
 	b.current = prev
 }
 
-func (b *ScopeBuilder) visitFunctionDef(f *parser.FunctionDef) {
+func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
 	fnSym := &Symbol{
 		Name: f.Name.ID,
 		Kind: SymFunction,

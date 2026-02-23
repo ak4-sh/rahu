@@ -1,6 +1,6 @@
 package analyser
 
-import "rahu/parser"
+import "rahu/parser/ast"
 
 type NameContext int
 
@@ -14,7 +14,7 @@ type Resolver struct {
 	errors    []SemanticError
 	loopDepth int
 
-	Resolved   map[*parser.Name]*Symbol
+	Resolved   map[*ast.Name]*Symbol
 	inFunction bool
 
 	inClass      bool
@@ -22,7 +22,7 @@ type Resolver struct {
 }
 
 type SemanticError struct {
-	Span parser.Range
+	Span ast.Range
 	Msg  string
 }
 
@@ -31,39 +31,39 @@ func newResolver(global *Scope) *Resolver {
 		current:    global,
 		errors:     nil,
 		loopDepth:  0,
-		Resolved:   make(map[*parser.Name]*Symbol),
+		Resolved:   make(map[*ast.Name]*Symbol),
 		inFunction: false,
 		inClass:    false,
 	}
 }
 
-func Resolve(m *parser.Module, global *Scope) ([]SemanticError, map[*parser.Name]*Symbol) {
+func Resolve(m *ast.Module, global *Scope) ([]SemanticError, map[*ast.Name]*Symbol) {
 	r := newResolver(global)
 	r.visitModule(m)
 	return r.errors, r.Resolved
 }
 
-func (r *Resolver) visitModule(m *parser.Module) {
+func (r *Resolver) visitModule(m *ast.Module) {
 	for _, stmt := range m.Body {
 		r.visitStmt(stmt)
 	}
 }
 
-func (r *Resolver) visitStmt(stmt parser.Statement) {
+func (r *Resolver) visitStmt(stmt ast.Statement) {
 	switch s := stmt.(type) {
-	case *parser.AugAssign:
+	case *ast.AugAssign:
 		r.visitExpr(s.Target, Read)
 		r.visitExpr(s.Value, Read)
 		r.visitExpr(s.Target, Write)
 
-	case *parser.Assign:
+	case *ast.Assign:
 		r.visitExpr(s.Value, Read)
 
 		for _, t := range s.Targets {
 			r.visitExpr(t, Write)
 		}
 
-	case *parser.ClassDef:
+	case *ast.ClassDef:
 		for _, base := range s.Bases {
 			if base != nil {
 				r.visitExpr(base, Read)
@@ -94,7 +94,7 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 		r.currentClass = prevClass
 		r.inClass = prevInClass
 
-	case *parser.FunctionDef:
+	case *ast.FunctionDef:
 		for _, arg := range s.Args {
 			if arg.Default != nil {
 				r.visitExpr(arg.Default, Read)
@@ -121,10 +121,10 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 		r.current = prevScope
 		r.inFunction = prevInFn
 
-	case *parser.ExprStmt:
+	case *ast.ExprStmt:
 		r.visitExpr(s.Value, Read)
 
-	case *parser.If:
+	case *ast.If:
 		r.visitExpr(s.Test, Read)
 
 		for _, st := range s.Body {
@@ -135,7 +135,7 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 			r.visitStmt(st)
 		}
 
-	case *parser.For:
+	case *ast.For:
 		r.visitExpr(s.Iter, Read)
 		r.loopDepth++
 		r.visitExpr(s.Target, Write)
@@ -145,7 +145,7 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 		}
 		r.loopDepth--
 
-	case *parser.WhileLoop:
+	case *ast.WhileLoop:
 		r.loopDepth++
 		r.visitExpr(s.Test, Read)
 
@@ -154,7 +154,7 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 		}
 		r.loopDepth--
 
-	case *parser.Return:
+	case *ast.Return:
 		if !r.inFunction {
 			r.error(s.Pos, "return outside function")
 		}
@@ -163,12 +163,12 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 			r.visitExpr(s.Value, Read)
 		}
 
-	case *parser.Break:
+	case *ast.Break:
 		if r.loopDepth == 0 {
 			r.error(s.Pos, "break outside loop")
 		}
 
-	case *parser.Continue:
+	case *ast.Continue:
 		if r.loopDepth == 0 {
 			r.error(s.Pos, "continue outside loop")
 		}
@@ -176,9 +176,9 @@ func (r *Resolver) visitStmt(stmt parser.Statement) {
 	}
 }
 
-func (r *Resolver) visitExpr(expr parser.Expression, ctx NameContext) {
+func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
 	switch e := expr.(type) {
-	case *parser.Name:
+	case *ast.Name:
 		var sym *Symbol
 		// writes must resolve in current scope only
 		// if not foun dthen scope builder impl is incorrect
@@ -200,38 +200,38 @@ func (r *Resolver) visitExpr(expr parser.Expression, ctx NameContext) {
 		r.Resolved[e] = sym
 		return
 
-	case *parser.Number, *parser.String, *parser.Boolean:
+	case *ast.Number, *ast.String, *ast.Boolean:
 		return
-	case *parser.BinOp:
+	case *ast.BinOp:
 		r.visitExpr(e.Left, Read)
 		r.visitExpr(e.Right, Read)
 
-	case *parser.UnaryOp:
+	case *ast.UnaryOp:
 		r.visitExpr(e.Operand, Read)
 
-	case *parser.BooleanOp:
+	case *ast.BooleanOp:
 		for _, v := range e.Values {
 			r.visitExpr(v, Read)
 		}
 
-	case *parser.Compare:
+	case *ast.Compare:
 		r.visitExpr(e.Left, Read)
 		for _, rgt := range e.Right {
 			r.visitExpr(rgt, Read)
 		}
 
-	case *parser.Call:
+	case *ast.Call:
 		r.visitExpr(e.Func, Read)
 		for _, arg := range e.Args {
 			r.visitExpr(arg, Read)
 		}
 
-	case *parser.Tuple:
+	case *ast.Tuple:
 		for _, elt := range e.Elts {
 			r.visitExpr(elt, ctx)
 		}
 
-	case *parser.List:
+	case *ast.List:
 		for _, elt := range e.Elts {
 			r.visitExpr(elt, ctx)
 		}
@@ -239,7 +239,7 @@ func (r *Resolver) visitExpr(expr parser.Expression, ctx NameContext) {
 	}
 }
 
-func (r *Resolver) error(span parser.Range, msg string) {
+func (r *Resolver) error(span ast.Range, msg string) {
 	r.errors = append(r.errors, SemanticError{
 		Span: span,
 		Msg:  msg,

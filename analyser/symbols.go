@@ -8,7 +8,7 @@ package analyser
 import (
 	"fmt"
 
-	"rahu/parser"
+	"rahu/parser/ast"
 )
 
 type SymbolKind int
@@ -28,7 +28,7 @@ const (
 type Symbol struct {
 	Name  string
 	Kind  SymbolKind
-	Span  parser.Range
+	Span  ast.Range
 	Scope *Scope
 	Inner *Scope
 }
@@ -73,7 +73,7 @@ func NewBuiltinScope() *Scope {
 			&Symbol{
 				Name: name,
 				Kind: SymConstant,
-				Span: parser.Range{},
+				Span: ast.Range{},
 			})
 	}
 
@@ -85,7 +85,7 @@ func NewBuiltinScope() *Scope {
 		s.Define(&Symbol{
 			Name: name,
 			Kind: SymType,
-			Span: parser.Range{},
+			Span: ast.Range{},
 		})
 	}
 
@@ -153,14 +153,14 @@ func NewBuiltinScope() *Scope {
 		s.Define(&Symbol{
 			Name: name,
 			Kind: SymFunction,
-			Span: parser.Range{},
+			Span: ast.Range{},
 		})
 	}
 
 	return s
 }
 
-func NewSymbol(name string, kind SymbolKind, span parser.Range) *Symbol {
+func NewSymbol(name string, kind SymbolKind, span ast.Range) *Symbol {
 	return &Symbol{
 		Name: name,
 		Kind: kind,
