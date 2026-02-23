@@ -1,4 +1,4 @@
-package parser
+package ast
 
 import "rahu/lexer"
 
@@ -265,3 +265,12 @@ type ClassDef struct {
 }
 
 func (c *ClassDef) statementNode() {}
+
+type Attribute struct {
+	Pos   Range
+	Value Expression
+	Attr  *Name
+}
+
+func (a *Attribute) expressionNode() {}
+func (a *Attribute) Position() Range { return a.Pos }
