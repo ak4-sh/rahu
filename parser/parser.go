@@ -33,6 +33,8 @@
 package parser
 
 import (
+	"slices"
+
 	"rahu/lexer"
 	"rahu/lsp"
 	"rahu/source"
@@ -72,10 +74,8 @@ func (p *Parser) errorCurrent(msg string) {
 
 func (p *Parser) syncTo(types ...lexer.TokenType) {
 	for p.current.Type != lexer.EOF {
-		for _, t := range types {
-			if p.current.Type == t {
-				return
-			}
+		if slices.Contains(types, p.current.Type) {
+			return
 		}
 		p.advance()
 	}
