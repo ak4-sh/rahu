@@ -6,6 +6,7 @@ import (
 	"rahu/analyser"
 	"rahu/lsp"
 	"rahu/parser"
+	"rahu/parser/ast"
 	"rahu/source"
 )
 
@@ -82,7 +83,7 @@ func TestContains(t *testing.T) {
 	start := li.PositionToOffset(0, 0) // h
 	end := li.PositionToOffset(0, 5)   // o
 
-	rng := parser.Range{Start: start, End: end}
+	rng := ast.Range{Start: start, End: end}
 
 	tests := []struct {
 		name     string
