@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	"rahu/lexer"
+	l "rahu/lexer"
 	a "rahu/parser/ast"
 )
 
@@ -12,6 +12,8 @@ func (p *Parser) parseExpression(minBP int) a.Expression {
 	if left == nil {
 		return nil
 	}
+
+	left = p.postfixParseLoop(left)
 
 	for {
 		bp := infixBindingPower(p.current.Type)
@@ -50,7 +52,7 @@ func (p *Parser) parseExpression(minBP int) a.Expression {
 			continue
 		}
 
-		if opTok.Type == lexer.AND || opTok.Type == lexer.OR {
+		if opTok.Type == l.AND || opTok.Type == l.OR {
 			p.advance()
 			right := p.parseExpression(bp)
 			if right == nil {
@@ -59,14 +61,14 @@ func (p *Parser) parseExpression(minBP int) a.Expression {
 			}
 
 			if boolOp, ok := left.(*a.BooleanOp); ok {
-				if (opTok.Type == lexer.AND && boolOp.Operator == a.And) || (opTok.Type == lexer.OR && boolOp.Operator == a.Or) {
+				if (opTok.Type == l.AND && boolOp.Operator == a.And) || (opTok.Type == l.OR && boolOp.Operator == a.Or) {
 					boolOp.Values = append(boolOp.Values, right)
 					continue
 				}
 			}
 
 			op := a.And
-			if opTok.Type == lexer.OR {
+			if opTok.Type == l.OR {
 				op = a.Or
 			}
 			left = &a.BooleanOp{
@@ -82,7 +84,7 @@ func (p *Parser) parseExpression(minBP int) a.Expression {
 		p.advance()
 		var right a.Expression
 
-		if opTok.Type == lexer.DOUBLESTAR {
+		if opTok.Type == l.DOUBLESTAR {
 			right = p.parseExpression(bp - 1)
 		} else {
 			right = p.parseExpression(bp)
@@ -109,12 +111,12 @@ func (p *Parser) parseExpression(minBP int) a.Expression {
 
 func (p *Parser) parsePrimary() a.Expression {
 	switch p.current.Type {
-	case lexer.UNTERMINATED_STRING:
+	case l.UNTERMINATED_STRING:
 		p.errorCurrent("unterminated string literal")
 		p.advance()
 		return nil
 
-	case lexer.NUMBER:
+	case l.NUMBER:
 		n := &a.Number{
 			Value: p.current.Literal,
 			Pos: a.Range{
@@ -124,7 +126,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		}
 		p.advance()
 		return n
-	case lexer.TRUE:
+	case l.TRUE:
 		ret := &a.Boolean{
 			Value: true,
 			Pos: a.Range{
@@ -135,7 +137,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		p.advance()
 		return ret
 
-	case lexer.FALSE:
+	case l.FALSE:
 		ret := &a.Boolean{
 			Value: false,
 			Pos: a.Range{
@@ -145,7 +147,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		}
 		p.advance()
 		return ret
-	case lexer.NAME:
+	case l.NAME:
 		n := &a.Name{
 			ID: p.current.Literal,
 			Pos: a.Range{
@@ -154,18 +156,15 @@ func (p *Parser) parsePrimary() a.Expression {
 			},
 		}
 		p.advance()
-
-		if p.current.Type == lexer.LPAR {
-			return p.parseCall(n)
-		}
 		return n
-	case lexer.LPAR:
+
+	case l.LPAR:
 		// TODO: need to add handling for tuples here
 		startPos := p.current.Start
 		p.advance()
 
 		// empty tuple
-		if p.current.Type == lexer.RPAR {
+		if p.current.Type == l.RPAR {
 			endPos := p.current.Start
 			p.advance()
 			return &a.Tuple{Elts: []a.Expression{}, Pos: a.Range{Start: startPos, End: endPos}}
@@ -176,16 +175,16 @@ func (p *Parser) parsePrimary() a.Expression {
 			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
 		}
 
-		if p.current.Type != lexer.COMMA {
+		if p.current.Type != l.COMMA {
 			p.advance() // expecting a RPAR now
 			return first
 		}
 
 		elts := []a.Expression{first}
-		for p.current.Type == lexer.COMMA {
+		for p.current.Type == l.COMMA {
 			p.advance()
 
-			if p.current.Type == lexer.RPAR {
+			if p.current.Type == l.RPAR {
 				break
 			}
 
@@ -199,9 +198,9 @@ func (p *Parser) parsePrimary() a.Expression {
 		p.advance()
 		return &a.Tuple{Elts: elts, Pos: a.Range{Start: startPos, End: endPos}}
 
-	case lexer.LSQB:
+	case l.LSQB:
 		return p.parseList()
-	case lexer.STRING:
+	case l.STRING:
 		s := &a.String{
 			Value: p.current.Literal,
 			Pos: a.Range{
@@ -212,7 +211,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		p.advance()
 		return s
 
-	case lexer.MINUS:
+	case l.MINUS:
 		startPos := p.current.Start
 		p.advance()
 		operand := p.parseExpression(PREFIX)
@@ -227,7 +226,7 @@ func (p *Parser) parsePrimary() a.Expression {
 			Pos:     a.Range{Start: startPos, End: endPos},
 		}
 
-	case lexer.PLUS:
+	case l.PLUS:
 		startPos := p.current.Start
 		p.advance()
 		operand := p.parseExpression(PREFIX)
@@ -242,7 +241,7 @@ func (p *Parser) parsePrimary() a.Expression {
 			Pos:     a.Range{Start: startPos, End: endPos},
 		}
 
-	case lexer.NOT:
+	case l.NOT:
 		startPos := p.current.Start
 		p.advance()
 		expr := p.parseExpression(PREFIX)
@@ -257,7 +256,7 @@ func (p *Parser) parsePrimary() a.Expression {
 			Pos:     a.Range{Start: startPos, End: endPos},
 		}
 
-	case lexer.NONE:
+	case l.NONE:
 		startPos := p.current.Start
 		endPos := p.current.End
 		p.advance()
@@ -277,7 +276,7 @@ func (p *Parser) parseList() a.Expression {
 	p.advance()
 	elts := []a.Expression{}
 
-	if p.current.Type != lexer.RSQB {
+	if p.current.Type != l.RSQB {
 		first := p.parseExpression(LOWEST)
 		if first != nil {
 			elts = append(elts, first)
@@ -285,10 +284,10 @@ func (p *Parser) parseList() a.Expression {
 			p.errorCurrent("expected expression in list")
 		}
 
-		for p.current.Type == lexer.COMMA {
+		for p.current.Type == l.COMMA {
 			p.advance()
 
-			if p.current.Type == lexer.RSQB {
+			if p.current.Type == l.RSQB {
 				break
 			}
 
@@ -302,10 +301,10 @@ func (p *Parser) parseList() a.Expression {
 		}
 	}
 
-	if p.current.Type != lexer.RSQB {
+	if p.current.Type != l.RSQB {
 		p.errorCurrent("expected ']' after list elements")
-		p.syncTo(lexer.RSQB, lexer.NEWLINE, lexer.EOF)
-		if p.current.Type == lexer.RSQB {
+		p.syncTo(l.RSQB, l.NEWLINE, l.EOF)
+		if p.current.Type == l.RSQB {
 			p.advance()
 		}
 		return &a.List{
