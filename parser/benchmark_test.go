@@ -13,9 +13,7 @@ func BenchmarkParseMega(b *testing.B) {
 
 	input := string(src)
 
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		p := New(input)
 		_ = p.Parse()
 	}
@@ -28,9 +26,8 @@ func BenchmarkParseSmall(b *testing.B) {
 	}
 
 	input := string(src)
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		p := New(input)
 		_ = p.Parse()
 	}
