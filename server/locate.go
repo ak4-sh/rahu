@@ -1,10 +1,10 @@
 package server
 
 import (
-	"rahu/parser"
+	"rahu/parser/ast"
 )
 
-func nameAtPos(module *parser.Module, pos int) *parser.Name {
+func nameAtPos(module *ast.Module, pos int) *ast.Name {
 	if module == nil {
 		return nil
 	}
@@ -16,13 +16,13 @@ func nameAtPos(module *parser.Module, pos int) *parser.Name {
 	return nil
 }
 
-func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
+func nameInStmt(stmt ast.Statement, pos int) *ast.Name {
 	if stmt == nil {
 		return nil
 	}
 
 	switch v := stmt.(type) {
-	case *parser.Assign:
+	case *ast.Assign:
 		for _, targ := range v.Targets {
 			if name := nameInExpr(targ, pos); name != nil {
 				return name
@@ -32,7 +32,7 @@ func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 			return name
 		}
 
-	case *parser.AugAssign:
+	case *ast.AugAssign:
 		if name := nameInExpr(v.Target, pos); name != nil {
 			return name
 		}
@@ -41,7 +41,7 @@ func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 			return name
 		}
 
-	case *parser.FunctionDef:
+	case *ast.FunctionDef:
 		if contains(v.NamePos, pos) {
 			return v.Name
 		}
@@ -57,7 +57,7 @@ func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 			}
 		}
 
-	case *parser.If:
+	case *ast.If:
 		if name := nameInExpr(v.Test, pos); name != nil {
 			return name
 		}
@@ -75,7 +75,7 @@ func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 		}
 		return nil
 
-	case *parser.WhileLoop:
+	case *ast.WhileLoop:
 		if name := nameInExpr(v.Test, pos); name != nil {
 			return name
 		}
@@ -87,10 +87,10 @@ func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 		}
 		return nil
 
-	case *parser.ExprStmt:
+	case *ast.ExprStmt:
 		return nameInExpr(v.Value, pos)
 
-	case *parser.Return:
+	case *ast.Return:
 		if v.Value != nil {
 			return nameInExpr(v.Value, pos)
 		}
@@ -101,24 +101,24 @@ func nameInStmt(stmt parser.Statement, pos int) *parser.Name {
 	return nil
 }
 
-func nameInExpr(expr parser.Expression, pos int) *parser.Name {
+func nameInExpr(expr ast.Expression, pos int) *ast.Name {
 	switch e := expr.(type) {
-	case *parser.Name:
+	case *ast.Name:
 		if contains(e.Pos, pos) {
 			return e
 		}
 
-	case *parser.BinOp:
+	case *ast.BinOp:
 		if name := nameInExpr(e.Left, pos); name != nil {
 			return name
 		}
 
 		return nameInExpr(e.Right, pos)
 
-	case *parser.Number, *parser.String, *parser.Boolean:
+	case *ast.Number, *ast.String, *ast.Boolean:
 		return nil
 
-	case *parser.Tuple:
+	case *ast.Tuple:
 		for _, elt := range e.Elts {
 			if name := nameInExpr(elt, pos); name != nil {
 				return name
@@ -126,7 +126,7 @@ func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 		}
 		return nil
 
-	case *parser.Call:
+	case *ast.Call:
 		if name := nameInExpr(e.Func, pos); name != nil {
 			return name
 		}
@@ -138,7 +138,7 @@ func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 		}
 		return nil
 
-	case *parser.Compare:
+	case *ast.Compare:
 		if name := nameInExpr(e.Left, pos); name != nil {
 			return name
 		}
@@ -149,7 +149,7 @@ func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 			}
 		}
 
-	case *parser.List:
+	case *ast.List:
 		for _, elt := range e.Elts {
 			if name := nameInExpr(elt, pos); name != nil {
 				return name
@@ -158,7 +158,7 @@ func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 		return nil
 
 		// TODO: boolean op support, list,
-	case *parser.BooleanOp:
+	case *ast.BooleanOp:
 		for _, exp := range e.Values {
 			if name := nameInExpr(exp, pos); name != nil {
 				return name
@@ -171,6 +171,6 @@ func nameInExpr(expr parser.Expression, pos int) *parser.Name {
 	return nil
 }
 
-func contains(rng parser.Range, pos int) bool {
+func contains(rng ast.Range, pos int) bool {
 	return pos >= rng.Start && pos <= rng.End
 }
