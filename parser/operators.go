@@ -2,6 +2,7 @@ package parser
 
 import (
 	"rahu/lexer"
+	a "rahu/parser/ast"
 )
 
 const (
@@ -48,42 +49,42 @@ func (p *Parser) isOperator(t lexer.TokenType) bool {
 	return t == lexer.PLUS || t == lexer.MINUS || t == lexer.STAR || t == lexer.SLASH || t == lexer.DOUBLESLASH || t == lexer.PERCENT
 }
 
-func (p *Parser) tokenTypeToOperator(t lexer.TokenType) Operator {
+func (p *Parser) tokenTypeToOperator(t lexer.TokenType) a.Operator {
 	switch t {
 	case lexer.PLUS:
-		return Add
+		return a.Add
 	case lexer.MINUS:
-		return Sub
+		return a.Sub
 	case lexer.STAR:
-		return Mult
+		return a.Mult
 	case lexer.SLASH:
-		return Div
+		return a.Div
 	case lexer.DOUBLESLASH:
-		return FloorDiv
+		return a.FloorDiv
 	case lexer.PERCENT:
-		return Mod
+		return a.Mod
 	case lexer.DOUBLESTAR:
-		return Pow
+		return a.Pow
 	default:
-		return Add
+		return a.Add
 	}
 }
 
-func tokenTypeToCompareOp(t lexer.TokenType) CompareOp {
+func tokenTypeToCompareOp(t lexer.TokenType) a.CompareOp {
 	switch t {
 	case lexer.EQEQUAL:
-		return Eq
+		return a.Eq
 	case lexer.NOTEQUAL:
-		return NotEq
+		return a.NotEq
 	case lexer.LESS:
-		return Lt
+		return a.Lt
 	case lexer.LESSEQUAL:
-		return LtE
+		return a.LtE
 	case lexer.GREATER:
-		return Gt
+		return a.Gt
 	case lexer.GREATEREQUAL:
-		return GtE
+		return a.GtE
 	default:
-		return Eq
+		return a.Eq
 	}
 }
