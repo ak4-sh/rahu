@@ -33,13 +33,14 @@
 package parser
 
 import (
+	"slices"
+
 	"rahu/lexer"
-	"rahu/lsp"
-	"rahu/source"
+	"rahu/parser/ast"
 )
 
 type Error struct {
-	Span Range
+	Span ast.Range
 	Msg  string
 }
 
@@ -55,12 +56,12 @@ type Parser struct {
 	errors []Error
 }
 
-func (p *Parser) error(span Range, msg string) {
+func (p *Parser) error(span ast.Range, msg string) {
 	p.errors = append(p.errors, Error{Span: span, Msg: msg})
 }
 
-func (p *Parser) currentRange() Range {
-	return Range{
+func (p *Parser) currentRange() ast.Range {
+	return ast.Range{
 		Start: p.current.Start,
 		End:   p.current.End,
 	}
@@ -72,28 +73,10 @@ func (p *Parser) errorCurrent(msg string) {
 
 func (p *Parser) syncTo(types ...lexer.TokenType) {
 	for p.current.Type != lexer.EOF {
-		for _, t := range types {
-			if p.current.Type == t {
-				return
-			}
+		if slices.Contains(types, p.current.Type) {
+			return
 		}
 		p.advance()
-	}
-}
-
-func (r Range) ToLSPRange(li *source.LineIndex) lsp.Range {
-	startLine, startCol := li.OffsetToPosition(r.Start)
-	endLine, endCol := li.OffsetToPosition(r.End)
-
-	return lsp.Range{
-		Start: lsp.Position{
-			Line:      startLine,
-			Character: startCol,
-		},
-		End: lsp.Position{
-			Line:      endLine,
-			Character: endCol,
-		},
 	}
 }
 
@@ -119,15 +102,15 @@ func (p *Parser) advanceBy(count int) {
 	}
 }
 
-func (p *Parser) Parse() *Module {
-	statements := []Statement{}
+func (p *Parser) Parse() *ast.Module {
+	statements := []ast.Statement{}
 	for p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			statements = append(statements, stmt)
 		}
 	}
-	return &Module{Body: statements}
+	return &ast.Module{Body: statements}
 }
 
 func canStartExpression(t lexer.TokenType) bool {
@@ -150,7 +133,7 @@ func (p *Parser) isAugAssign() bool {
 	}
 }
 
-func (p *Parser) parseStatement() Statement {
+func (p *Parser) parseStatement() ast.Statement {
 	if p.current.Type == lexer.UNTERMINATED_STRING {
 		p.errorCurrent("unterminated string literal")
 		p.advance()
@@ -181,7 +164,7 @@ func (p *Parser) parseStatement() Statement {
 		} else if p.current.Type != lexer.EOF {
 			p.error(expr.Position(), "expected newline after expression")
 		}
-		return &ExprStmt{Value: expr, Pos: expr.Position()}
+		return &ast.ExprStmt{Value: expr, Pos: expr.Position()}
 	}
 
 	if p.current.Type == lexer.DEF {
@@ -190,7 +173,7 @@ func (p *Parser) parseStatement() Statement {
 	}
 
 	if p.current.Type == lexer.BREAK {
-		pos := Range{
+		pos := ast.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		}
@@ -198,11 +181,11 @@ func (p *Parser) parseStatement() Statement {
 		if p.current.Type == lexer.NEWLINE {
 			p.advance()
 		}
-		return &Break{Pos: pos}
+		return &ast.Break{Pos: pos}
 	}
 
 	if p.current.Type == lexer.CONTINUE {
-		pos := Range{
+		pos := ast.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		}
@@ -210,7 +193,7 @@ func (p *Parser) parseStatement() Statement {
 		if p.current.Type == lexer.NEWLINE {
 			p.advance()
 		}
-		return &Continue{Pos: pos}
+		return &ast.Continue{Pos: pos}
 	}
 
 	if p.current.Type == lexer.RETURN {
@@ -229,7 +212,7 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseClass()
 	}
 
-	p.error(Range{
+	p.error(ast.Range{
 		Start: p.current.Start,
 		End:   p.current.End,
 	},

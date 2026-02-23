@@ -6,7 +6,7 @@ import (
 	"rahu/analyser"
 	"rahu/jsonrpc"
 	"rahu/lsp"
-	"rahu/parser"
+	ast "rahu/parser/ast"
 	"rahu/source"
 )
 
@@ -16,8 +16,8 @@ type Document struct {
 	Text      string
 	LineIndex *source.LineIndex
 
-	AST     *parser.Module
-	Symbols map[*parser.Name]*analyser.Symbol
+	AST     *ast.Module
+	Symbols map[*ast.Name]*analyser.Symbol
 	SemErrs []analyser.SemanticError
 }
 
@@ -46,7 +46,7 @@ func (s *Server) Get(uri lsp.DocumentURI) *Document {
 	return &d
 }
 
-func (s *Server) SetAnalysis(uri lsp.DocumentURI, ast *parser.Module, symbols map[*parser.Name]*analyser.Symbol, semErrs []analyser.SemanticError) {
+func (s *Server) SetAnalysis(uri lsp.DocumentURI, ast *ast.Module, symbols map[*ast.Name]*analyser.Symbol, semErrs []analyser.SemanticError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

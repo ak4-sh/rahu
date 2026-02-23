@@ -4,9 +4,10 @@ import (
 	"fmt"
 
 	"rahu/lexer"
+	a "rahu/parser/ast"
 )
 
-func (p *Parser) parseExpression(minBP int) Expression {
+func (p *Parser) parseExpression(minBP int) a.Expression {
 	left := p.parsePrimary()
 	if left == nil {
 		return nil
@@ -22,8 +23,8 @@ func (p *Parser) parseExpression(minBP int) Expression {
 
 		if isCompareOp(opTok.Type) {
 			startPos := left.Position().Start
-			ops := []CompareOp{}
-			rights := []Expression{}
+			ops := []a.CompareOp{}
+			rights := []a.Expression{}
 
 			for isCompareOp(p.current.Type) {
 				op := tokenTypeToCompareOp(p.current.Type)
@@ -40,11 +41,11 @@ func (p *Parser) parseExpression(minBP int) Expression {
 			lastRight := rights[len(rights)-1]
 			endPos := lastRight.Position().End
 
-			left = &Compare{
+			left = &a.Compare{
 				Left:  left,
 				Ops:   ops,
 				Right: rights,
-				Pos:   Range{Start: startPos, End: endPos},
+				Pos:   a.Range{Start: startPos, End: endPos},
 			}
 			continue
 		}
@@ -57,21 +58,21 @@ func (p *Parser) parseExpression(minBP int) Expression {
 				return left
 			}
 
-			if boolOp, ok := left.(*BooleanOp); ok {
-				if (opTok.Type == lexer.AND && boolOp.Operator == And) || (opTok.Type == lexer.OR && boolOp.Operator == Or) {
+			if boolOp, ok := left.(*a.BooleanOp); ok {
+				if (opTok.Type == lexer.AND && boolOp.Operator == a.And) || (opTok.Type == lexer.OR && boolOp.Operator == a.Or) {
 					boolOp.Values = append(boolOp.Values, right)
 					continue
 				}
 			}
 
-			op := And
+			op := a.And
 			if opTok.Type == lexer.OR {
-				op = Or
+				op = a.Or
 			}
-			left = &BooleanOp{
+			left = &a.BooleanOp{
 				Operator: op,
-				Values:   []Expression{left, right},
-				Pos: Range{
+				Values:   []a.Expression{left, right},
+				Pos: a.Range{
 					Start: left.Position().Start,
 					End:   right.Position().End,
 				},
@@ -79,7 +80,7 @@ func (p *Parser) parseExpression(minBP int) Expression {
 			continue
 		}
 		p.advance()
-		var right Expression
+		var right a.Expression
 
 		if opTok.Type == lexer.DOUBLESTAR {
 			right = p.parseExpression(bp - 1)
@@ -92,11 +93,11 @@ func (p *Parser) parseExpression(minBP int) Expression {
 			return left
 		}
 
-		left = &BinOp{
+		left = &a.BinOp{
 			Left:  left,
 			Op:    p.tokenTypeToOperator(opTok.Type),
 			Right: right,
-			Pos: Range{
+			Pos: a.Range{
 				Start: left.Position().Start,
 				End:   right.Position().End,
 			},
@@ -106,7 +107,7 @@ func (p *Parser) parseExpression(minBP int) Expression {
 	return left
 }
 
-func (p *Parser) parsePrimary() Expression {
+func (p *Parser) parsePrimary() a.Expression {
 	switch p.current.Type {
 	case lexer.UNTERMINATED_STRING:
 		p.errorCurrent("unterminated string literal")
@@ -114,9 +115,9 @@ func (p *Parser) parsePrimary() Expression {
 		return nil
 
 	case lexer.NUMBER:
-		n := &Number{
+		n := &a.Number{
 			Value: p.current.Literal,
-			Pos: Range{
+			Pos: a.Range{
 				Start: p.current.Start,
 				End:   p.current.End,
 			},
@@ -124,9 +125,9 @@ func (p *Parser) parsePrimary() Expression {
 		p.advance()
 		return n
 	case lexer.TRUE:
-		ret := &Boolean{
+		ret := &a.Boolean{
 			Value: true,
-			Pos: Range{
+			Pos: a.Range{
 				Start: p.current.Start,
 				End:   p.current.End,
 			},
@@ -135,9 +136,9 @@ func (p *Parser) parsePrimary() Expression {
 		return ret
 
 	case lexer.FALSE:
-		ret := &Boolean{
+		ret := &a.Boolean{
 			Value: false,
-			Pos: Range{
+			Pos: a.Range{
 				Start: p.current.Start,
 				End:   p.current.End,
 			},
@@ -145,9 +146,9 @@ func (p *Parser) parsePrimary() Expression {
 		p.advance()
 		return ret
 	case lexer.NAME:
-		n := &Name{
+		n := &a.Name{
 			ID: p.current.Literal,
-			Pos: Range{
+			Pos: a.Range{
 				Start: p.current.Start,
 				End:   p.current.End,
 			},
@@ -167,12 +168,12 @@ func (p *Parser) parsePrimary() Expression {
 		if p.current.Type == lexer.RPAR {
 			endPos := p.current.Start
 			p.advance()
-			return &Tuple{Elts: []Expression{}, Pos: Range{Start: startPos, End: endPos}}
+			return &a.Tuple{Elts: []a.Expression{}, Pos: a.Range{Start: startPos, End: endPos}}
 		}
 
 		first := p.parseExpression(LOWEST)
 		if first == nil {
-			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
 		}
 
 		if p.current.Type != lexer.COMMA {
@@ -180,7 +181,7 @@ func (p *Parser) parsePrimary() Expression {
 			return first
 		}
 
-		elts := []Expression{first}
+		elts := []a.Expression{first}
 		for p.current.Type == lexer.COMMA {
 			p.advance()
 
@@ -196,14 +197,14 @@ func (p *Parser) parsePrimary() Expression {
 
 		endPos := p.current.Start
 		p.advance()
-		return &Tuple{Elts: elts, Pos: Range{Start: startPos, End: endPos}}
+		return &a.Tuple{Elts: elts, Pos: a.Range{Start: startPos, End: endPos}}
 
 	case lexer.LSQB:
 		return p.parseList()
 	case lexer.STRING:
-		s := &String{
+		s := &a.String{
 			Value: p.current.Literal,
-			Pos: Range{
+			Pos: a.Range{
 				Start: p.current.Start,
 				End:   p.current.End,
 			},
@@ -217,13 +218,13 @@ func (p *Parser) parsePrimary() Expression {
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
 			p.errorCurrent("expected expression after '-' ")
-			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
 		}
 		endPos := operand.Position().End
-		return &UnaryOp{
-			Op:      USub,
+		return &a.UnaryOp{
+			Op:      a.USub,
 			Operand: operand,
-			Pos:     Range{Start: startPos, End: endPos},
+			Pos:     a.Range{Start: startPos, End: endPos},
 		}
 
 	case lexer.PLUS:
@@ -232,13 +233,13 @@ func (p *Parser) parsePrimary() Expression {
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
 			p.errorCurrent("expected expression after '+'")
-			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
 		}
 		endPos := operand.Position().End
-		return &UnaryOp{
-			Op:      UAdd,
+		return &a.UnaryOp{
+			Op:      a.UAdd,
 			Operand: operand,
-			Pos:     Range{Start: startPos, End: endPos},
+			Pos:     a.Range{Start: startPos, End: endPos},
 		}
 
 	case lexer.NOT:
@@ -247,22 +248,22 @@ func (p *Parser) parsePrimary() Expression {
 		expr := p.parseExpression(PREFIX)
 		if expr == nil {
 			p.errorCurrent("expected expression after 'not'")
-			return &Name{ID: "", Pos: Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
 		}
 		endPos := expr.Position().End
-		return &UnaryOp{
-			Op:      Not,
+		return &a.UnaryOp{
+			Op:      a.Not,
 			Operand: expr,
-			Pos:     Range{Start: startPos, End: endPos},
+			Pos:     a.Range{Start: startPos, End: endPos},
 		}
 
 	case lexer.NONE:
 		startPos := p.current.Start
 		endPos := p.current.End
 		p.advance()
-		return &Name{
+		return &a.Name{
 			ID:  "None",
-			Pos: Range{Start: startPos, End: endPos},
+			Pos: a.Range{Start: startPos, End: endPos},
 		}
 
 	}
@@ -271,10 +272,10 @@ func (p *Parser) parsePrimary() Expression {
 	return nil
 }
 
-func (p *Parser) parseList() Expression {
+func (p *Parser) parseList() a.Expression {
 	startPos := p.current.Start
 	p.advance()
-	elts := []Expression{}
+	elts := []a.Expression{}
 
 	if p.current.Type != lexer.RSQB {
 		first := p.parseExpression(LOWEST)
@@ -307,24 +308,30 @@ func (p *Parser) parseList() Expression {
 		if p.current.Type == lexer.RSQB {
 			p.advance()
 		}
-		return &List{Elts: elts, Pos: Range{Start: startPos, End: p.currentRange().End}}
+		return &a.List{
+			Elts: elts,
+			Pos: a.Range{
+				Start: startPos,
+				End:   p.currentRange().End,
+			},
+		}
 	}
 
 	endPos := p.current.Start
 	p.advance()
-	return &List{Elts: elts, Pos: Range{Start: startPos, End: endPos}}
+	return &a.List{Elts: elts, Pos: a.Range{Start: startPos, End: endPos}}
 }
 
-func (p *Parser) parseCall(funcExpr Expression) Expression {
+func (p *Parser) parseCall(funcExpr a.Expression) a.Expression {
 	var startPos int
-	if name, ok := funcExpr.(*Name); ok {
+	if name, ok := funcExpr.(*a.Name); ok {
 		startPos = name.Pos.Start
 	} else {
 		startPos = funcExpr.Position().Start
 	}
 
 	p.advance()
-	args := []Expression{}
+	args := []a.Expression{}
 
 	if p.current.Type != lexer.RPAR {
 		first := p.parseExpression(LOWEST)
@@ -333,10 +340,10 @@ func (p *Parser) parseCall(funcExpr Expression) Expression {
 			if p.current.Type == lexer.RPAR {
 				p.advance()
 			}
-			return &Call{
+			return &a.Call{
 				Func: funcExpr,
 				Args: args,
-				Pos: Range{
+				Pos: a.Range{
 					Start: startPos,
 					End:   p.currentRange().End,
 				},
@@ -358,10 +365,10 @@ func (p *Parser) parseCall(funcExpr Expression) Expression {
 				if p.current.Type == lexer.RPAR {
 					p.advance()
 				}
-				return &Call{
+				return &a.Call{
 					Func: funcExpr,
 					Args: args,
-					Pos: Range{
+					Pos: a.Range{
 						Start: startPos,
 						End:   p.currentRange().End,
 					},
@@ -378,18 +385,18 @@ func (p *Parser) parseCall(funcExpr Expression) Expression {
 			p.advance()
 		}
 		endPos := p.currentRange().End
-		return &Call{
+		return &a.Call{
 			Func: funcExpr,
 			Args: args,
-			Pos:  Range{Start: startPos, End: endPos},
+			Pos:  a.Range{Start: startPos, End: endPos},
 		}
 	}
 	endPos := p.current.Start
 	p.advance()
 
-	return &Call{
+	return &a.Call{
 		Func: funcExpr,
 		Args: args,
-		Pos:  Range{Start: startPos, End: endPos},
+		Pos:  a.Range{Start: startPos, End: endPos},
 	}
 }

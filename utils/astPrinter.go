@@ -18,7 +18,7 @@ import (
 
 	"golang.org/x/term"
 
-	"rahu/parser"
+	"rahu/parser/ast"
 )
 
 const (
@@ -72,13 +72,13 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 
 	switch n := node.(type) {
 
-	case *parser.Module:
+	case *ast.Module:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Module:"))
 		for _, stmt := range n.Body {
 			printAST(w, stmt, indent+2, opts)
 		}
 
-	case *parser.Assign:
+	case *ast.Assign:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Assign:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Targets:"))
 		for _, t := range n.Targets {
@@ -87,7 +87,7 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Value:"))
 		printAST(w, n.Value, indent+4, opts)
 
-	case *parser.BinOp:
+	case *ast.BinOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "BinOp:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Left:"))
 		printAST(w, n.Left, indent+4, opts)
@@ -96,22 +96,22 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Right:"))
 		printAST(w, n.Right, indent+4, opts)
 
-	case *parser.Name:
+	case *ast.Name:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+n.ID+")"))
 
-	case *parser.Number:
+	case *ast.Number:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Number("+n.Value+")"))
 
-	case parser.Operator:
+	case ast.Operator:
 		fmt.Fprintf(w, "%s%s\n", prefix, keyword(opts, operatorString(n)))
 
-	case *parser.String:
+	case *ast.String:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, `String("`+n.Value+`")`))
 
-	case *parser.Boolean:
+	case *ast.Boolean:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, fmt.Sprintf("Boolean(%t)", n.Value)))
 
-	case *parser.Call:
+	case *ast.Call:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Call:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Func:"))
 		printAST(w, n.Func, indent+4, opts)
@@ -120,18 +120,18 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, a, indent+4, opts)
 		}
 
-	case *parser.ExprStmt:
+	case *ast.ExprStmt:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "ExprStmt:"))
 		printAST(w, n.Value, indent+2, opts)
 
-	case parser.FuncArg:
+	case ast.FuncArg:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FuncArg("+n.Name.ID+")"))
 		if n.Default != nil {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Default:"))
 			printAST(w, n.Default, indent+4, opts)
 		}
 
-	case *parser.FunctionDef:
+	case *ast.FunctionDef:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+n.Name.ID+"):"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Args:"))
 		for _, a := range n.Args {
@@ -142,11 +142,11 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, s, indent+4, opts)
 		}
 
-	case *parser.Return:
+	case *ast.Return:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Return:"))
 		printAST(w, n.Value, indent+2, opts)
 
-	case *parser.If:
+	case *ast.If:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "If:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Test:"))
 		printAST(w, n.Test, indent+4, opts)
@@ -161,7 +161,7 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			}
 		}
 
-	case *parser.WhileLoop:
+	case *ast.WhileLoop:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "While:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Test:"))
 		printAST(w, n.Test, indent+4, opts)
@@ -170,7 +170,7 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, s, indent+4, opts)
 		}
 
-	case *parser.For:
+	case *ast.For:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "For:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Target:"))
 		printAST(w, n.Target, indent+4, opts)
@@ -181,25 +181,25 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, s, indent+4, opts)
 		}
 
-	case *parser.List:
+	case *ast.List:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "List:"))
 		for _, e := range n.Elts {
 			printAST(w, e, indent+2, opts)
 		}
 
-	case *parser.Tuple:
+	case *ast.Tuple:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Tuple:"))
 		for _, e := range n.Elts {
 			printAST(w, e, indent+2, opts)
 		}
 
-	case *parser.BooleanOp:
+	case *ast.BooleanOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "BooleanOp:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Operator:"))
 		switch n.Operator {
-		case parser.And:
+		case ast.And:
 			fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, "And"))
-		case parser.Or:
+		case ast.Or:
 			fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, "Or"))
 		}
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Values:"))
@@ -207,10 +207,10 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, v, indent+4, opts)
 		}
 
-	case parser.CompareOp:
+	case ast.CompareOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, keyword(opts, "CompareOp("+compareOpString(n)+")"))
 
-	case *parser.Compare:
+	case *ast.Compare:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Compare:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Left:"))
 		printAST(w, n.Left, indent+4, opts)
@@ -223,10 +223,10 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 			printAST(w, r, indent+4, opts)
 		}
 
-	case *parser.Break:
+	case *ast.Break:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Break"))
 
-	case *parser.Continue:
+	case *ast.Continue:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Continue"))
 
 	default:
@@ -234,38 +234,38 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 	}
 }
 
-func operatorString(op parser.Operator) string {
+func operatorString(op ast.Operator) string {
 	switch op {
-	case parser.Add:
+	case ast.Add:
 		return "+"
-	case parser.Sub:
+	case ast.Sub:
 		return "-"
-	case parser.Mult:
+	case ast.Mult:
 		return "*"
-	case parser.Div:
+	case ast.Div:
 		return "/"
-	case parser.FloorDiv:
+	case ast.FloorDiv:
 		return "//"
-	case parser.Mod:
+	case ast.Mod:
 		return "%"
 	default:
 		return "<?>"
 	}
 }
 
-func compareOpString(op parser.CompareOp) string {
+func compareOpString(op ast.CompareOp) string {
 	switch op {
-	case parser.Eq:
+	case ast.Eq:
 		return "=="
-	case parser.NotEq:
+	case ast.NotEq:
 		return "!="
-	case parser.Lt:
+	case ast.Lt:
 		return "<"
-	case parser.LtE:
+	case ast.LtE:
 		return "<="
-	case parser.Gt:
+	case ast.Gt:
 		return ">"
-	case parser.GtE:
+	case ast.GtE:
 		return ">="
 	default:
 		return "<?>"

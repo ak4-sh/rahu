@@ -2,13 +2,14 @@ package parser
 
 import (
 	"rahu/lexer"
+	a "rahu/parser/ast"
 )
 
-func (p *Parser) parseIf() Statement {
+func (p *Parser) parseIf() a.Statement {
 	startPos := p.current.Start
 
 	p.advance()
-	ifExpr := &If{}
+	ifExpr := &a.If{}
 	testCond := p.parseExpression(LOWEST)
 
 	ifExpr.Test = testCond
@@ -43,7 +44,7 @@ func (p *Parser) parseIf() Statement {
 	}
 	p.advance() // moving ahead of indent
 
-	body := []Statement{}
+	body := []a.Statement{}
 
 	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
@@ -60,12 +61,12 @@ func (p *Parser) parseIf() Statement {
 		p.advance() // skip past dedent
 	}
 
-	orelse := []Statement{}
+	orelse := []a.Statement{}
 	if p.current.Type == lexer.ELIF {
 		elifStmt := p.parseIf()
 		orelse = append(orelse, elifStmt)
 
-		if ifNode, ok := elifStmt.(*If); ok {
+		if ifNode, ok := elifStmt.(*a.If); ok {
 			endPos = ifNode.Pos.End
 		}
 	} else if p.current.Type == lexer.ELSE {
@@ -117,7 +118,7 @@ func (p *Parser) parseIf() Statement {
 	}
 
 	ifExpr.Orelse = orelse
-	ifExpr.Pos = Range{
+	ifExpr.Pos = a.Range{
 		Start: startPos,
 		End:   endPos,
 	}
@@ -125,9 +126,9 @@ func (p *Parser) parseIf() Statement {
 	return ifExpr
 }
 
-func (p *Parser) parseFor() Statement {
+func (p *Parser) parseFor() a.Statement {
 	startPos := p.current.Start
-	forStmt := &For{Pos: Range{Start: startPos}}
+	forStmt := &a.For{Pos: a.Range{Start: startPos}}
 	p.advance()
 	forStmt.Target = p.parseForTarget()
 
@@ -172,7 +173,7 @@ func (p *Parser) parseFor() Statement {
 
 	p.advance()
 
-	body := []Statement{}
+	body := []a.Statement{}
 
 	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
@@ -189,7 +190,7 @@ func (p *Parser) parseFor() Statement {
 		p.advance()
 	}
 
-	orelse := []Statement{}
+	orelse := []a.Statement{}
 	if p.current.Type == lexer.ELSE {
 		p.advance()
 
@@ -243,13 +244,13 @@ func (p *Parser) parseFor() Statement {
 	return forStmt
 }
 
-func (p *Parser) parseReturn() Statement {
+func (p *Parser) parseReturn() a.Statement {
 	startPos := p.current.Start
 	p.advance()
 	if p.current.Type == lexer.NEWLINE || p.current.Type == lexer.EOF {
 		endPos := p.current.Start
 		p.advance()
-		return &Return{Value: nil, Pos: Range{Start: startPos, End: endPos}}
+		return &a.Return{Value: nil, Pos: a.Range{Start: startPos, End: endPos}}
 	}
 
 	value := p.parseExpression(LOWEST)
@@ -259,10 +260,10 @@ func (p *Parser) parseReturn() Statement {
 		p.advance()
 	}
 
-	return &Return{Value: value, Pos: Range{Start: startPos, End: endPos}}
+	return &a.Return{Value: value, Pos: a.Range{Start: startPos, End: endPos}}
 }
 
-func (p *Parser) parseAugAssign() Statement {
+func (p *Parser) parseAugAssign() a.Statement {
 	start := p.current.Start
 	target := p.parsePrimary()
 	op := p.current.Type
@@ -276,17 +277,17 @@ func (p *Parser) parseAugAssign() Statement {
 		p.advance()
 	}
 
-	return &AugAssign{
+	return &a.AugAssign{
 		Target: target,
 		Op:     op,
 		Value:  value,
-		Pos:    Range{Start: start, End: end},
+		Pos:    a.Range{Start: start, End: end},
 	}
 }
 
-func (p *Parser) parseAssignment() Statement {
+func (p *Parser) parseAssignment() a.Statement {
 	start := p.current.Start
-	targets := []Expression{}
+	targets := []a.Expression{}
 	for {
 		target := p.parsePrimary()
 		targets = append(targets, target)
@@ -298,7 +299,7 @@ func (p *Parser) parseAssignment() Statement {
 
 	if p.current.Type != lexer.EQUAL {
 		p.error(
-			Range{
+			a.Range{
 				Start: start,
 				End:   p.current.Start,
 			},
@@ -318,7 +319,7 @@ func (p *Parser) parseAssignment() Statement {
 		p.advance()
 	} else if p.current.Type != lexer.EOF {
 		p.error(
-			Range{
+			a.Range{
 				Start: assgnEnd,
 				End:   p.current.End,
 			},
@@ -326,17 +327,17 @@ func (p *Parser) parseAssignment() Statement {
 		)
 	}
 
-	return &Assign{
+	return &a.Assign{
 		Targets: targets,
 		Value:   value,
-		Pos:     Range{Start: start, End: assgnEnd},
+		Pos:     a.Range{Start: start, End: assgnEnd},
 	}
 }
 
-func (p *Parser) parseWhile() Statement {
+func (p *Parser) parseWhile() a.Statement {
 	startPos := p.current.Start
 	p.advance()
-	whileStmt := &WhileLoop{}
+	whileStmt := &a.WhileLoop{}
 
 	whileStmt.Test = p.parseExpression(LOWEST)
 
@@ -367,7 +368,7 @@ func (p *Parser) parseWhile() Statement {
 	}
 	p.advance()
 
-	body := []Statement{}
+	body := []a.Statement{}
 	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
 		if stmt != nil {
@@ -380,15 +381,15 @@ func (p *Parser) parseWhile() Statement {
 	if p.current.Type == lexer.DEDENT {
 		p.advance()
 	}
-	whileStmt.Pos = Range{Start: startPos, End: endPos}
+	whileStmt.Pos = a.Range{Start: startPos, End: endPos}
 
 	return whileStmt
 }
 
-func (p *Parser) parseFunc() Statement {
+func (p *Parser) parseFunc() a.Statement {
 	startPos := p.current.Start
 	p.advance()
-	funcDef := &FunctionDef{}
+	funcDef := &a.FunctionDef{}
 
 	if p.current.Type != lexer.NAME {
 		p.errorCurrent("expected function name after 'def'")
@@ -397,14 +398,14 @@ func (p *Parser) parseFunc() Statement {
 	}
 
 	// funcDef.Name = p.current.Literal
-	funcDef.Name = &Name{
+	funcDef.Name = &a.Name{
 		ID: p.current.Literal,
-		Pos: Range{
+		Pos: a.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		},
 	}
-	funcDef.NamePos = Range{
+	funcDef.NamePos = a.Range{
 		Start: p.current.Start,
 		End:   p.current.End,
 	}
@@ -420,7 +421,7 @@ func (p *Parser) parseFunc() Statement {
 
 	p.advance() // advanced past left parantheses
 
-	args := []FuncArg{}
+	args := []a.FuncArg{}
 	seenDefault := false
 
 	if p.current.Type != lexer.RPAR {
@@ -438,13 +439,13 @@ func (p *Parser) parseFunc() Statement {
 			start := p.current.Start
 			end := p.current.End
 
-			arg := FuncArg{
+			arg := a.FuncArg{
 				// Name: p.current.Literal,
-				Name: &Name{
+				Name: &a.Name{
 					ID:  p.current.Literal,
-					Pos: Range{Start: start, End: end},
+					Pos: a.Range{Start: start, End: end},
 				},
-				Pos: Range{Start: start, End: end},
+				Pos: a.Range{Start: start, End: end},
 			}
 
 			p.advance()
@@ -512,7 +513,7 @@ func (p *Parser) parseFunc() Statement {
 	}
 	p.advance()
 
-	funcBody := []Statement{}
+	funcBody := []a.Statement{}
 
 	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
 		stmt := p.parseStatement()
@@ -527,20 +528,20 @@ func (p *Parser) parseFunc() Statement {
 
 	funcDef.Body = funcBody
 	endPos := p.current.Start
-	funcDef.Pos = Range{Start: startPos, End: endPos}
+	funcDef.Pos = a.Range{Start: startPos, End: endPos}
 
 	return funcDef
 }
 
-func (p *Parser) parseForTarget() Expression {
+func (p *Parser) parseForTarget() a.Expression {
 	if p.current.Type != lexer.NAME {
 		p.errorCurrent("expected variable name")
 		return nil
 	}
 
-	first := &Name{
+	first := &a.Name{
 		ID: p.current.Literal,
-		Pos: Range{
+		Pos: a.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		},
@@ -548,25 +549,25 @@ func (p *Parser) parseForTarget() Expression {
 	p.advance()
 
 	if p.current.Type == lexer.COMMA {
-		targets := []Expression{first}
+		targets := []a.Expression{first}
 
 		for p.current.Type == lexer.COMMA {
 			p.advance()
 
 			if p.current.Type != lexer.NAME {
 				p.errorCurrent("expected variable name")
-				return &Tuple{
+				return &a.Tuple{
 					Elts: targets,
-					Pos: Range{
+					Pos: a.Range{
 						Start: first.Pos.Start,
 						End:   targets[len(targets)-1].Position().End,
 					},
 				}
 			}
 			targets = append(
-				targets, &Name{
+				targets, &a.Name{
 					ID: p.current.Literal,
-					Pos: Range{
+					Pos: a.Range{
 						Start: p.current.Start,
 						End:   p.current.End,
 					},
@@ -574,9 +575,9 @@ func (p *Parser) parseForTarget() Expression {
 			p.advance()
 		}
 		lastName := targets[len(targets)-1]
-		return &Tuple{
+		return &a.Tuple{
 			Elts: targets,
-			Pos: Range{
+			Pos: a.Range{
 				Start: first.Pos.Start,
 				End:   lastName.Position().End,
 			},
@@ -585,16 +586,16 @@ func (p *Parser) parseForTarget() Expression {
 	return first
 }
 
-func (p *Parser) parseClass() Statement {
+func (p *Parser) parseClass() a.Statement {
 	// advance past `class`
-	def := ClassDef{}
+	def := a.ClassDef{}
 	startPos := p.current.Start
 	p.advance()
 
 	if p.current.Type != lexer.NAME {
 		p.errorCurrent("expected classname after `class`")
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
-		def.Pos = Range{
+		def.Pos = a.Range{
 			Start: startPos,
 			End:   p.current.End,
 		}
@@ -602,9 +603,9 @@ func (p *Parser) parseClass() Statement {
 	}
 
 	// def.Name = p.current.Literal
-	def.Name = &Name{
+	def.Name = &a.Name{
 		ID:  p.current.Literal,
-		Pos: Range{Start: startPos, End: p.current.End},
+		Pos: a.Range{Start: startPos, End: p.current.End},
 	}
 
 	p.advance()
@@ -612,7 +613,7 @@ func (p *Parser) parseClass() Statement {
 	if p.current.Type != lexer.COLON && (p.current.Type != lexer.LPAR) {
 		p.errorCurrent("expected `(` or `:` after class name")
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
-		def.Pos = Range{
+		def.Pos = a.Range{
 			Start: startPos,
 			End:   p.current.End,
 		}
@@ -623,9 +624,9 @@ func (p *Parser) parseClass() Statement {
 		p.advance() // advance past `(`
 		for p.current.Type != lexer.RPAR && p.current.Type != lexer.EOF {
 			if p.current.Type == lexer.NAME {
-				name := Name{
+				name := a.Name{
 					ID: p.current.Literal,
-					Pos: Range{
+					Pos: a.Range{
 						Start: p.current.Start,
 						End:   p.current.End,
 					},
@@ -651,7 +652,7 @@ func (p *Parser) parseClass() Statement {
 		p.errorCurrent("expected `:` after class header")
 		p.syncTo(lexer.COLON, lexer.EOF, lexer.RPAR)
 		if p.current.Type != lexer.COLON {
-			def.Pos = Range{
+			def.Pos = a.Range{
 				Start: startPos,
 				End:   p.current.End,
 			}
@@ -665,7 +666,7 @@ func (p *Parser) parseClass() Statement {
 		p.errorCurrent("expected newline after `:`")
 		p.syncTo(lexer.EOF, lexer.NEWLINE)
 		if p.current.Type != lexer.NEWLINE {
-			def.Pos = Range{
+			def.Pos = a.Range{
 				Start: startPos,
 				End:   p.current.End,
 			}
@@ -678,7 +679,7 @@ func (p *Parser) parseClass() Statement {
 		p.errorCurrent("expected indent after class definition")
 		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
 		if p.current.Type != lexer.INDENT {
-			def.Pos = Range{
+			def.Pos = a.Range{
 				Start: startPos,
 				End:   p.current.End,
 			}
@@ -689,7 +690,7 @@ func (p *Parser) parseClass() Statement {
 
 	p.advance() // move past indent
 
-	body := []Statement{}
+	body := []a.Statement{}
 	for p.current.Type != lexer.EOF && p.current.Type != lexer.DEDENT {
 		stmt := p.parseStatement()
 		if stmt != nil {
@@ -703,6 +704,6 @@ func (p *Parser) parseClass() Statement {
 
 	def.Body = body
 	endPos := p.current.End
-	def.Pos = Range{Start: startPos, End: endPos}
+	def.Pos = a.Range{Start: startPos, End: endPos}
 	return &def
 }

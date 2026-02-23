@@ -6,6 +6,7 @@ import (
 	"rahu/analyser"
 	"rahu/lsp"
 	"rahu/parser"
+	"rahu/parser/ast"
 	"rahu/source"
 )
 
@@ -104,7 +105,7 @@ func TestNameAtPos_NilModule_LSP(t *testing.T) {
 // -------------------------
 
 func TestContains_LSP(t *testing.T) {
-	rng := parser.Range{Start: 10, End: 20}
+	rng := ast.Range{Start: 10, End: 20}
 
 	tests := []struct {
 		pos      int

@@ -2,6 +2,8 @@ package parser
 
 import (
 	"testing"
+
+	"rahu/parser/ast"
 )
 
 // ===== Assignment Tests =====
@@ -15,7 +17,7 @@ func TestSimpleAssignment(t *testing.T) {
 		t.Fatalf("expected 1 statement, got %d", len(module.Body))
 	}
 
-	assign, ok := module.Body[0].(*Assign)
+	assign, ok := module.Body[0].(*ast.Assign)
 	if !ok {
 		t.Fatalf("expected Assign, got %T", module.Body[0])
 	}
@@ -24,12 +26,12 @@ func TestSimpleAssignment(t *testing.T) {
 		t.Fatalf("expected 1 target, got %d", len(assign.Targets))
 	}
 
-	target, ok := assign.Targets[0].(*Name)
+	target, ok := assign.Targets[0].(*ast.Name)
 	if !ok || target.ID != "x" {
 		t.Fatalf("expected target 'x', got %v", target)
 	}
 
-	value, ok := assign.Value.(*Number)
+	value, ok := assign.Value.(*ast.Number)
 	if !ok || value.Value != "5" {
 		t.Fatalf("expected value '5', got %v", value)
 	}
@@ -44,21 +46,21 @@ func TestExpressionAssignment(t *testing.T) {
 		t.Fatalf("expected 1 statement, got %d", len(module.Body))
 	}
 
-	assign := module.Body[0].(*Assign)
+	assign := module.Body[0].(*ast.Assign)
 
 	// Should be BinOp(1, +, BinOp(2, *, 3))
-	binop, ok := assign.Value.(*BinOp)
+	binop, ok := assign.Value.(*ast.BinOp)
 	if !ok {
 		t.Fatalf("expected BinOp for value, got %T", assign.Value)
 	}
 
-	if binop.Op != Add {
+	if binop.Op != ast.Add {
 		t.Fatalf("expected Add operator, got %v", binop.Op)
 	}
 
 	// Right side should be multiplication
-	rightBinOp, ok := binop.Right.(*BinOp)
-	if !ok || rightBinOp.Op != Mult {
+	rightBinOp, ok := binop.Right.(*ast.BinOp)
+	if !ok || rightBinOp.Op != ast.Mult {
 		t.Fatalf("expected multiplication on right, got %T", binop.Right)
 	}
 }
@@ -68,21 +70,21 @@ func TestExpressionAssignment(t *testing.T) {
 func TestBinaryOperations(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected Operator
+		expected ast.Operator
 	}{
-		{"x = 1 + 2", Add},
-		{"x = 1 - 2", Sub},
-		{"x = 1 * 2", Mult},
-		{"x = 1 / 2", Div},
-		{"x = 1 // 2", FloorDiv},
-		{"x = 1 % 2", Mod},
+		{"x = 1 + 2", ast.Add},
+		{"x = 1 - 2", ast.Sub},
+		{"x = 1 * 2", ast.Mult},
+		{"x = 1 / 2", ast.Div},
+		{"x = 1 // 2", ast.FloorDiv},
+		{"x = 1 % 2", ast.Mod},
 	}
 
 	for _, tt := range tests {
 		p := New(tt.input)
 		module := p.Parse()
-		assign := module.Body[0].(*Assign)
-		binop := assign.Value.(*BinOp)
+		assign := module.Body[0].(*ast.Assign)
+		binop := assign.Value.(*ast.BinOp)
 
 		if binop.Op != tt.expected {
 			t.Errorf("for %q: expected %v, got %v", tt.input, tt.expected, binop.Op)
@@ -95,26 +97,26 @@ func TestOperatorPrecedence(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	binop := assign.Value.(*BinOp)
+	assign := module.Body[0].(*ast.Assign)
+	binop := assign.Value.(*ast.BinOp)
 
 	// Top level should be addition
-	if binop.Op != Add {
+	if binop.Op != ast.Add {
 		t.Fatalf("expected top-level Add, got %v", binop.Op)
 	}
 
 	// Left should be Number(1)
-	if _, ok := binop.Left.(*Number); !ok {
+	if _, ok := binop.Left.(*ast.Number); !ok {
 		t.Fatalf("expected Number on left, got %T", binop.Left)
 	}
 
 	// Right should be BinOp(2, *, 3)
-	rightBinOp, ok := binop.Right.(*BinOp)
+	rightBinOp, ok := binop.Right.(*ast.BinOp)
 	if !ok {
 		t.Fatalf("expected BinOp on right, got %T", binop.Right)
 	}
 
-	if rightBinOp.Op != Mult {
+	if rightBinOp.Op != ast.Mult {
 		t.Fatalf("expected Mult on right, got %v", rightBinOp.Op)
 	}
 }
@@ -124,17 +126,17 @@ func TestParentheses(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	binop := assign.Value.(*BinOp)
+	assign := module.Body[0].(*ast.Assign)
+	binop := assign.Value.(*ast.BinOp)
 
 	// Top level should be multiplication
-	if binop.Op != Mult {
+	if binop.Op != ast.Mult {
 		t.Fatalf("expected top-level Mult, got %v", binop.Op)
 	}
 
 	// Left should be BinOp(1, +, 2)
-	leftBinOp, ok := binop.Left.(*BinOp)
-	if !ok || leftBinOp.Op != Add {
+	leftBinOp, ok := binop.Left.(*ast.BinOp)
+	if !ok || leftBinOp.Op != ast.Add {
 		t.Fatalf("expected Add on left, got %T", binop.Left)
 	}
 }
@@ -144,21 +146,21 @@ func TestParentheses(t *testing.T) {
 func TestComparison(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected CompareOp
+		expected ast.CompareOp
 	}{
-		{"x = 1 == 2", Eq},
-		{"x = 1 != 2", NotEq},
-		{"x = 1 < 2", Lt},
-		{"x = 1 <= 2", LtE},
-		{"x = 1 > 2", Gt},
-		{"x = 1 >= 2", GtE},
+		{"x = 1 == 2", ast.Eq},
+		{"x = 1 != 2", ast.NotEq},
+		{"x = 1 < 2", ast.Lt},
+		{"x = 1 <= 2", ast.LtE},
+		{"x = 1 > 2", ast.Gt},
+		{"x = 1 >= 2", ast.GtE},
 	}
 
 	for _, tt := range tests {
 		p := New(tt.input)
 		module := p.Parse()
-		assign := module.Body[0].(*Assign)
-		compare := assign.Value.(*Compare)
+		assign := module.Body[0].(*ast.Assign)
+		compare := assign.Value.(*ast.Compare)
 
 		if len(compare.Ops) != 1 || compare.Ops[0] != tt.expected {
 			t.Errorf("for %q: expected %v, got %v", tt.input, tt.expected, compare.Ops)
@@ -171,8 +173,8 @@ func TestComparisonChaining(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	compare, ok := assign.Value.(*Compare)
+	assign := module.Body[0].(*ast.Assign)
+	compare, ok := assign.Value.(*ast.Compare)
 	if !ok {
 		t.Fatalf("expected Compare, got %T", assign.Value)
 	}
@@ -181,7 +183,7 @@ func TestComparisonChaining(t *testing.T) {
 		t.Fatalf("expected 2 operators, got %d", len(compare.Ops))
 	}
 
-	if compare.Ops[0] != Lt || compare.Ops[1] != Lt {
+	if compare.Ops[0] != ast.Lt || compare.Ops[1] != ast.Lt {
 		t.Fatalf("expected both Lt, got %v", compare.Ops)
 	}
 }
@@ -193,13 +195,13 @@ func TestBooleanAnd(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	boolOp, ok := assign.Value.(*BooleanOp)
+	assign := module.Body[0].(*ast.Assign)
+	boolOp, ok := assign.Value.(*ast.BooleanOp)
 	if !ok {
 		t.Fatalf("expected BooleanOp, got %T", assign.Value)
 	}
 
-	if boolOp.Operator != And {
+	if boolOp.Operator != ast.And {
 		t.Fatalf("expected And, got %v", boolOp.Operator)
 	}
 
@@ -213,10 +215,10 @@ func TestBooleanOr(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	boolOp := assign.Value.(*BooleanOp)
+	assign := module.Body[0].(*ast.Assign)
+	boolOp := assign.Value.(*ast.BooleanOp)
 
-	if boolOp.Operator != Or {
+	if boolOp.Operator != ast.Or {
 		t.Fatalf("expected Or, got %v", boolOp.Operator)
 	}
 }
@@ -226,17 +228,17 @@ func TestBooleanPrecedence(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	orOp := assign.Value.(*BooleanOp)
+	assign := module.Body[0].(*ast.Assign)
+	orOp := assign.Value.(*ast.BooleanOp)
 
 	// Top level should be Or
-	if orOp.Operator != Or {
+	if orOp.Operator != ast.Or {
 		t.Fatalf("expected Or at top, got %v", orOp.Operator)
 	}
 
 	// Second value should be And(b, c)
-	andOp, ok := orOp.Values[1].(*BooleanOp)
-	if !ok || andOp.Operator != And {
+	andOp, ok := orOp.Values[1].(*ast.BooleanOp)
+	if !ok || andOp.Operator != ast.And {
 		t.Fatalf("expected And as second value, got %T", orOp.Values[1])
 	}
 }
@@ -246,17 +248,17 @@ func TestComplexBooleanExpression(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
+	assign := module.Body[0].(*ast.Assign)
 
 	// Should be Or(And(a>5, b<10), c==0)
-	orOp, ok := assign.Value.(*BooleanOp)
-	if !ok || orOp.Operator != Or {
+	orOp, ok := assign.Value.(*ast.BooleanOp)
+	if !ok || orOp.Operator != ast.Or {
 		t.Fatalf("expected Or at top level, got %T", assign.Value)
 	}
 
 	// First value should be And
-	andOp, ok := orOp.Values[0].(*BooleanOp)
-	if !ok || andOp.Operator != And {
+	andOp, ok := orOp.Values[0].(*ast.BooleanOp)
+	if !ok || andOp.Operator != ast.And {
 		t.Fatalf("expected And in first value, got %T", orOp.Values[0])
 	}
 
@@ -273,13 +275,13 @@ func TestUnaryMinus(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	unary, ok := assign.Value.(*UnaryOp)
+	assign := module.Body[0].(*ast.Assign)
+	unary, ok := assign.Value.(*ast.UnaryOp)
 	if !ok {
 		t.Fatalf("expected UnaryOp, got %T", assign.Value)
 	}
 
-	if unary.Op != USub {
+	if unary.Op != ast.USub {
 		t.Fatalf("expected USub, got %v", unary.Op)
 	}
 }
@@ -289,10 +291,10 @@ func TestUnaryNot(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	unary := assign.Value.(*UnaryOp)
+	assign := module.Body[0].(*ast.Assign)
+	unary := assign.Value.(*ast.UnaryOp)
 
-	if unary.Op != Not {
+	if unary.Op != ast.Not {
 		t.Fatalf("expected Not, got %v", unary.Op)
 	}
 }
@@ -309,7 +311,7 @@ func TestFunctionDefinition(t *testing.T) {
 		t.Fatalf("expected 1 statement, got %d", len(module.Body))
 	}
 
-	funcDef, ok := module.Body[0].(*FunctionDef)
+	funcDef, ok := module.Body[0].(*ast.FunctionDef)
 	if !ok {
 		t.Fatalf("expected FunctionDef, got %T", module.Body[0])
 	}
@@ -337,7 +339,7 @@ func TestFunctionWithDefaults(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	funcDef := module.Body[0].(*FunctionDef)
+	funcDef := module.Body[0].(*ast.FunctionDef)
 
 	if len(funcDef.Args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(funcDef.Args))
@@ -353,7 +355,7 @@ func TestFunctionWithDefaults(t *testing.T) {
 		t.Fatalf("expected default for second arg")
 	}
 
-	defaultVal, ok := funcDef.Args[1].Default.(*String)
+	defaultVal, ok := funcDef.Args[1].Default.(*ast.String)
 	if !ok || defaultVal.Value != "Hello" {
 		t.Fatalf("expected default 'Hello', got %v", funcDef.Args[1].Default)
 	}
@@ -364,13 +366,13 @@ func TestFunctionCall(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	call, ok := assign.Value.(*Call)
+	assign := module.Body[0].(*ast.Assign)
+	call, ok := assign.Value.(*ast.Call)
 	if !ok {
 		t.Fatalf("expected Call, got %T", assign.Value)
 	}
 
-	funcName, ok := call.Func.(*Name)
+	funcName, ok := call.Func.(*ast.Name)
 	if !ok || funcName.ID != "add" {
 		t.Fatalf("expected function 'add', got %v", call.Func)
 	}
@@ -385,8 +387,8 @@ func TestFunctionCallNoArgs(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	call := assign.Value.(*Call)
+	assign := module.Body[0].(*ast.Assign)
+	call := assign.Value.(*ast.Call)
 
 	if len(call.Args) != 0 {
 		t.Fatalf("expected 0 args, got %d", len(call.Args))
@@ -398,15 +400,15 @@ func TestFunctionCallMultipleArgs(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	call := assign.Value.(*Call)
+	assign := module.Body[0].(*ast.Assign)
+	call := assign.Value.(*ast.Call)
 
 	if len(call.Args) != 3 {
 		t.Fatalf("expected 3 args, got %d", len(call.Args))
 	}
 
 	for i, expected := range []string{"1", "2", "3"} {
-		num, ok := call.Args[i].(*Number)
+		num, ok := call.Args[i].(*ast.Number)
 		if !ok {
 			t.Fatalf("arg %d: expected Number, got %T", i, call.Args[i])
 		}
@@ -421,8 +423,8 @@ func TestFunctionCallTrailingComma(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	call := assign.Value.(*Call)
+	assign := module.Body[0].(*ast.Assign)
+	call := assign.Value.(*ast.Call)
 
 	if len(call.Args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(call.Args))
@@ -434,19 +436,19 @@ func TestFunctionCallNestedCalls(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	call := assign.Value.(*Call)
+	assign := module.Body[0].(*ast.Assign)
+	call := assign.Value.(*ast.Call)
 
 	if len(call.Args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(call.Args))
 	}
 
-	innerCall, ok := call.Args[0].(*Call)
+	innerCall, ok := call.Args[0].(*ast.Call)
 	if !ok {
 		t.Fatalf("expected first arg to be Call, got %T", call.Args[0])
 	}
 
-	innerFunc, ok := innerCall.Func.(*Name)
+	innerFunc, ok := innerCall.Func.(*ast.Name)
 	if !ok || innerFunc.ID != "bar" {
 		t.Fatalf("expected inner call to 'bar', got %v", innerCall.Func)
 	}
@@ -461,28 +463,28 @@ func TestFunctionCallExpressionArgs(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	call := assign.Value.(*Call)
+	assign := module.Body[0].(*ast.Assign)
+	call := assign.Value.(*ast.Call)
 
 	if len(call.Args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(call.Args))
 	}
 
 	// First arg should be BinOp(1, +, 2)
-	binop1, ok := call.Args[0].(*BinOp)
+	binop1, ok := call.Args[0].(*ast.BinOp)
 	if !ok {
 		t.Fatalf("expected first arg to be BinOp, got %T", call.Args[0])
 	}
-	if binop1.Op != Add {
+	if binop1.Op != ast.Add {
 		t.Fatalf("expected Add, got %v", binop1.Op)
 	}
 
 	// Second arg should be BinOp(x, *, y)
-	binop2, ok := call.Args[1].(*BinOp)
+	binop2, ok := call.Args[1].(*ast.BinOp)
 	if !ok {
 		t.Fatalf("expected second arg to be BinOp, got %T", call.Args[1])
 	}
-	if binop2.Op != Mult {
+	if binop2.Op != ast.Mult {
 		t.Fatalf("expected Mult, got %v", binop2.Op)
 	}
 }
@@ -495,12 +497,12 @@ func TestIfStatement(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	ifStmt, ok := module.Body[0].(*If)
+	ifStmt, ok := module.Body[0].(*ast.If)
 	if !ok {
 		t.Fatalf("expected If, got %T", module.Body[0])
 	}
 
-	if _, ok := ifStmt.Test.(*Compare); !ok {
+	if _, ok := ifStmt.Test.(*ast.Compare); !ok {
 		t.Fatalf("expected Compare in test, got %T", ifStmt.Test)
 	}
 
@@ -521,7 +523,7 @@ else:
 	p := New(input)
 	module := p.Parse()
 
-	ifStmt := module.Body[0].(*If)
+	ifStmt := module.Body[0].(*ast.If)
 
 	if len(ifStmt.Orelse) != 1 {
 		t.Fatalf("expected 1 else statement, got %d", len(ifStmt.Orelse))
@@ -538,14 +540,14 @@ else:
 	p := New(input)
 	module := p.Parse()
 
-	ifStmt := module.Body[0].(*If)
+	ifStmt := module.Body[0].(*ast.If)
 
 	if len(ifStmt.Orelse) != 1 {
 		t.Fatalf("expected 1 orelse statement, got %d", len(ifStmt.Orelse))
 	}
 
 	// Elif is another If in orelse
-	elifStmt, ok := ifStmt.Orelse[0].(*If)
+	elifStmt, ok := ifStmt.Orelse[0].(*ast.If)
 	if !ok {
 		t.Fatalf("expected elif to be If, got %T", ifStmt.Orelse[0])
 	}
@@ -562,17 +564,17 @@ func TestForLoop(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	forStmt, ok := module.Body[0].(*For)
+	forStmt, ok := module.Body[0].(*ast.For)
 	if !ok {
 		t.Fatalf("expected For, got %T", module.Body[0])
 	}
 
-	target, ok := forStmt.Target.(*Name)
+	target, ok := forStmt.Target.(*ast.Name)
 	if !ok || target.ID != "i" {
 		t.Fatalf("expected target 'i', got %v", forStmt.Target)
 	}
 
-	if _, ok := forStmt.Iter.(*Call); !ok {
+	if _, ok := forStmt.Iter.(*ast.Call); !ok {
 		t.Fatalf("expected Call in iter, got %T", forStmt.Iter)
 	}
 
@@ -587,9 +589,9 @@ func TestForLoopWithTupleUnpacking(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	forStmt := module.Body[0].(*For)
+	forStmt := module.Body[0].(*ast.For)
 
-	tuple, ok := forStmt.Target.(*Tuple)
+	tuple, ok := forStmt.Target.(*ast.Tuple)
 	if !ok {
 		t.Fatalf("expected Tuple target, got %T", forStmt.Target)
 	}
@@ -605,12 +607,12 @@ func TestWhileLoop(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	whileStmt, ok := module.Body[0].(*WhileLoop)
+	whileStmt, ok := module.Body[0].(*ast.WhileLoop)
 	if !ok {
 		t.Fatalf("expected WhileLoop, got %T", module.Body[0])
 	}
 
-	if _, ok := whileStmt.Test.(*Compare); !ok {
+	if _, ok := whileStmt.Test.(*ast.Compare); !ok {
 		t.Fatalf("expected Compare in test, got %T", whileStmt.Test)
 	}
 
@@ -625,9 +627,9 @@ func TestBreakStatement(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	whileStmt := module.Body[0].(*WhileLoop)
+	whileStmt := module.Body[0].(*ast.WhileLoop)
 
-	_, ok := whileStmt.Body[0].(*Break)
+	_, ok := whileStmt.Body[0].(*ast.Break)
 	if !ok {
 		t.Fatalf("expected Break, got %T", whileStmt.Body[0])
 	}
@@ -639,9 +641,9 @@ func TestContinueStatement(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	forStmt := module.Body[0].(*For)
+	forStmt := module.Body[0].(*ast.For)
 
-	_, ok := forStmt.Body[0].(*Continue)
+	_, ok := forStmt.Body[0].(*ast.Continue)
 	if !ok {
 		t.Fatalf("expected Continue, got %T", forStmt.Body[0])
 	}
@@ -654,8 +656,8 @@ func TestEmptyList(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	list, ok := assign.Value.(*List)
+	assign := module.Body[0].(*ast.Assign)
+	list, ok := assign.Value.(*ast.List)
 	if !ok {
 		t.Fatalf("expected List, got %T", assign.Value)
 	}
@@ -670,8 +672,8 @@ func TestSimpleList(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	list := assign.Value.(*List)
+	assign := module.Body[0].(*ast.Assign)
+	list := assign.Value.(*ast.List)
 
 	if len(list.Elts) != 3 {
 		t.Fatalf("expected 3 elements, got %d", len(list.Elts))
@@ -683,15 +685,15 @@ func TestNestedList(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	list := assign.Value.(*List)
+	assign := module.Body[0].(*ast.Assign)
+	list := assign.Value.(*ast.List)
 
 	if len(list.Elts) != 3 {
 		t.Fatalf("expected 3 elements, got %d", len(list.Elts))
 	}
 
 	// Second element should be a list
-	_, ok := list.Elts[1].(*List)
+	_, ok := list.Elts[1].(*ast.List)
 	if !ok {
 		t.Fatalf("expected nested List, got %T", list.Elts[1])
 	}
@@ -702,8 +704,8 @@ func TestListWithTrailingComma(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	list := assign.Value.(*List)
+	assign := module.Body[0].(*ast.Assign)
+	list := assign.Value.(*ast.List)
 
 	if len(list.Elts) != 3 {
 		t.Fatalf("expected 3 elements, got %d", len(list.Elts))
@@ -717,8 +719,8 @@ func TestStringLiteral(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	assign := module.Body[0].(*Assign)
-	str, ok := assign.Value.(*String)
+	assign := module.Body[0].(*ast.Assign)
+	str, ok := assign.Value.(*ast.String)
 	if !ok {
 		t.Fatalf("expected String, got %T", assign.Value)
 	}
@@ -740,8 +742,8 @@ func TestBooleanLiterals(t *testing.T) {
 	for _, tt := range tests {
 		p := New(tt.input)
 		module := p.Parse()
-		assign := module.Body[0].(*Assign)
-		boolean, ok := assign.Value.(*Boolean)
+		assign := module.Body[0].(*ast.Assign)
+		boolean, ok := assign.Value.(*ast.Boolean)
 		if !ok {
 			t.Fatalf("expected Boolean, got %T", assign.Value)
 		}
@@ -760,8 +762,8 @@ func TestReturnWithValue(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	funcDef := module.Body[0].(*FunctionDef)
-	returnStmt, ok := funcDef.Body[0].(*Return)
+	funcDef := module.Body[0].(*ast.FunctionDef)
+	returnStmt, ok := funcDef.Body[0].(*ast.Return)
 	if !ok {
 		t.Fatalf("expected Return, got %T", funcDef.Body[0])
 	}
@@ -777,8 +779,8 @@ func TestReturnEmpty(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	funcDef := module.Body[0].(*FunctionDef)
-	returnStmt := funcDef.Body[0].(*Return)
+	funcDef := module.Body[0].(*ast.FunctionDef)
+	returnStmt := funcDef.Body[0].(*ast.Return)
 
 	if returnStmt.Value != nil {
 		t.Fatalf("expected nil return value, got %v", returnStmt.Value)
@@ -804,19 +806,19 @@ print(result)`
 	}
 
 	// First should be function def
-	_, ok := module.Body[0].(*FunctionDef)
+	_, ok := module.Body[0].(*ast.FunctionDef)
 	if !ok {
 		t.Fatalf("expected FunctionDef first, got %T", module.Body[0])
 	}
 
 	// Second should be assignment
-	_, ok = module.Body[1].(*Assign)
+	_, ok = module.Body[1].(*ast.Assign)
 	if !ok {
 		t.Fatalf("expected Assign second, got %T", module.Body[1])
 	}
 
 	// Third should be expression statement
-	_, ok = module.Body[2].(*ExprStmt)
+	_, ok = module.Body[2].(*ast.ExprStmt)
 	if !ok {
 		t.Fatalf("expected ExprStmt third, got %T", module.Body[2])
 	}
@@ -831,20 +833,20 @@ func TestNestedControlFlow(t *testing.T) {
 	p := New(input)
 	module := p.Parse()
 
-	forStmt := module.Body[0].(*For)
+	forStmt := module.Body[0].(*ast.For)
 
 	if len(forStmt.Body) != 2 {
 		t.Fatalf("expected 2 statements in for body, got %d", len(forStmt.Body))
 	}
 
 	// First should be if
-	ifStmt, ok := forStmt.Body[0].(*If)
+	ifStmt, ok := forStmt.Body[0].(*ast.If)
 	if !ok {
 		t.Fatalf("expected If, got %T", forStmt.Body[0])
 	}
 
 	// If body should contain continue
-	_, ok = ifStmt.Body[0].(*Continue)
+	_, ok = ifStmt.Body[0].(*ast.Continue)
 	if !ok {
 		t.Fatalf("expected Continue in if body, got %T", ifStmt.Body[0])
 	}
