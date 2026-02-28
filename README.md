@@ -17,7 +17,6 @@ All internal source locations are represented as **byte offsets**, with line and
 column information derived only at API boundaries (LSP, diagnostics, editor
 integration).
 
----
 
 ## Current Status
 
@@ -105,7 +104,6 @@ integration).
 - Panic recovery in handlers
 - Type-safe handler registration
 
----
 
 ## Not Yet Implemented
 
@@ -144,7 +142,6 @@ integration).
 - No structured logging
 - No CI
 
----
 
 ## Project Structure
 
@@ -163,7 +160,6 @@ rahu/
 
 ```
 
----
 
 ## Architecture
 
@@ -186,13 +182,11 @@ editor keystroke
 The lexer and parser operate entirely on byte offsets.
 Line and column positions are derived only when interacting with the editor.
 
----
 
 ## License
 
 MIT
 
----
 
 ## Author
 
