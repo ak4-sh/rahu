@@ -289,7 +289,17 @@ func (p *Parser) parseAssignment() a.Statement {
 	start := p.current.Start
 	targets := []a.Expression{}
 	for {
-		target := p.parsePrimary()
+		target := p.parseExpression(LOWEST)
+		if target == nil {
+			p.errorCurrent("expected assignment target")
+			return &a.Assign{Targets: targets, Value: nil, Pos: a.Range{Start: start, End: p.current.Start}}
+		}
+		switch target.(type) {
+		case *a.Name, *a.Attribute, *a.Tuple, *a.List:
+		default:
+			p.error(target.Position(), "invalid assignment target")
+
+		}
 		targets = append(targets, target)
 		if p.current.Type != lexer.COMMA {
 			break
@@ -305,6 +315,11 @@ func (p *Parser) parseAssignment() a.Statement {
 			},
 			"expected '=' in assignment",
 		)
+		p.syncTo(lexer.EQUAL, lexer.NEWLINE, lexer.EOF)
+		if p.current.Type != lexer.EQUAL {
+			return &a.Assign{Targets: targets, Value: nil, Pos: a.Range{Start: start, End: p.current.Start}}
+		}
+
 	}
 
 	p.advance()

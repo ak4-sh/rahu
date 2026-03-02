@@ -124,6 +124,32 @@ func canStartExpression(t lexer.TokenType) bool {
 	}
 }
 
+func (p *Parser) parseAssignmentFromFirst(start int, first ast.Expression) ast.Statement {
+	targets := []ast.Expression{first}
+	for p.current.Type == lexer.COMMA {
+		p.advance()
+		t := p.parseExpression(LOWEST)
+		if t == nil {
+			p.errorCurrent("expected assignment target")
+			break
+		}
+		targets = append(targets, t)
+	}
+
+	if p.current.Type != lexer.EQUAL {
+		p.error(ast.Range{Start: start, End: p.current.Start}, "expected '=' in assignment")
+		p.syncTo(lexer.NEWLINE, lexer.EOF)
+		return &ast.Assign{Targets: targets, Value: nil, Pos: ast.Range{Start: start, End: p.current.Start}}
+	}
+	p.advance()
+	value := p.parseExpression(LOWEST)
+	end := p.current.Start
+	if p.current.Type == lexer.NEWLINE {
+		p.advance()
+	}
+	return &ast.Assign{Targets: targets, Value: value, Pos: ast.Range{Start: start, End: end}}
+}
+
 func (p *Parser) isAugAssign() bool {
 	switch p.peek.Type {
 	case lexer.PLUSEQUAL, lexer.MINEQUAL, lexer.SLASHEQUAL, lexer.STAREQUAL, lexer.DOUBLESLASHEQUAL, lexer.DOUBLESTAREQUAL, lexer.AMPEREQUAL, lexer.NOTEQUAL, lexer.LEFTSHIFTEQUAL, lexer.RIGHTSHIFTEQUAL:
@@ -131,6 +157,17 @@ func (p *Parser) isAugAssign() bool {
 	default:
 		return false
 	}
+}
+
+func (p *Parser) parseAugAssignFromFirst(start int, target ast.Expression) ast.Statement {
+	op := p.current.Type
+	p.advance()
+	value := p.parseExpression(LOWEST)
+	end := p.current.Start
+	if p.current.Type == lexer.NEWLINE {
+		p.advance()
+	}
+	return &ast.AugAssign{Target: target, Op: op, Value: value, Pos: ast.Range{Start: start, End: end}}
 }
 
 func (p *Parser) parseStatement() ast.Statement {
@@ -145,26 +182,47 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 
-	if p.current.Type == lexer.NAME {
-		if p.isAugAssign() {
-			return p.parseAugAssign()
-		} else if p.peek.Type == lexer.EQUAL {
-			return p.parseAssignment()
-		}
-	}
-
 	if p.current.Type == lexer.IF {
 		return p.parseIf()
 	}
 
 	if canStartExpression(p.current.Type) {
+		start := p.current.Start
 		expr := p.parseExpression(LOWEST)
+		if expr == nil {
+			p.errorCurrent("expected expression")
+			return nil
+		}
+
+		if p.current.Type == lexer.EQUAL || p.current.Type == lexer.COMMA {
+			switch expr.(type) {
+			case *ast.Name, *ast.Attribute, *ast.Tuple, *ast.List:
+				return p.parseAssignmentFromFirst(start, expr)
+			}
+		}
+
+		if p.current.Type == lexer.PLUSEQUAL ||
+			p.current.Type == lexer.MINEQUAL ||
+			p.current.Type == lexer.SLASHEQUAL ||
+			p.current.Type == lexer.STAREQUAL ||
+			p.current.Type == lexer.DOUBLESLASHEQUAL ||
+			p.current.Type == lexer.DOUBLESTAREQUAL ||
+			p.current.Type == lexer.AMPEREQUAL ||
+			p.current.Type == lexer.LEFTSHIFTEQUAL ||
+			p.current.Type == lexer.RIGHTSHIFTEQUAL {
+			switch expr.(type) {
+			case *ast.Name, *ast.Attribute:
+				return p.parseAugAssignFromFirst(start, expr)
+			}
+		}
+
 		if p.current.Type == lexer.NEWLINE {
 			p.advance()
 		} else if p.current.Type != lexer.EOF {
 			p.error(expr.Position(), "expected newline after expression")
 		}
 		return &ast.ExprStmt{Value: expr, Pos: expr.Position()}
+
 	}
 
 	if p.current.Type == lexer.DEF {
