@@ -165,6 +165,18 @@ func nameInExpr(expr ast.Expression, pos int) *ast.Name {
 			}
 		}
 		return nil
+
+	case *ast.Attribute:
+		// check base first
+		if name := nameInExpr(e.Value, pos); name != nil {
+			return name
+		}
+
+		if contains(e.Attr.Pos, pos) {
+			return e.Attr
+		}
+
+		return nil
 	default:
 		return nil
 	}
