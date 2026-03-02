@@ -19,6 +19,8 @@ type Resolver struct {
 
 	inClass      bool
 	currentClass *Symbol
+	ResolvedAttr map[*ast.Attribute]*Symbol
+	PendingAttrs []*ast.Attribute
 }
 
 type SemanticError struct {
@@ -28,12 +30,14 @@ type SemanticError struct {
 
 func newResolver(global *Scope) *Resolver {
 	return &Resolver{
-		current:    global,
-		errors:     nil,
-		loopDepth:  0,
-		Resolved:   make(map[*ast.Name]*Symbol),
-		inFunction: false,
-		inClass:    false,
+		current:      global,
+		errors:       nil,
+		loopDepth:    0,
+		Resolved:     make(map[*ast.Name]*Symbol),
+		inFunction:   false,
+		inClass:      false,
+		PendingAttrs: make([]*ast.Attribute, 0),
+		ResolvedAttr: make(map[*ast.Attribute]*Symbol),
 	}
 }
 
@@ -235,6 +239,11 @@ func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
 		for _, elt := range e.Elts {
 			r.visitExpr(elt, ctx)
 		}
+
+	case *ast.Attribute:
+		r.visitExpr(e.Value, Read)
+		r.PendingAttrs = append(r.PendingAttrs, e)
+
 	default:
 	}
 }

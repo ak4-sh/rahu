@@ -23,6 +23,7 @@ const (
 	SymImport
 	SymConstant
 	SymType
+	SymAttr
 )
 
 type Symbol struct {
@@ -31,6 +32,7 @@ type Symbol struct {
 	Span  ast.Range
 	Scope *Scope
 	Inner *Scope
+	Attrs *Scope
 }
 
 type ScopeKind int
@@ -41,6 +43,7 @@ const (
 	ScopeBlock
 	ScopeBuiltin
 	ScopeClass
+	ScopeAttr
 )
 
 type Scope struct {
