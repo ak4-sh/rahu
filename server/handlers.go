@@ -92,17 +92,22 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 }
 
 func (s *Server) DidChange(p *lsp.DidChangeTextDocumentParams) {
+	doc := s.Get(p.TextDocument.URI)
+	if doc == nil {
+		return
+	}
+
+	if doc.Version >= p.TextDocument.Version {
+		return
+	}
+
 	s.ApplyFullChange(
 		p.TextDocument.URI,
 		p.ContentChanges,
 		p.TextDocument.Version,
 	)
 
-	doc := s.Get(p.TextDocument.URI)
-	if doc != nil {
-		s.scheduleAnalysis(p.TextDocument.URI)
-		// s.analyze(doc)
-	}
+	s.scheduleAnalysis(p.TextDocument.URI)
 }
 
 func (s *Server) DidClose(p *lsp.DidCloseTextDocumentParams) {
