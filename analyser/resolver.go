@@ -187,40 +187,44 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		}
 
 	case *ast.Break:
-		if r.loopDepth == 0 {
-			r.error(s.Pos, "break outside loop")
-		}
+		r.checkLoopContext(s.Pos, "break")
 
 	case *ast.Continue:
-		if r.loopDepth == 0 {
-			r.error(s.Pos, "continue outside loop")
-		}
+		r.checkLoopContext(s.Pos, "continue")
 
 	}
+}
+
+func (r *Resolver) checkLoopContext(pos ast.Range, keyword string) {
+	if r.loopDepth == 0 {
+		r.error(pos, keyword+" outside loop")
+	}
+}
+
+func (r *Resolver) resolveName(e *ast.Name, ctx NameContext) {
+	var sym *Symbol
+	if ctx == Write {
+		sym = r.current.Symbols[e.ID]
+
+		if sym == nil {
+			r.error(e.Pos, "internal error: write to undefined local "+e.ID)
+			return
+		}
+	} else {
+		var ok bool
+		sym, ok = r.current.Lookup(e.ID)
+		if !ok || sym == nil {
+			r.error(e.Pos, ("undefined name: " + e.ID))
+			return
+		}
+	}
+	r.Resolved[e] = sym
 }
 
 func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
 	switch e := expr.(type) {
 	case *ast.Name:
-		var sym *Symbol
-		// writes must resolve in current scope only
-		// if not foun dthen scope builder impl is incorrect
-		if ctx == Write {
-			sym = r.current.Symbols[e.ID]
-
-			if sym == nil {
-				r.error(e.Pos, "internal error: write to undefined local "+e.ID)
-				return
-			}
-		} else {
-			var ok bool
-			sym, ok = r.current.Lookup(e.ID)
-			if !ok || sym == nil {
-				r.error(e.Pos, ("undefined name: " + e.ID))
-				return
-			}
-		}
-		r.Resolved[e] = sym
+		r.resolveName(e, ctx)
 		return
 
 	case *ast.Number, *ast.String, *ast.Boolean:

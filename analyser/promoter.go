@@ -19,7 +19,7 @@ func promoteOneClass(cls *Symbol) {
 	// 1. Methods
 	if cls.Inner != nil {
 		for _, s := range cls.Inner.Symbols {
-			cls.Members.Define(s)
+			cls.Members.Symbols[s.Name] = s
 		}
 	}
 

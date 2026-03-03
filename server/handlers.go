@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"rahu/analyser"
 	"rahu/jsonrpc"
 
 	a "rahu/analyser"
 	"rahu/lsp"
 	l "rahu/server/locate"
+	u "rahu/utils"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
@@ -21,7 +21,16 @@ func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
 	}
 }
 
-func (s *Server) hoverForSymbol(doc *Document, sym *analyser.Symbol) *lsp.Hover {
+func classOwner(scope *a.Scope) *a.Symbol {
+	for s := scope; s != nil; s = s.Parent {
+		if s.Kind == a.ScopeClass && s.Owner != nil {
+			return s.Owner
+		}
+	}
+	return nil
+}
+
+func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 	var kind string
 	switch sym.Kind {
 	case a.SymVariable:
@@ -44,20 +53,28 @@ func (s *Server) hoverForSymbol(doc *Document, sym *analyser.Symbol) *lsp.Hover 
 
 	if sym.Kind == a.SymFunction && sym.Inner != nil {
 		params := []string{}
-		for _, s := range sym.Inner.Symbols {
-			if s.Kind == a.SymParameter {
-				params = append(params, s.Name)
+		for _, p := range sym.Inner.Symbols {
+			if p.Kind == a.SymParameter {
+				params = append(params, p.Name)
 			}
 		}
+		name := sym.Name
+
+		if cls := classOwner(sym.Scope); cls != nil {
+			name = cls.Name + "." + name
+			kind = "method"
+		}
+
 		value = fmt.Sprintf(
 			"```python\n%s(%s)\n```",
-			sym.Name,
+			name,
 			strings.Join(params, ", "),
 		)
 	}
 
+	filename := u.FilenameFromURI(doc.URI)
 	line, _ := doc.LineIndex.OffsetToPosition(sym.Span.Start)
-	value += fmt.Sprintf("\n\nDefined at line %d", line+1)
+	value += fmt.Sprintf("\n\nDefined in %s:%d", filename, line+1)
 
 	return &lsp.Hover{
 		Contents: lsp.MarkupContent{
@@ -93,16 +110,22 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 }
 
 func (s *Server) DidChange(p *lsp.DidChangeTextDocumentParams) {
+	doc := s.Get(p.TextDocument.URI)
+	if doc == nil {
+		return
+	}
+
+	if doc.Version >= p.TextDocument.Version {
+		return
+	}
+
 	s.ApplyFullChange(
 		p.TextDocument.URI,
 		p.ContentChanges,
 		p.TextDocument.Version,
 	)
 
-	doc := s.Get(p.TextDocument.URI)
-	if doc != nil {
-		s.analyze(doc)
-	}
+	s.scheduleAnalysis(p.TextDocument.URI)
 }
 
 func (s *Server) DidClose(p *lsp.DidCloseTextDocumentParams) {

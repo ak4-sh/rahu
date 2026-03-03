@@ -53,6 +53,7 @@ type Scope struct {
 	Children []*Scope
 	Symbols  map[string]*Symbol
 	Kind     ScopeKind
+	Owner    *Symbol
 }
 
 func NewScope(parent *Scope, kind ScopeKind) *Scope {
@@ -177,6 +178,7 @@ func (s *Scope) Define(sym *Symbol) error {
 	if _, exists := s.Symbols[sym.Name]; exists {
 		return fmt.Errorf("duplicate symbol: %s", sym.Name)
 	}
+	sym.Scope = s
 	s.Symbols[sym.Name] = sym
 	return nil
 }
