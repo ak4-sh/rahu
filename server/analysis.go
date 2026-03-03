@@ -12,7 +12,6 @@ func (s *Server) analyze(doc *Document) {
 	module := p.Parse()
 
 	global := analyser.BuildScopes(module)
-	analyser.PromoteClassMembers(global)
 	resolver, semErrs := analyser.Resolve(module, global)
 
 	s.SetAnalysis(doc.URI, module, resolver.Resolved, resolver.ResolvedAttr, semErrs)
