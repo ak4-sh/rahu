@@ -9,6 +9,12 @@ const (
 	Write
 )
 
+type PendingAttr struct {
+	Node     *ast.Attribute
+	Class    *Symbol
+	SelfName string
+}
+
 type Resolver struct {
 	current   *Scope
 	errors    []SemanticError
@@ -20,7 +26,8 @@ type Resolver struct {
 	inClass      bool
 	currentClass *Symbol
 	ResolvedAttr map[*ast.Attribute]*Symbol
-	PendingAttrs []*ast.Attribute
+	PendingAttrs []PendingAttr
+	selfName     string
 }
 
 type SemanticError struct {
@@ -36,15 +43,17 @@ func newResolver(global *Scope) *Resolver {
 		Resolved:     make(map[*ast.Name]*Symbol),
 		inFunction:   false,
 		inClass:      false,
-		PendingAttrs: make([]*ast.Attribute, 0),
+		PendingAttrs: make([]PendingAttr, 0),
 		ResolvedAttr: make(map[*ast.Attribute]*Symbol),
+		selfName:     "",
 	}
 }
 
-func Resolve(m *ast.Module, global *Scope) ([]SemanticError, map[*ast.Name]*Symbol) {
+func Resolve(m *ast.Module, global *Scope) (*Resolver, []SemanticError) {
 	r := newResolver(global)
 	r.visitModule(m)
-	return r.errors, r.Resolved
+	r.BindMembers()
+	return r, r.errors
 }
 
 func (r *Resolver) visitModule(m *ast.Module) {
@@ -85,6 +94,7 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		prevScope := r.current
 		prevClass := r.currentClass
 		prevInClass := r.inClass
+		prevSelf := r.selfName
 
 		r.current = classSym.Inner
 		r.currentClass = classSym
@@ -97,6 +107,7 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		r.current = prevScope
 		r.currentClass = prevClass
 		r.inClass = prevInClass
+		r.selfName = prevSelf
 
 	case *ast.FunctionDef:
 		for _, arg := range s.Args {
@@ -114,6 +125,13 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 
 		prevScope := r.current
 		prevInFn := r.inFunction
+		prevSelf := r.selfName
+
+		if r.inClass && len(s.Args) > 0 {
+			r.selfName = s.Args[0].Name.ID
+		} else {
+			r.selfName = ""
+		}
 
 		r.current = fnSym.Inner
 		r.inFunction = true
@@ -124,6 +142,7 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 
 		r.current = prevScope
 		r.inFunction = prevInFn
+		r.selfName = prevSelf
 
 	case *ast.ExprStmt:
 		r.visitExpr(s.Value, Read)
@@ -242,7 +261,11 @@ func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
 
 	case *ast.Attribute:
 		r.visitExpr(e.Value, Read)
-		r.PendingAttrs = append(r.PendingAttrs, e)
+		r.PendingAttrs = append(r.PendingAttrs, PendingAttr{
+			Node:     e,
+			Class:    r.currentClass,
+			SelfName: r.selfName,
+		})
 
 	default:
 	}

@@ -27,12 +27,13 @@ const (
 )
 
 type Symbol struct {
-	Name  string
-	Kind  SymbolKind
-	Span  ast.Range
-	Scope *Scope
-	Inner *Scope
-	Attrs *Scope
+	Name    string
+	Kind    SymbolKind
+	Span    ast.Range
+	Scope   *Scope
+	Inner   *Scope
+	Attrs   *Scope
+	Members *Scope
 }
 
 type ScopeKind int
@@ -44,6 +45,7 @@ const (
 	ScopeBuiltin
 	ScopeClass
 	ScopeAttr
+	ScopeMember
 )
 
 type Scope struct {
