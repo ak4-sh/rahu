@@ -4,9 +4,6 @@ func PromoteClassMembers(scope *Scope) {
 	for _, sym := range scope.Symbols {
 		if sym.Kind == SymClass {
 			promoteOneClass(sym)
-			if sym.Inner != nil {
-				PromoteClassMembers(sym.Inner)
-			}
 		}
 		if sym.Inner != nil {
 			PromoteClassMembers(sym.Inner)
