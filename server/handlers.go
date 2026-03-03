@@ -10,6 +10,7 @@ import (
 	a "rahu/analyser"
 	"rahu/lsp"
 	l "rahu/server/locate"
+	u "rahu/utils"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
@@ -61,6 +62,7 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 
 		if cls := classOwner(sym.Scope); cls != nil {
 			name = cls.Name + "." + name
+			kind = "method"
 		}
 
 		value = fmt.Sprintf(
@@ -70,8 +72,9 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		)
 	}
 
+	filename := u.FilenameFromURI(doc.URI)
 	line, _ := doc.LineIndex.OffsetToPosition(sym.Span.Start)
-	value += fmt.Sprintf("\n\nDefined in :%d", line+1)
+	value += fmt.Sprintf("\n\nDefined in %s:%d", filename, line+1)
 
 	return &lsp.Hover{
 		Contents: lsp.MarkupContent{
