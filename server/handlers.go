@@ -5,10 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"rahu/analyser"
 	"rahu/jsonrpc"
 
 	a "rahu/analyser"
 	"rahu/lsp"
+	l "rahu/server/locate"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
@@ -19,27 +21,7 @@ func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
 	}
 }
 
-func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
-	doc := s.Get(p.TextDocument.URI)
-	if doc == nil {
-		return nil, jsonrpc.InvalidParamsError(nil)
-	}
-
-	offset := doc.LineIndex.PositionToOffset(
-		p.Position.Line,
-		p.Position.Character,
-	)
-
-	name := nameAtPos(doc.AST, offset)
-	if name == nil {
-		return nil, nil
-	}
-
-	sym, ok := doc.Symbols[name]
-	if !ok || sym == nil {
-		return nil, nil
-	}
-
+func (s *Server) hoverForSymbol(doc *Document, sym *analyser.Symbol) *lsp.Hover {
 	var kind string
 	switch sym.Kind {
 	case a.SymVariable:
@@ -82,7 +64,32 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 			Kind:  "markdown",
 			Value: value,
 		},
-	}, nil
+	}
+}
+
+func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
+	doc := s.Get(p.TextDocument.URI)
+	if doc == nil {
+		return nil, jsonrpc.InvalidParamsError(nil)
+	}
+
+	offset := doc.LineIndex.PositionToOffset(
+		p.Position.Line,
+		p.Position.Character,
+	)
+
+	if name := l.NameAtPos(doc.AST, offset); name != nil {
+		if sym, ok := doc.Symbols[name]; ok && sym != nil {
+			return s.hoverForSymbol(doc, sym), nil
+		}
+	}
+
+	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
+		if sym, ok := doc.AttrSymbols[attr]; ok && sym != nil {
+			return s.hoverForSymbol(doc, sym), nil
+		}
+	}
+	return nil, jsonrpc.InvalidParamsError(nil)
 }
 
 func (s *Server) DidChange(p *lsp.DidChangeTextDocumentParams) {
@@ -147,27 +154,29 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		p.Position.Character,
 	)
 
-	name := nameAtPos(doc.AST, offset)
-	if name == nil {
-		return nil, jsonrpc.InvalidParamsError(nil)
+	if name := l.NameAtPos(doc.AST, offset); name != nil {
+		if sym, ok := doc.Symbols[name]; ok && sym != nil {
+			if sym.Kind != a.SymBuiltin &&
+				sym.Kind != a.SymConstant &&
+				sym.Kind != a.SymType &&
+				!sym.Span.IsEmpty() {
+				return &lsp.Location{
+					URI:   doc.URI,
+					Range: ToRange(doc.LineIndex, sym.Span),
+				}, nil
+			}
+		}
 	}
 
-	sym, ok := doc.Symbols[name]
-	if !ok {
-		return nil, jsonrpc.InvalidParamsError(nil)
+	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
+		if sym, ok := doc.AttrSymbols[attr]; ok && sym != nil && !sym.Span.IsEmpty() {
+			return &lsp.Location{
+				URI:   doc.URI,
+				Range: ToRange(doc.LineIndex, sym.Span),
+			}, nil
+		}
 	}
-
-	if sym.Kind == a.SymBuiltin ||
-		sym.Kind == a.SymConstant ||
-		sym.Kind == a.SymType ||
-		sym.Span.IsEmpty() {
-		return nil, jsonrpc.InvalidParamsError(nil)
-	}
-
-	return &lsp.Location{
-		URI:   doc.URI,
-		Range: ToRange(doc.LineIndex, sym.Span),
-	}, nil
+	return nil, jsonrpc.InvalidParamsError(nil)
 }
 
 func (s *Server) scheduleAnalysis(uri lsp.DocumentURI) {
