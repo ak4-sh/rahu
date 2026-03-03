@@ -16,9 +16,10 @@ type Document struct {
 	Text      string
 	LineIndex *source.LineIndex
 
-	AST     *ast.Module
-	Symbols map[*ast.Name]*analyser.Symbol
-	SemErrs []analyser.SemanticError
+	AST         *ast.Module
+	Symbols     map[*ast.Name]*analyser.Symbol
+	SemErrs     []analyser.SemanticError
+	AttrSymbols map[*ast.Attribute]*analyser.Symbol
 }
 
 func (s *Server) Open(item lsp.TextDocumentItem) {
@@ -46,7 +47,7 @@ func (s *Server) Get(uri lsp.DocumentURI) *Document {
 	return &d
 }
 
-func (s *Server) SetAnalysis(uri lsp.DocumentURI, ast *ast.Module, symbols map[*ast.Name]*analyser.Symbol, semErrs []analyser.SemanticError) {
+func (s *Server) SetAnalysis(uri lsp.DocumentURI, ast *ast.Module, symbols map[*ast.Name]*analyser.Symbol, attrSymbols map[*ast.Attribute]*analyser.Symbol, semErrs []analyser.SemanticError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,6 +59,7 @@ func (s *Server) SetAnalysis(uri lsp.DocumentURI, ast *ast.Module, symbols map[*
 	doc.AST = ast
 	doc.Symbols = symbols
 	doc.SemErrs = semErrs
+	doc.AttrSymbols = attrSymbols
 }
 
 func (s *Server) Close(uri lsp.DocumentURI) {

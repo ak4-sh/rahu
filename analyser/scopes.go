@@ -5,7 +5,10 @@ import (
 )
 
 type ScopeBuilder struct {
-	current *Scope
+	currentClass *Symbol
+	current      *Scope
+	inFunction   bool
+	selfName     string
 }
 
 func BuildScopes(module *ast.Module) *Scope {
@@ -72,12 +75,34 @@ func (b *ScopeBuilder) visitIf(i *ast.If) {
 
 func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 	for _, t := range a.Targets {
-		if name, ok := t.(*ast.Name); ok {
+		switch tt := t.(type) {
+		case *ast.Name:
 			_ = b.current.Define(&Symbol{
-				Name: name.ID,
+				Name: tt.ID,
 				Kind: SymVariable,
-				Span: name.Pos,
+				Span: tt.Pos,
 			})
+
+		case *ast.Attribute:
+			if b.currentClass == nil || !b.inFunction {
+				break
+			}
+			base, ok := tt.Value.(*ast.Name)
+
+			if !ok || base.ID != b.selfName {
+				break
+			}
+
+			if b.currentClass.Attrs == nil {
+				b.currentClass.Attrs = NewScope(nil, ScopeAttr)
+			}
+
+			_ = b.currentClass.Attrs.Define(&Symbol{
+				Name: tt.Attr.ID,
+				Kind: SymAttr,
+				Span: tt.Attr.Pos,
+			})
+
 		}
 	}
 }
@@ -93,12 +118,18 @@ func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
 	classScope := NewScope(b.current, ScopeClass)
 	classSym.Inner = classScope
 	prev := b.current
+	prevClass := b.currentClass
+	prevSelf := b.selfName
 	b.current = classScope
+	b.currentClass = classSym
+	b.selfName = ""
 
 	for _, stmt := range c.Body {
 		b.visitStmt(stmt)
 	}
 	b.current = prev
+	b.currentClass = prevClass
+	b.selfName = prevSelf
 }
 
 func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
@@ -112,8 +143,16 @@ func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
 
 	fnScope := NewScope(b.current, ScopeFunction)
 	fnSym.Inner = fnScope
+	prevSelf := b.selfName
+	if b.current.Kind == ScopeClass && len(f.Args) > 0 {
+		b.selfName = f.Args[0].Name.ID
+	} else {
+		b.selfName = ""
+	}
 	prev := b.current
 	b.current = fnScope
+	prevInFunc := b.inFunction
+	b.inFunction = true
 
 	for _, arg := range f.Args {
 		_ = b.current.Define(&Symbol{
@@ -128,4 +167,6 @@ func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
 	}
 
 	b.current = prev
+	b.selfName = prevSelf
+	b.inFunction = prevInFunc
 }
