@@ -66,6 +66,10 @@ func (s *Server) Close(uri lsp.DocumentURI) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if t, ok := s.debounce[uri]; ok {
+		t.Stop()
+		delete(s.debounce, uri)
+	}
 	delete(s.docs, uri)
 }
 

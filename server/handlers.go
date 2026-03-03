@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"rahu/analyser"
 	"rahu/jsonrpc"
 
 	a "rahu/analyser"
@@ -21,7 +20,7 @@ func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
 	}
 }
 
-func (s *Server) hoverForSymbol(doc *Document, sym *analyser.Symbol) *lsp.Hover {
+func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 	var kind string
 	switch sym.Kind {
 	case a.SymVariable:
@@ -101,7 +100,8 @@ func (s *Server) DidChange(p *lsp.DidChangeTextDocumentParams) {
 
 	doc := s.Get(p.TextDocument.URI)
 	if doc != nil {
-		s.analyze(doc)
+		s.scheduleAnalysis(p.TextDocument.URI)
+		// s.analyze(doc)
 	}
 }
 
