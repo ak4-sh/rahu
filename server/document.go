@@ -37,14 +37,7 @@ func (s *Server) Open(item lsp.TextDocumentItem) {
 func (s *Server) Get(uri lsp.DocumentURI) *Document {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	doc, ok := s.docs[uri]
-	if !ok {
-		return nil
-	}
-
-	d := *doc
-	return &d
+	return s.docs[uri]
 }
 
 func (s *Server) SetAnalysis(uri lsp.DocumentURI, ast *ast.Module, symbols map[*ast.Name]*analyser.Symbol, attrSymbols map[*ast.Attribute]*analyser.Symbol, semErrs []analyser.SemanticError) {
