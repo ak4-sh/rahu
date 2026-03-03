@@ -8,6 +8,8 @@ import (
 	"rahu/parser"
 	"rahu/parser/ast"
 	"rahu/source"
+
+	l "rahu/server/locate"
 )
 
 // -------------------------
@@ -74,7 +76,7 @@ func TestNameAtPos_LSP(t *testing.T) {
 			li := source.NewLineIndex(tt.code)
 			offset := li.PositionToOffset(tt.line-1, tt.col-1)
 
-			name := nameAtPos(module, offset)
+			name := l.NameAtPos(module, offset)
 
 			if tt.expectedName == "" {
 				if name != nil {
@@ -95,7 +97,7 @@ func TestNameAtPos_LSP(t *testing.T) {
 }
 
 func TestNameAtPos_NilModule_LSP(t *testing.T) {
-	if nameAtPos(nil, 0) != nil {
+	if l.NameAtPos(nil, 0) != nil {
 		t.Fatal("expected nil for nil module")
 	}
 }
@@ -119,7 +121,7 @@ func TestContains_LSP(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := contains(rng, tt.pos); got != tt.expected {
+		if got := l.Contains(rng, tt.pos); got != tt.expected {
 			t.Fatalf("contains(%d) = %v, expected %v", tt.pos, got, tt.expected)
 		}
 	}
@@ -175,7 +177,7 @@ func TestDefinition_LSP(t *testing.T) {
 			p := parser.New(tt.code)
 			module := p.Parse()
 			global := analyser.BuildScopes(module)
-			_, resolved := analyser.Resolve(module, global)
+			resolver, _ := analyser.Resolve(module, global)
 
 			s.docs[uri] = &Document{
 				URI:       uri,
@@ -183,7 +185,7 @@ func TestDefinition_LSP(t *testing.T) {
 				Text:      tt.code,
 				LineIndex: source.NewLineIndex(tt.code),
 				AST:       module,
-				Symbols:   resolved,
+				Symbols:   resolver.Resolved,
 			}
 
 			params := &lsp.DefinitionParams{
@@ -239,7 +241,7 @@ y = x
 	p := parser.New(code)
 	module := p.Parse()
 	global := analyser.BuildScopes(module)
-	_, resolved := analyser.Resolve(module, global)
+	resolver, _ := analyser.Resolve(module, global)
 
 	s.docs[uri] = &Document{
 		URI:       uri,
@@ -247,7 +249,7 @@ y = x
 		Text:      code,
 		LineIndex: source.NewLineIndex(code),
 		AST:       module,
-		Symbols:   resolved,
+		Symbols:   resolver.Resolved,
 	}
 
 	tests := []struct {

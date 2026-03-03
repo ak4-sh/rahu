@@ -18,6 +18,10 @@ func NameAtPos(module *ast.Module, pos int) *ast.Name {
 	return nil
 }
 
-func contains(rng ast.Range, pos int) bool {
+func Contains(rng ast.Range, pos int) bool {
 	return pos >= rng.Start && pos <= rng.End
+}
+
+func contains(rng ast.Range, pos int) bool {
+	return Contains(rng, pos)
 }
