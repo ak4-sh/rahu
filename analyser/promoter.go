@@ -32,4 +32,16 @@ func promoteOneClass(cls *Symbol) {
 
 	// 3. (Next step) Base classes
 	// for _, base := range cls.Bases { ... }
+	for _, base := range cls.Bases {
+		if base == nil || base.Members == nil {
+			continue
+		}
+
+		for name, sym := range base.Members.Symbols {
+			// Do not override child definitions
+			if _, exists := cls.Members.Symbols[name]; !exists {
+				cls.Members.Symbols[name] = sym
+			}
+		}
+	}
 }

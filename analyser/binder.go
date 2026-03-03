@@ -5,7 +5,7 @@ import "rahu/parser/ast"
 func (r *Resolver) BindMembers() {
 	for _, p := range r.PendingAttrs {
 		a := p.Node
-		if a == nil || p.Class == nil || p.Class.Attrs == nil || p.SelfName == "" {
+		if a == nil || p.Class == nil || p.SelfName == "" {
 			continue
 		}
 
@@ -19,7 +19,12 @@ func (r *Resolver) BindMembers() {
 			continue
 		}
 
-		sym, ok := p.Class.Attrs.Lookup(a.Attr.ID)
+		if p.Class.Members == nil {
+			r.error(a.Attr.Pos, "internal error: missing class members")
+			continue
+		}
+
+		sym, ok := p.Class.Members.Lookup(a.Attr.ID)
 		if !ok {
 			r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.ID)
 			continue
@@ -40,6 +45,7 @@ func ResolveWithAttrs(
 ) {
 	r := newResolver(global)
 	r.visitModule(m)
+	PromoteClassMembers(global)
 	r.BindMembers()
 	return r.errors, r.Resolved, r.ResolvedAttr, r.PendingAttrs
 }

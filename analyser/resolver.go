@@ -52,6 +52,7 @@ func newResolver(global *Scope) *Resolver {
 func Resolve(m *ast.Module, global *Scope) (*Resolver, []SemanticError) {
 	r := newResolver(global)
 	r.visitModule(m)
+	PromoteClassMembers(global)
 	r.BindMembers()
 	return r, r.errors
 }
@@ -85,6 +86,30 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 
 		classSym := r.current.Symbols[s.Name.ID]
 		r.Resolved[s.Name] = classSym
+
+		for _, baseExpr := range s.Bases {
+			if baseExpr == nil {
+				continue
+			}
+
+			name, ok := baseExpr.(*ast.Name)
+			if !ok {
+				r.error(baseExpr.Position(), "unsupported base class expression")
+				continue
+			}
+
+			baseSym, ok := r.current.Lookup(name.ID)
+			if !ok || baseSym == nil {
+				r.error(name.Pos, "undefined base class: "+name.ID)
+			}
+
+			if baseSym.Kind != SymClass {
+				r.error(name.Pos, name.ID+" is not a class")
+				continue
+			}
+
+			classSym.Bases = append(classSym.Bases, baseSym)
+		}
 
 		if classSym == nil || classSym.Inner == nil {
 			r.error(s.Pos, "internal compiler error: missing class symbol or scope for: "+s.Name.ID)
