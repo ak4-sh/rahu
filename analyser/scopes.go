@@ -108,14 +108,16 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 }
 
 func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
+	classScope := NewScope(b.current, ScopeClass)
+
 	classSym := &Symbol{
 		Name: c.Name.ID,
 		Kind: SymClass,
 		Span: c.Pos,
 	}
+	classScope.Owner = classSym
 	_ = b.current.Define(classSym)
 
-	classScope := NewScope(b.current, ScopeClass)
 	classSym.Inner = classScope
 	prev := b.current
 	prevClass := b.currentClass
@@ -133,15 +135,18 @@ func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
 }
 
 func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
+	fnScope := NewScope(b.current, ScopeFunction)
+
 	fnSym := &Symbol{
 		Name: f.Name.ID,
 		Kind: SymFunction,
 		Span: f.NamePos,
 	}
 
+	fnScope.Owner = fnSym
+
 	_ = b.current.Define(fnSym)
 
-	fnScope := NewScope(b.current, ScopeFunction)
 	fnSym.Inner = fnScope
 	prevSelf := b.selfName
 	if b.current.Kind == ScopeClass && len(f.Args) > 0 {

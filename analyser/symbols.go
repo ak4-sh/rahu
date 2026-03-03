@@ -53,6 +53,7 @@ type Scope struct {
 	Children []*Scope
 	Symbols  map[string]*Symbol
 	Kind     ScopeKind
+	Owner    *Symbol
 }
 
 func NewScope(parent *Scope, kind ScopeKind) *Scope {
