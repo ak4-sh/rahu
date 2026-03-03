@@ -55,6 +55,7 @@ type Lexer struct {
 	atLineStart   bool
 	pendingTokens []Token
 	indentChar    byte
+	parenDepth    int
 }
 
 func New(input string) *Lexer {
@@ -311,7 +312,7 @@ func (l *Lexer) NextToken() Token {
 		return tok
 	}
 
-	if l.atLineStart {
+	if l.atLineStart && l.parenDepth == 0 {
 		spaces, err := l.countLeadingSpaces()
 		if err != nil {
 			pos := l.position
@@ -388,9 +389,21 @@ func (l *Lexer) NextToken() Token {
 		}
 	}
 
+	if l.atLineStart && l.parenDepth > 0 {
+		l.atLineStart = false
+	}
+
 	l.skipWhitespaceAndComments()
 
 	if l.ch == 0 {
+		if len(l.indentStack) > 1 {
+			l.indentStack = l.indentStack[:len(l.indentStack)-1]
+			return Token{
+				Type:  DEDENT,
+				Start: l.position,
+				End:   l.position,
+			}
+		}
 		pos := l.position
 		return Token{
 			Type:  EOF,
@@ -402,6 +415,10 @@ func (l *Lexer) NextToken() Token {
 	if l.ch == '\n' {
 		start := l.position
 		l.readChar()
+		if l.parenDepth > 0 {
+			l.atLineStart = false
+			return l.NextToken()
+		}
 		l.atLineStart = true
 		return Token{
 			Type:  NEWLINE,
@@ -453,6 +470,15 @@ func (l *Lexer) NextToken() Token {
 	if typ, ok := SingleCharOps[string(l.ch)]; ok {
 		start := l.position
 		lit := string(l.ch)
+		switch l.ch {
+		case '(', '[', '{':
+			l.parenDepth++
+		case ')', ']', '}':
+			if l.parenDepth > 0 {
+				l.parenDepth--
+			}
+		}
+
 		l.readChar()
 		return Token{
 			Type:    typ,
