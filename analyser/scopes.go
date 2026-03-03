@@ -1,6 +1,8 @@
 package analyser
 
 import (
+	"fmt"
+
 	"rahu/parser/ast"
 )
 
@@ -40,6 +42,75 @@ func (b *ScopeBuilder) visitStmt(stmt ast.Statement) {
 		b.visitWhile(s)
 	case *ast.ClassDef:
 		b.visitClassDef(s)
+
+	case *ast.ExprStmt:
+		b.visitExpr(s.Value)
+	case *ast.Return:
+		if s.Value != nil {
+			b.visitExpr(s.Value)
+		}
+	case *ast.AugAssign:
+		b.visitAugAssign(s)
+	case *ast.Break:
+	case *ast.Continue:
+	default:
+		panic(fmt.Sprintf("unhandled statement type %T", s))
+	}
+}
+
+func (b *ScopeBuilder) visitAugAssign(a *ast.AugAssign) {
+	switch tt := a.Target.(type) {
+	case *ast.Name:
+		_ = b.current.Define(&Symbol{
+			Name: tt.ID,
+			Kind: SymVariable,
+			Span: tt.Pos,
+		})
+
+	case *ast.Attribute:
+		if b.currentClass != nil && b.inFunction {
+			base, ok := tt.Value.(*ast.Name)
+			if ok && base.ID == b.selfName {
+				if b.currentClass.Attrs == nil {
+					b.currentClass.Attrs = NewScope(nil, ScopeAttr)
+				}
+				_ = b.currentClass.Attrs.Define(&Symbol{
+					Name: tt.Attr.ID,
+					Kind: SymAttr,
+					Span: tt.Attr.Pos,
+				})
+			}
+		}
+	}
+
+	b.visitExpr(a.Value)
+}
+
+func (b *ScopeBuilder) visitExpr(value ast.Expression) {
+	switch v := value.(type) {
+	case *ast.Name:
+	case *ast.Call:
+		b.visitExpr(v.Func)
+		for _, arg := range v.Args {
+			b.visitExpr(arg)
+		}
+
+	case *ast.Attribute:
+		b.visitExpr(v.Value)
+
+	case *ast.BinOp:
+		b.visitExpr(v.Left)
+		b.visitExpr(v.Right)
+
+	case *ast.UnaryOp:
+		b.visitExpr(v.Operand)
+
+	case *ast.Compare:
+		b.visitExpr(v.Left)
+		for _, c := range v.Right {
+			b.visitExpr(c)
+		}
+
 	}
 }
 
@@ -105,6 +176,8 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 
 		}
 	}
+
+	b.visitExpr(a.Value)
 }
 
 func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
