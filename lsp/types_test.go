@@ -132,7 +132,7 @@ func TestTextDocumentContentChangeEventIncrementalChange(t *testing.T) {
 			Start: Position{Line: 5, Character: 10},
 			End:   Position{Line: 5, Character: 20},
 		},
-		RangeLength: intPtr(10),
+		RangeLength: new(10),
 		Text:        "replacement",
 	}
 
@@ -239,7 +239,7 @@ func TestInitializeParamsMarshalUnmarshal(t *testing.T) {
 		RootURI:   &rootURI,
 		Capabilities: ClientCapabilities{
 			Workspace: &WorkspaceClientCapabilities{
-				ApplyEdit: boolPtr(true),
+				ApplyEdit: new(true),
 			},
 			TextDocument: &TextDocumentClientCapabilities{},
 		},
@@ -615,14 +615,17 @@ func TestPublishDiagnosticsParamsMarshalUnmarshal(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func intPtr(i int) *int {
-	return &i
+	return new(i)
 }
 
+//go:fix inline
 func boolPtr(b bool) *bool {
-	return &b
+	return new(b)
 }
 
+//go:fix inline
 func strPtr(s string) *string {
-	return &s
+	return new(s)
 }
