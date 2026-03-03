@@ -51,7 +51,9 @@ func TestSingleNumber(t *testing.T) {
 
 func TestBasicIndent(t *testing.T) {
 	input := "def foo():\n    pass"
-	want := []TokenType{DEF, NAME, LPAR, RPAR, COLON, NEWLINE, INDENT, PASS, EOF}
+	want := []TokenType{
+		DEF, NAME, LPAR, RPAR, COLON, NEWLINE, INDENT, PASS, DEDENT, EOF,
+	}
 	l := New(input)
 	count := 0
 	for {
@@ -71,3 +73,34 @@ func TestBasicIndent(t *testing.T) {
 }
 
 // TODO: add tests for single indent, empty input, multiple dedents and string literals
+
+func TestEOFFlushesDedent(t *testing.T) {
+	input := "if x:\n    y = 1"
+	l := New(input)
+
+	expected := []TokenType{
+		IF,
+		NAME,
+		COLON,
+		NEWLINE,
+		INDENT,
+		NAME,
+		EQUAL,
+		NUMBER,
+		DEDENT,
+		EOF,
+	}
+
+	for i, want := range expected {
+		tok := l.NextToken()
+
+		if tok.Type != want {
+			t.Fatalf(
+				"token %d mismatch: expected %v but got %v",
+				i,
+				want,
+				tok.Type,
+			)
+		}
+	}
+}
