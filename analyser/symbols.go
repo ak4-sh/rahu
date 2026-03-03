@@ -34,6 +34,7 @@ type Symbol struct {
 	Inner   *Scope
 	Attrs   *Scope
 	Members *Scope
+	Bases   []*Symbol
 }
 
 type ScopeKind int
@@ -224,12 +225,20 @@ func (k SymbolKind) String() string {
 
 func (k ScopeKind) String() string {
 	switch k {
-	case ScopeBlock:
-		return "block"
-	case ScopeFunction:
-		return "function"
 	case ScopeGlobal:
 		return "global"
+	case ScopeFunction:
+		return "function"
+	case ScopeBlock:
+		return "block"
+	case ScopeBuiltin:
+		return "builtin"
+	case ScopeClass:
+		return "class"
+	case ScopeAttr:
+		return "attr"
+	case ScopeMember:
+		return "member"
 	default:
 		return "unknown"
 	}
