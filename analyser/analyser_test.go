@@ -41,7 +41,7 @@ func TestSimpleResolution(t *testing.T) {
 	module := p.Parse()
 	global := BuildScopes(module)
 
-	errs, resolved := Resolve(module, global)
+	resolver, errs := Resolve(module, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
 	}
@@ -49,7 +49,7 @@ func TestSimpleResolution(t *testing.T) {
 	var xUses []*ast.Name
 	collectNames(module, &xUses)
 
-	if resolved[xUses[0]].Name != "x" {
+	if resolver.Resolved[xUses[0]].Name != "x" {
 		t.Fatal("x did not resolve to symbol x")
 	}
 }
