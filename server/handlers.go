@@ -20,6 +20,15 @@ func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
 	}
 }
 
+func classOwner(scope *a.Scope) *a.Symbol {
+	for s := scope; s != nil; s = s.Parent {
+		if s.Kind == a.ScopeClass && s.Owner != nil {
+			return s.Owner
+		}
+	}
+	return nil
+}
+
 func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 	var kind string
 	switch sym.Kind {
@@ -43,20 +52,26 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 
 	if sym.Kind == a.SymFunction && sym.Inner != nil {
 		params := []string{}
-		for _, s := range sym.Inner.Symbols {
-			if s.Kind == a.SymParameter {
-				params = append(params, s.Name)
+		for _, p := range sym.Inner.Symbols {
+			if p.Kind == a.SymParameter {
+				params = append(params, p.Name)
 			}
 		}
+		name := sym.Name
+
+		if cls := classOwner(sym.Scope); cls != nil {
+			name = cls.Name + "." + name
+		}
+
 		value = fmt.Sprintf(
 			"```python\n%s(%s)\n```",
-			sym.Name,
+			name,
 			strings.Join(params, ", "),
 		)
 	}
 
 	line, _ := doc.LineIndex.OffsetToPosition(sym.Span.Start)
-	value += fmt.Sprintf("\n\nDefined at line %d", line+1)
+	value += fmt.Sprintf("\n\nDefined in :%d", line+1)
 
 	return &lsp.Hover{
 		Contents: lsp.MarkupContent{
