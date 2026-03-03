@@ -37,6 +37,7 @@ integration).
 
 **Statements**
 - Assignment
+- Augmented assignment (`+=`, `-=`, etc.)
 - `if` / `elif` / `else`
 - `for` (with `else`)
 - `while`
@@ -50,6 +51,7 @@ integration).
 - Boolean `and` / `or`
 - Unary `-` / `+` / `not`
 - Function calls
+- Attribute access (`obj.attr`)
 - List literals
 - Tuple literals and unpacking
 
@@ -94,6 +96,7 @@ integration).
   - functions
   - parameters
   - class names
+  - attribute access
 - Graceful shutdown (`shutdown` / `exit`)
 - DefinitionProvider capability advertised
 
@@ -111,12 +114,10 @@ integration).
 
 ### Language features missing or incomplete
 
-- Attribute access (`obj.attr`) **(AST + parser not implemented)**
 - Imports (`import`, `from ... import`)
 - Subscripts and slicing (`a[0]`, `a[1:3]`)
 - Dictionaries and sets
 - `try` / `except` / `finally`
-- Augmented assignment (`+=`, `-=`, etc.)
 - `*args` / `**kwargs`
 - `with`
 - `lambda`
