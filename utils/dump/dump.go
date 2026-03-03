@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -10,18 +11,38 @@ import (
 	"rahu/parser/ast"
 )
 
-// -------------------- ANSI COLORS --------------------
-
-const (
-	bold    = "\033[1m"
-	red     = "\033[31m"
-	reset   = "\033[0m"
-	blue    = "\033[34m"
-	cyan    = "\033[36m"
-	green   = "\033[32m"
-	yellow  = "\033[33m"
-	magenta = "\033[35m"
+var (
+	bold    string
+	red     string
+	reset   string
+	blue    string
+	cyan    string
+	green   string
+	yellow  string
+	magenta string
 )
+
+func initColors(noColor bool) {
+	if noColor {
+		bold = ""
+		red = ""
+		reset = ""
+		blue = ""
+		cyan = ""
+		green = ""
+		yellow = ""
+		magenta = ""
+	} else {
+		bold = "\033[1m"
+		red = "\033[31m"
+		reset = "\033[0m"
+		blue = "\033[34m"
+		cyan = "\033[36m"
+		green = "\033[32m"
+		yellow = "\033[33m"
+		magenta = "\033[35m"
+	}
+}
 
 func header(s string) {
 	fmt.Println(bold + cyan + s + reset)
@@ -42,6 +63,11 @@ func warnLine(s string) {
 // ------------------------------------------------------
 
 func main() {
+	noColor := flag.Bool("no-color", false, "Disable colored output")
+	flag.Parse()
+
+	initColors(*noColor)
+
 	src, err := os.ReadFile("temp.py")
 	if err != nil {
 		panic(err)
