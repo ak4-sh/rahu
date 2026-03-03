@@ -8,6 +8,8 @@ import (
 	"rahu/parser"
 	"rahu/parser/ast"
 	"rahu/source"
+
+	l "rahu/server/locate"
 )
 
 // --------------------
@@ -46,7 +48,7 @@ func TestNameAtPos(t *testing.T) {
 			// convert human (1-based) → LSP (0-based) → offset
 			offset := li.PositionToOffset(tt.line-1, tt.col-1)
 
-			name := nameAtPos(module, offset)
+			name := l.NameAtPos(module, offset)
 
 			if tt.expectedName == "" {
 				if name != nil {
@@ -67,7 +69,7 @@ func TestNameAtPos(t *testing.T) {
 }
 
 func TestNameAtPos_NilModule(t *testing.T) {
-	if nameAtPos(nil, 0) != nil {
+	if l.NameAtPos(nil, 0) != nil {
 		t.Error("expected nil for nil module")
 	}
 }
@@ -100,7 +102,7 @@ func TestContains(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := li.PositionToOffset(tt.line, tt.char)
-			if contains(rng, pos) != tt.expected {
+			if l.Contains(rng, pos) != tt.expected {
 				t.Fatalf("unexpected result")
 			}
 		})
@@ -137,7 +139,7 @@ func TestDefinition(t *testing.T) {
 				p := parser.New(tt.code)
 				module := p.Parse()
 				global := analyser.BuildScopes(module)
-				_, resolved := analyser.Resolve(module, global)
+				resolver, _ := analyser.Resolve(module, global)
 
 				s.docs[uri] = &Document{
 					URI:       uri,
@@ -145,7 +147,7 @@ func TestDefinition(t *testing.T) {
 					Text:      tt.code,
 					LineIndex: source.NewLineIndex(tt.code),
 					AST:       module,
-					Symbols:   resolved,
+					Symbols:   resolver.Resolved,
 				}
 			}
 
