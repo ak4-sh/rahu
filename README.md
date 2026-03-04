@@ -1,349 +1,317 @@
 # rahu
 
-A Python Language Server Protocol (LSP) implementation written in Go.
+A Python Language Server built in Go from scratch — no LSP libraries, no Python runtime, just pure static goodness.
 
-## About
+## Why?
 
-Rahu is a from-scratch Python language server — lexer, parser, semantic analyser,
-JSON-RPC transport, and LSP server, all hand-written in Go with no third-party
-LSP libraries. It communicates over stdin/stdout using the LSP specification and
-can be connected to any editor that supports custom language servers.
+Most language servers are... complicated. Rahu exists to understand Python at the source level — how does code actually flow, what names mean, how do classes inherit from each other?
 
-The project prioritizes **correct semantics, clear architecture, and precise
-source mapping** over execution or runtime behavior. There is no interpreter or
-interop with a Python runtime - this is purely a static analysis tool.
+It's not meant to replace Pyright or pylsp. It's meant to be **understandable**. Every line of code here should be readable, every data structure traceable. If you want to understand how a language server actually works under the hood, this is the repo.
 
-All internal source locations are represented as **byte offsets**, with line and
-column information derived only at API boundaries (LSP, diagnostics, editor
-integration).
-
+All internal source locations are stored as **byte offsets**. Line and column only appear at the LSP boundary.
 
 ## Current Status
 
-### What Works Today
+### Lexer — full Python tokenization
 
-### Lexer — full Python tokenization (byte-offset based)
+- Single and multi-character operators (`+`, `==`, `//`, `**`, `>>=`, `:=`, etc.)
+- String literals (single-line and triple-quoted)
+- Number literals (int, float, hex, binary, octal)
+- Keywords and identifiers
+- INDENT/DEDENT with tab/space consistency enforcement
+- All positions stored as half-open byte ranges `[start, end)`
 
-- All single and multi-character operators (`+`, `==`, `//`, `**`, `>>=`, etc.)
-- String literals (single-line and triple-quoted multi-line)
-- Number literals (integers and floats)
-- Identifier and keyword recognition
-- INDENT/DEDENT emission with tab/space consistency enforcement
-- Token positions stored as half-open byte ranges `[start, end)`
-- No line/column tracking in the lexer (derived later via line index)
+### Parser — recursive descent + Pratt
 
-### Parser — recursive descent with Pratt expression parsing
-
-**Statements**
-- Assignment
-- Augmented assignment (`+=`, `-=`, etc.)
+**Statements working:**
+- Assignment and augmented assignment (`+=`, `-=`, etc.)
 - `if` / `elif` / `else`
-- `for` (with `else`)
-- `while`
-- `def` (with default arguments)
-- `class` (ClassDef implemented)
+- `for` (with `else`) and `while`
+- `def` with default arguments
+- `class` with inheritance (base class support!)
 - `return`, `break`, `continue`
 
-**Expressions**
-- Binary operations
-- Comparison chaining (`1 < x < 10`)
-- Boolean `and` / `or`
-- Unary `-` / `+` / `not`
-- Function calls
-- Attribute access (`obj.attr`)
-- List literals
-- Tuple literals and unpacking
+**Expressions:**
+- Binary ops, comparisons (including chained `1 < x < 10`)
+- Boolean `and` / `or`, unary `-` / `+` / `not`
+- Function calls, attribute access (`obj.attr`)
+- List literals, tuple unpacking
+- Right-associative `**` operator
 
-- Right-associative `**` (power) operator
-- Error recovery — parsing continues after syntax errors
-- Source ranges on every AST node (byte offsets)
-- Extensive parser test coverage
+Parser recovers from errors — it'll keep parsing even if something's syntactically wrong. Every AST node carries its byte span.
 
-### Semantic Analyser — two-pass scope builder and resolver
+### Semantic Analyser — LEGB scoping + inheritance
 
-- Lexical scope construction:
-  - builtin → global → function → class
-- Python-style LEGB name resolution
-- Builtin scope includes:
-  `print`, `range`, `len`, `input`, `int`, `str`, `float`, `bool`, `list`,
-  `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`, `enumerate`,
-  `zip`, `map`, `filter`, `open`, `super`, `hasattr`, `getattr`, `setattr`
-- Symbol kinds:
-  - variable
-  - function
-  - class
-  - parameter
-  - builtin
-- Detects:
-  - undefined names
-  - `return` outside function
-  - `break` / `continue` outside loop
-- Deterministic `*Name → *Symbol` resolution map
-- Source spans stored as byte ranges (LSP-ready)
+- Lexical scopes: builtin → global → function → class
+- Python-style name resolution (LEGB)
+- Builtin functions: `print`, `range`, `len`, `int`, `str`, `bool`, `list`, `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `open`, `super`, `hasattr`, `getattr`, `setattr`, `input`, `float`
+
+**Symbol kinds:**
+- variable, function, class, parameter, builtin, attribute
+
+**What it catches:**
+- Undefined names
+- `return` outside a function
+- `break` / `continue` outside a loop
+
+**Class inheritance:**
+- Tracks base classes in class definitions
+- Promotes base class members into child classes
+- Overridden methods are respected (Dog's `speak` overrides Animal's)
+- Instance attributes discovered via `self.x = ...` are tracked
 
 ### LSP Server — JSON-RPC 2.0 over stdio
 
-- Initialization and capability negotiation
+- Initialize/shutdown lifecycle
 - Document lifecycle (`didOpen`, `didChange`, `didClose`)
-- Full and incremental text synchronization
-- Central `Document` model with:
-  - raw text
-  - persistent line index (offset ↔ position mapping)
-- Diagnostic publishing (syntax + semantic errors)
-- Go-to-definition (`textDocument/definition`)
-  - variables
-  - functions
-  - parameters
-  - class names
-  - attribute access
-- Graceful shutdown (`shutdown` / `exit`)
-- DefinitionProvider capability advertised
+- Full and incremental text sync
+- Publishes diagnostics (syntax + semantic errors)
+- **Go-to-definition** — jumps to variables, functions, parameters, classes, attributes
+- **Hover** — basic implementation showing symbol info
+- `definitionProvider` and `hoverProvider` capabilities advertised
 
 ### JSON-RPC Transport
 
-- LSP Content-Length framing
+- Content-Length framing
 - Request/response correlation
 - Notification dispatch
 - Panic recovery in handlers
-- Type-safe handler registration
 
+## What's Missing
 
-## Not Yet Implemented
-
-### Language features missing or incomplete
+### Language features
 
 - Imports (`import`, `from ... import`)
 - Subscripts and slicing (`a[0]`, `a[1:3]`)
 - Dictionaries and sets
 - `try` / `except` / `finally`
 - `*args` / `**kwargs`
-- `with`
-- `lambda`
-- Comprehensions
-- Decorators
-- `async` / `await`
-- `yield`
+- `with`, `lambda`, comprehensions, decorators
+- `async` / `await`, `yield`
 - Bitwise operators
-- String escape sequence processing
+- String escape sequences
 
-### LSP features missing
+### LSP features
 
-- Hover (currently minimal / stub)
 - Find references
 - Completion
 - Rename
-- Code actions
-- Formatting
+- Code actions / formatting
 
-### Infrastructure gaps
+### Performance
 
-- No analysis debouncing (full reparse on every keystroke)
+- No analysis debouncing (re-parses everything on every keystroke)
 - No incremental parsing
 - No AST reuse across edits
 - No structured logging
-- No CI
-
 
 ## Project Structure
 
 ```
-
 rahu/
-├── cmd/lsp/        # Entry point — wires stdin/stdout to the server
-├── jsonrpc/        # JSON-RPC 2.0 transport
-├── lsp/            # LSP protocol type definitions
-├── server/         # LSP server logic, document model, handlers
-├── source/         # LineIndex (offset <-> line/column mapping)
-├── lexer/          # Python tokenizer (byte-offset based)
-├── parser/         # Recursive descent + Pratt parser, AST
-├── analyser/       # Scope builder and name resolver
-└── utils/          # Debug / development helpers
-
+├── cmd/lsp/           # Entry point — stdin/stdout -> server
+├── jsonrpc/           # JSON-RPC 2.0 transport layer
+├── lsp/               # LSP protocol types
+├── server/            # LSP server, document model, handlers
+│   └── locate/        # Go-to-definition lookup logic
+├── source/            # LineIndex (byte offset <-> line/column)
+├── lexer/             # Python tokenizer
+├── parser/            # Recursive descent + Pratt, AST
+│   └── ast/           # AST node definitions
+├── analyser/          # Scope builder, name resolver, class promotion
+│   ├── scopes.go      # Scope chain and symbol tables
+│   ├── resolver.go    # Name resolution
+│   ├── promoter.go    # Inheritance member promotion
+│   └── binder.go      # Attribute binding
+└── utils/             # Debug tools
+    └── dump/          # CLI for dumping analysis output
 ```
-
 
 ## Architecture
 
-Pipeline on every document change:
+Every time you type:
 
 ```
-
 editor keystroke
--> textDocument/didChange
--> update Document text + line index
--> lex entire file (byte offsets)
--> parse tokens into AST
--> build scopes
--> resolve names
--> convert byte spans to LSP ranges
--> publish diagnostics
-
+  -> textDocument/didChange
+  -> update Document text + line index
+  -> lex entire file (byte offsets)
+  -> parse tokens into AST
+  -> build scopes
+  -> resolve names
+  -> promote class members (inheritance)
+  -> bind attributes
+  -> convert byte spans to LSP ranges
+  -> publish diagnostics
 ```
 
-The lexer and parser operate entirely on byte offsets.
-Line and column positions are derived only when interacting with the editor.
+Everything runs on byte offsets internally. Line/column only shows up when talking to the editor.
+
+## Sample Output
+
+Here's what Rahu produces when analysing code with inheritance:
+
+```python
+class Animal:
+    def __init__(self, name):
+        self.name = name
+        self.alive = True
+
+    def speak(self):
+        return "..."
+
+    def info(self):
+        return self.name
 
 
-## Current pipeline sample output
+class Dog(Animal):
+    def __init__(self, name, breed):
+        self.breed = breed
+        self.energy = 100
 
-```text
-=== SOURCE ===
-class Base:
-    def __init__(self):
-        self.base_only = 1
+    def speak(self):
+        return "woof"
 
-    def base_method(self):
-        return self.base_only
+    def play(self):
+        self.energy = self.energy - 10
+        return self.energy
 
-
-class Child(Base):
-    def __init__(self):
-        self.x = 10
-        self.y = 20
-        self.x = 99          # re-assign same attr; should still be a known attr
-
-    def sum(self):
-        return self.x + self.y
-
-    def touch(self):
-        z = self.x           # base is self, attr is x
-        return z
-
-    def unknown_attr_read(self):
-        return self.nope     # should NOT be resolvable as attr yet unless you special-case self.* lookup
-
-    def unknown_attr_write(self):
-        self.new_attr = 123  # should be recorded as an instance attr in scope-building
+    def describe(self):
+        return self.name + " the " + self.breed
 
 
-def top_level():
-    c = Child()
-    a = c.x                 # base name "c" should resolve; member "x" not resolvable without types
-    b = c.sum()             # base name "c" should resolve; member "sum" not resolvable without types
-    return a
+class GuideDog(Dog):
+    def __init__(self, name, breed, owner):
+        self.owner = owner
+        self.tasks = 0
+
+    def assist(self):
+        self.tasks = self.tasks + 1
+        return self.owner
+
+    def full_info(self):
+        # inherited from Animal and Dog
+        return self.name + " helps " + self.owner
 
 
-top_level()
+def make_dog():
+    d = Dog("Fido", "Labrador")
+    sound = d.speak()
+    remaining = d.play()
+    desc = d.describe()
+    return desc
 
 
-=== SCOPES ===
-Scope(global)
-  Base : class
-    Scope(unknown)
-      __init__ : function
-        Scope(function)
-          self : parameter
-      base_method : function
-        Scope(function)
-          self : parameter
-  Child : class
-    Scope(unknown)
-      unknown_attr_read : function
-        Scope(function)
-          self : parameter
-      unknown_attr_write : function
-        Scope(function)
-          self : parameter
-      __init__ : function
-        Scope(function)
-          self : parameter
-      sum : function
-        Scope(function)
-          self : parameter
-      touch : function
-        Scope(function)
-          self : parameter
-          z : variable
-  top_level : function
-    Scope(function)
-      c : variable
-      a : variable
-      b : variable
+def make_guide():
+    g = GuideDog("Rex", "Golden", "Alice")
+    a = g.assist()
+    info = g.full_info()
+    speech = g.speak()        # inherited override
+    base = g.info()           # inherited from Animal
+    return base
 
+
+def zoo():
+    a = Animal("Mystery")
+    b = Dog("Buddy", "Poodle")
+    c = GuideDog("Max", "Retriever", "Bob")
+
+    animals = [a, b, c]
+
+    for x in animals:
+        name = x.info()
+        print(name)
+
+    return c.speak()
+
+
+zoo()
+```
+
+Running this through Rahu gives:
+
+```
 === RESOLVER STATS ===
-names=31 attrs=9 pending=12 semErrs=1
-
-=== SEMANTIC ERRORS ===
-{486 490}: undefined attribute: nope
-
-=== RESOLVED NAMES ===
-top_level @ [947,956] -> top_level (function)
-self @ [106,110] -> self (parameter)
-Child @ [123,134] -> Child (class)
-self @ [481,485] -> self (parameter)
-c @ [838,839] -> c (variable)
-Base @ [0,10] -> Base (class)
-__init__ @ [150,158] -> __init__ (function)
-c @ [738,739] -> c (variable)
-self @ [194,198] -> self (parameter)
-sum @ [296,299] -> sum (function)
-self @ [331,335] -> self (parameter)
-touch @ [347,352] -> touch (function)
-z @ [430,431] -> z (variable)
-Base @ [135,139] -> Base (class)
-self @ [214,218] -> self (parameter)
-self @ [372,376] -> self (parameter)
-z @ [368,369] -> z (variable)
-unknown_attr_write @ [581,599] -> unknown_attr_write (function)
-__init__ @ [20,28] -> __init__ (function)
-self @ [44,48] -> self (parameter)
-self @ [174,178] -> self (parameter)
-self @ [322,326] -> self (parameter)
-unknown_attr_read @ [441,458] -> unknown_attr_read (function)
-self @ [615,619] -> self (parameter)
-Child @ [722,727] -> Child (class)
-b @ [834,835] -> b (variable)
-base_method @ [72,83] -> base_method (function)
-top_level @ [701,710] -> top_level (function)
-c @ [718,719] -> c (variable)
-a @ [734,735] -> a (variable)
-a @ [943,944] -> a (variable)
-
-=== ATTRIBUTE BINDINGS ===
-BOUND   attr base_only -> base_only (unknown) at [49,58]
-BOUND   attr base_only -> base_only (unknown) at [111,120]
-BOUND   attr x -> x (unknown) at [179,180]
-BOUND   attr y -> y (unknown) at [199,200]
-BOUND   attr x -> x (unknown) at [219,220]
-BOUND   attr x -> x (unknown) at [327,328]
-BOUND   attr y -> y (unknown) at [336,337]
-BOUND   attr x -> x (unknown) at [377,378]
-UNBOUND attr nope at [486,490]
-BOUND   attr new_attr -> new_attr (unknown) at [620,628]
-UNBOUND attr x at [740,741]
-UNBOUND attr sum at [840,843]
-
-=== ATTRIBUTES DISCOVERED (INSTANCE) ===
-Class Base
-  attr base_only
-Class Child
-  attr x
-  attr y
-  attr new_attr
-
-=== PROMOTED CLASS MEMBERS ===
-Class Base
-  member __init__ : function
-  member base_method : function
-  member base_only : unknown
-Class Child
-  member unknown_attr_write : function
-  member __init__ : function
-  member sum : function
-  member touch : function
-  member unknown_attr_read : function
-  member x : unknown
-  member y : unknown
-  member new_attr : unknown
-
+names=76 attrs=17 pending=26 semErrs=0
 ```
 
+```
+=== ATTRIBUTE BINDINGS ===
+BOUND   attr name -> name (unknown) at [57,61]
+BOUND   attr alive -> alive (unknown) at [82,87]
+...
+UNBOUND attr speak at [881,886]    # instance attribute lookup
+UNBOUND attr play at [907,911]     # not yet resolved via instance type
+...
+```
 
+```
+=== ATTRIBUTES DISCOVERED (INSTANCE) ===
+Class Animal
+  attr name
+  attr alive
+Class Dog
+  attr breed
+  attr energy
+Class GuideDog
+  attr owner
+  attr tasks
+```
+
+```
+=== PROMOTED CLASS MEMBERS ===
+Class Dog
+  member speak : function          # overrides Animal's speak
+  member play : function
+  member describe : function
+  member breed : unknown
+  member energy : unknown
+  member info : function           # inherited from Animal
+  member name : unknown           # inherited from Animal
+  member alive : unknown          # inherited from Animal
+
+Class GuideDog
+  member assist : function
+  member full_info : function
+  member speak : function         # inherited from Dog (overrides Animal)
+  member play : function          # inherited from Dog
+  member info : function          # inherited from Animal
+  ...
+```
+
+Notice how:
+- `GuideDog` inherits from `Dog`, which inherits from `Animal`
+- Members are properly promoted up the chain
+- Overridden methods (`speak`) are correctly tagged
+- Instance attributes via `self.x = ...` are tracked separately
+
+The `UNBOUND` attributes are calls on instance variables (`d.speak()`) — we're not yet tracking that `d` is an instance of `Dog`, so we can't resolve method lookups on arbitrary variables. That's the next big piece.
+
+## Getting Started
+
+```bash
+# Build
+go build ./...
+
+# Run tests
+go test ./...
+
+# Analyze a Python file
+go run ./utils/dump path/to/file.py
+
+# Use with your editor (LSP client required)
+# Point your editor's Python language server to: go run ./cmd/lsp
+```
+
+## Tech Stack
+
+- **Go 1.26** — that's it. One runtime, no dependencies worth mentioning.
+- No external LSP libraries
+- No Python interpreter — pure static analysis
 
 ## License
 
 MIT
-
 
 ## Author
 
