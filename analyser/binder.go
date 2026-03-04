@@ -5,32 +5,47 @@ import "rahu/parser/ast"
 func (r *Resolver) BindMembers() {
 	for _, p := range r.PendingAttrs {
 		a := p.Node
-		if a == nil || p.Class == nil || p.SelfName == "" {
+		if a == nil {
 			continue
 		}
 
 		base, ok := a.Value.(*ast.Name)
-		if !ok || base.ID != p.SelfName {
+		if !ok {
 			continue
 		}
 
 		baseSym := r.Resolved[base]
-		if baseSym == nil || baseSym.Kind != SymParameter {
+		if baseSym == nil {
 			continue
 		}
 
-		if p.Class.Members == nil {
-			r.error(a.Attr.Pos, "internal error: missing class members")
+		if p.Class != nil && p.SelfName != "" &&
+			base.ID == p.SelfName &&
+			baseSym.Kind == SymParameter {
+
+			sym, ok := p.Class.Members.Lookup(a.Attr.ID)
+			if !ok {
+				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.ID)
+				continue
+			}
+
+			r.ResolvedAttr[a] = sym
 			continue
 		}
 
-		sym, ok := p.Class.Members.Lookup(a.Attr.ID)
-		if !ok {
-			r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.ID)
+		// --- case 2: instance.attr outside class ---
+		if baseSym.InstanceOf != nil {
+			class := baseSym.InstanceOf
+
+			sym, ok := class.Members.Lookup(a.Attr.ID)
+			if !ok {
+				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.ID)
+				continue
+			}
+
+			r.ResolvedAttr[a] = sym
 			continue
 		}
-
-		r.ResolvedAttr[a] = sym
 	}
 }
 

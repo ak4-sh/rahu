@@ -45,6 +45,8 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		kind = "builtin"
 	case a.SymType:
 		kind = "type"
+	case a.SymAttr:
+		kind = "field"
 	default:
 		kind = "symbol"
 	}
@@ -70,6 +72,10 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 			name,
 			strings.Join(params, ", "),
 		)
+	}
+
+	if sym.Kind == a.SymVariable && sym.InstanceOf != nil {
+		value = fmt.Sprintf("**%s** `%s`", kind, sym.Name)
 	}
 
 	filename := u.FilenameFromURI(doc.URI)
