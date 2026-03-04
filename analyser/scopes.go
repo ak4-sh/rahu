@@ -23,7 +23,9 @@ func BuildScopes(module *ast.Module) *Scope {
 
 func (b *ScopeBuilder) visitModule(m *ast.Module) {
 	for _, stmt := range m.Body {
-		b.visitStmt(stmt)
+		if stmt != nil {
+			b.visitStmt(stmt)
+		}
 	}
 }
 
@@ -181,6 +183,10 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 }
 
 func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
+	if c.Name.ID == "<incomplete>" {
+		return
+	}
+
 	classScope := NewScope(b.current, ScopeClass)
 
 	classSym := &Symbol{
@@ -208,6 +214,10 @@ func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
 }
 
 func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
+	if f.Name.ID == "<incomplete>" {
+		return
+	}
+
 	fnScope := NewScope(b.current, ScopeFunction)
 
 	fnSym := &Symbol{
