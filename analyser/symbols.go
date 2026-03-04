@@ -24,17 +24,19 @@ const (
 	SymConstant
 	SymType
 	SymAttr
+	SymField
 )
 
 type Symbol struct {
-	Name    string
-	Kind    SymbolKind
-	Span    ast.Range
-	Scope   *Scope
-	Inner   *Scope
-	Attrs   *Scope
-	Members *Scope
-	Bases   []*Symbol
+	Name       string
+	Kind       SymbolKind
+	Span       ast.Range
+	Scope      *Scope
+	Inner      *Scope
+	Attrs      *Scope
+	Members    *Scope
+	Bases      []*Symbol
+	InstanceOf *Symbol
 }
 
 type ScopeKind int
@@ -218,6 +220,8 @@ func (k SymbolKind) String() string {
 		return "constant"
 	case SymType:
 		return "type"
+	case SymAttr:
+		return "attribute"
 	default:
 		return "unknown"
 	}

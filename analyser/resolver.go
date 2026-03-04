@@ -28,6 +28,7 @@ type Resolver struct {
 	ResolvedAttr map[*ast.Attribute]*Symbol
 	PendingAttrs []PendingAttr
 	selfName     string
+	ExprTypes    map[ast.Expression]*Symbol
 }
 
 type SemanticError struct {
@@ -46,6 +47,7 @@ func newResolver(global *Scope) *Resolver {
 		PendingAttrs: make([]PendingAttr, 0),
 		ResolvedAttr: make(map[*ast.Attribute]*Symbol),
 		selfName:     "",
+		ExprTypes:    make(map[ast.Expression]*Symbol),
 	}
 }
 
@@ -58,8 +60,12 @@ func Resolve(m *ast.Module, global *Scope) (*Resolver, []SemanticError) {
 }
 
 func (r *Resolver) visitModule(m *ast.Module) {
-	for _, stmt := range m.Body {
-		r.visitStmt(stmt)
+	if m != nil {
+		for _, stmt := range m.Body {
+			if stmt != nil {
+				r.visitStmt(stmt)
+			}
+		}
 	}
 }
 
@@ -72,9 +78,17 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 
 	case *ast.Assign:
 		r.visitExpr(s.Value, Read)
+		class := r.ExprTypes[s.Value]
 
 		for _, t := range s.Targets {
 			r.visitExpr(t, Write)
+
+			if name, ok := t.(*ast.Name); ok && class != nil {
+				sym := r.Resolved[name]
+				if sym != nil {
+					sym.InstanceOf = class
+				}
+			}
 		}
 
 	case *ast.ClassDef:
@@ -276,6 +290,14 @@ func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
 		r.visitExpr(e.Func, Read)
 		for _, arg := range e.Args {
 			r.visitExpr(arg, Read)
+		}
+
+		if name, ok := e.Func.(*ast.Name); ok {
+			sym := r.Resolved[name]
+
+			if sym != nil && sym.Kind == SymClass {
+				r.ExprTypes[e] = sym
+			}
 		}
 
 	case *ast.Tuple:
