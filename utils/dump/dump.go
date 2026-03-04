@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"rahu/analyser"
@@ -24,14 +25,7 @@ var (
 
 func initColors(noColor bool) {
 	if noColor {
-		bold = ""
-		red = ""
-		reset = ""
-		blue = ""
-		cyan = ""
-		green = ""
-		yellow = ""
-		magenta = ""
+		bold, red, reset, blue, cyan, green, yellow, magenta = "", "", "", "", "", "", "", ""
 	} else {
 		bold = "\033[1m"
 		red = "\033[31m"
@@ -44,21 +38,10 @@ func initColors(noColor bool) {
 	}
 }
 
-func header(s string) {
-	fmt.Println(bold + cyan + s + reset)
-}
-
-func errLine(s string) {
-	fmt.Println(red + s + reset)
-}
-
-func okLine(s string) {
-	fmt.Println(green + s + reset)
-}
-
-func warnLine(s string) {
-	fmt.Println(yellow + s + reset)
-}
+func header(s string)   { fmt.Println(bold + cyan + s + reset) }
+func errLine(s string)  { fmt.Println(red + s + reset) }
+func okLine(s string)   { fmt.Println(green + s + reset) }
+func warnLine(s string) { fmt.Println(yellow + s + reset) }
 
 // ------------------------------------------------------
 
@@ -94,6 +77,8 @@ func main() {
 	dumpScope(global, 0)
 	fmt.Println()
 
+	analyser.PromoteClassMembers(global)
+
 	semErrors, resolved, resolvedAttrs, pendingAttrs := analyser.ResolveWithAttrs(module, global)
 
 	header("=== RESOLVER STATS ===")
@@ -112,17 +97,30 @@ func main() {
 		fmt.Println()
 	}
 
-	analyser.PromoteClassMembers(global)
-
 	header("=== RESOLVED NAMES ===")
-	for name, sym := range resolved {
+
+	type nameEntry struct {
+		name *ast.Name
+		sym  *analyser.Symbol
+	}
+
+	var names []nameEntry
+	for n, s := range resolved {
+		names = append(names, nameEntry{n, s})
+	}
+
+	sort.Slice(names, func(i, j int) bool {
+		return names[i].name.Pos.Start < names[j].name.Pos.Start
+	})
+
+	for _, e := range names {
 		okLine(fmt.Sprintf(
 			"%s @ [%d,%d] -> %s (%s)",
-			name.ID,
-			name.Pos.Start,
-			name.Pos.End,
-			sym.Name,
-			sym.Kind,
+			e.name.ID,
+			e.name.Pos.Start,
+			e.name.Pos.End,
+			e.sym.Name,
+			e.sym.Kind,
 		))
 	}
 
@@ -131,7 +129,7 @@ func main() {
 	dumpAttrBindings(module, resolvedAttrs)
 
 	fmt.Println()
-	header("=== ATTRIBUTES DISCOVERED (INSTANCE) ===")
+	header("=== INSTANCE ATTRIBUTES PER CLASS ===")
 	dumpClassAttrs(global)
 
 	fmt.Println()
@@ -143,9 +141,18 @@ func main() {
 
 func dumpScope(s *analyser.Scope, indent int) {
 	prefix := strings.Repeat("  ", indent)
+
 	fmt.Printf("%sScope(%s)\n", prefix, s.Kind)
 
-	for _, sym := range s.Symbols {
+	var names []string
+	for n := range s.Symbols {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, n := range names {
+		sym := s.Symbols[n]
+
 		fmt.Printf("%s  %s%s%s : %s\n",
 			prefix,
 			yellow,
@@ -153,6 +160,7 @@ func dumpScope(s *analyser.Scope, indent int) {
 			reset,
 			sym.Kind,
 		)
+
 		if sym.Inner != nil {
 			dumpScope(sym.Inner, indent+2)
 		}
@@ -163,11 +171,19 @@ func dumpClassAttrs(s *analyser.Scope) {
 	for _, sym := range s.Symbols {
 		if sym.Kind == analyser.SymClass {
 			fmt.Printf("%sClass %s%s\n", magenta, sym.Name, reset)
+
 			if sym.Attrs != nil {
-				for _, a := range sym.Attrs.Symbols {
-					fmt.Printf("  %sattr%s %s\n", yellow, reset, a.Name)
+				var names []string
+				for n := range sym.Attrs.Symbols {
+					names = append(names, n)
+				}
+				sort.Strings(names)
+
+				for _, n := range names {
+					fmt.Printf("  %sattr%s %s\n", yellow, reset, n)
 				}
 			}
+
 			if sym.Inner != nil {
 				dumpClassAttrs(sym.Inner)
 			}
@@ -178,23 +194,32 @@ func dumpClassAttrs(s *analyser.Scope) {
 // ------------------------------------------------------------
 
 func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Symbol) {
-	walkStmt := func(st ast.Statement, visitExpr func(ast.Expression)) {}
 	var walkExpr func(ast.Expression)
 
 	walkExpr = func(e ast.Expression) {
 		switch v := e.(type) {
+
 		case *ast.Attribute:
+
+			base := "<expr>"
+			if n, ok := v.Value.(*ast.Name); ok {
+				base = n.ID
+			}
+
 			sym := attrs[v]
+
 			if sym == nil {
 				errLine(fmt.Sprintf(
-					"UNBOUND attr %s at [%d,%d]",
+					"UNBOUND %s.%s at [%d,%d]",
+					base,
 					v.Attr.ID,
 					v.Attr.Pos.Start,
 					v.Attr.Pos.End,
 				))
 			} else {
 				okLine(fmt.Sprintf(
-					"BOUND   attr %s -> %s (%s) at [%d,%d]",
+					"BOUND   %s.%s -> %s (%s) at [%d,%d]",
+					base,
 					v.Attr.ID,
 					sym.Name,
 					sym.Kind,
@@ -202,6 +227,7 @@ func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Sym
 					v.Attr.Pos.End,
 				))
 			}
+
 			walkExpr(v.Value)
 
 		case *ast.BinOp:
@@ -240,54 +266,67 @@ func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Sym
 		}
 	}
 
-	walkStmt = func(st ast.Statement, visitExpr func(ast.Expression)) {
+	var walkStmt func(ast.Statement)
+
+	walkStmt = func(st ast.Statement) {
 		switch s := st.(type) {
+
 		case *ast.Assign:
 			for _, t := range s.Targets {
-				visitExpr(t)
+				walkExpr(t)
 			}
-			visitExpr(s.Value)
+			walkExpr(s.Value)
 
 		case *ast.ExprStmt:
-			visitExpr(s.Value)
+			walkExpr(s.Value)
 
 		case *ast.Return:
 			if s.Value != nil {
-				visitExpr(s.Value)
+				walkExpr(s.Value)
 			}
 
-		case *ast.FunctionDef, *ast.ClassDef:
-			switch x := s.(type) {
-			case *ast.FunctionDef:
-				for _, b := range x.Body {
-					walkStmt(b, visitExpr)
-				}
-			case *ast.ClassDef:
-				for _, b := range x.Body {
-					walkStmt(b, visitExpr)
-				}
+		case *ast.FunctionDef:
+			for _, b := range s.Body {
+				walkStmt(b)
+			}
+
+		case *ast.ClassDef:
+			for _, b := range s.Body {
+				walkStmt(b)
 			}
 		}
 	}
 
 	for _, st := range module.Body {
-		walkStmt(st, walkExpr)
+		walkStmt(st)
 	}
 }
 
 func dumpClassMembers(s *analyser.Scope) {
 	for _, sym := range s.Symbols {
 		if sym.Kind == analyser.SymClass {
+
 			fmt.Printf("%sClass %s%s\n", magenta, sym.Name, reset)
 
 			if sym.Members != nil {
-				for _, m := range sym.Members.Symbols {
+
+				var names []string
+				for n := range sym.Members.Symbols {
+					names = append(names, n)
+				}
+				sort.Strings(names)
+
+				for _, n := range names {
+					m := sym.Members.Symbols[n]
+
 					fmt.Printf("  %smember%s %s : %s\n",
-						yellow, reset,
+						yellow,
+						reset,
 						m.Name,
 						m.Kind,
 					)
 				}
+
 			} else {
 				warnLine("  (no members)")
 			}
