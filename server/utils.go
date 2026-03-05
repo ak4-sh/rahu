@@ -31,19 +31,3 @@ func FromRange(li *source.LineIndex, r lsp.Range) ast.Range {
 		End:   end,
 	}
 }
-
-func ToLSPRange(r ast.Range, li *source.LineIndex) lsp.Range {
-	startLine, startCol := li.OffsetToPosition(r.Start)
-	endLine, endCol := li.OffsetToPosition(r.End)
-
-	return lsp.Range{
-		Start: lsp.Position{
-			Line:      startLine,
-			Character: startCol,
-		},
-		End: lsp.Position{
-			Line:      endLine,
-			Character: endCol,
-		},
-	}
-}
