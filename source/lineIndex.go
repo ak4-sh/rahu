@@ -29,10 +29,7 @@ func (li *LineIndex) OffsetToPosition(off int) (line int, col int) {
 		}
 	}
 
-	line = lo - 1
-	if line < 0 {
-		line = 0
-	}
+	line = max(lo-1, 0)
 
 	col = off - li.lineStarts[line]
 	return
