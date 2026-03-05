@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"rahu/lexer"
 	a "rahu/parser/ast"
 )
@@ -148,7 +150,9 @@ func (p *Parser) parseReturn() a.Statement {
 func (p *Parser) parseFunc() a.Statement {
 	startPos := p.current.Start
 	p.advance()
-	funcDef := &a.FunctionDef{}
+	funcDef := &a.FunctionDef{
+		DocString: "",
+	}
 
 	if p.current.Type != lexer.NAME {
 		p.errorCurrent("expected function name after 'def'")
@@ -277,8 +281,15 @@ func (p *Parser) parseFunc() a.Statement {
 	p.advance()
 
 	funcBody := []a.Statement{}
+	atStart := true
 
 	for p.current.Type != lexer.DEDENT && p.current.Type != lexer.EOF {
+		// starting from first line of func body
+		if atStart && p.current.Type == lexer.STRING {
+			funcDef.DocString = strings.TrimSpace(p.current.Literal)
+			p.advance()
+		}
+		atStart = false
 		stmt := p.parseStatement()
 		if stmt != nil {
 			funcBody = append(funcBody, stmt)
@@ -298,7 +309,9 @@ func (p *Parser) parseFunc() a.Statement {
 
 func (p *Parser) parseClass() a.Statement {
 	// advance past `class`
-	def := a.ClassDef{}
+	def := a.ClassDef{
+		DocString: "",
+	}
 	startPos := p.current.Start
 	p.advance()
 
@@ -410,7 +423,13 @@ func (p *Parser) parseClass() a.Statement {
 	p.advance() // move past indent
 
 	body := []a.Statement{}
+	atStart := true
 	for p.current.Type != lexer.EOF && p.current.Type != lexer.DEDENT {
+		if atStart && p.current.Type == lexer.STRING {
+			def.DocString = strings.TrimSpace(p.current.Literal)
+			p.advance()
+		}
+		atStart = false
 		stmt := p.parseStatement()
 		if stmt != nil {
 			body = append(body, stmt)

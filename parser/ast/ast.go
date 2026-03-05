@@ -90,11 +90,12 @@ type FuncArg struct {
 }
 
 type FunctionDef struct {
-	Name    *Name
-	NamePos Range
-	Args    []FuncArg
-	Body    []Statement
-	Pos     Range
+	Name      *Name
+	NamePos   Range
+	Args      []FuncArg
+	Body      []Statement
+	Pos       Range
+	DocString string
 }
 
 func (f *FunctionDef) statementNode() {}
@@ -262,6 +263,7 @@ type ClassDef struct {
 	Keywords   []KeywordArg
 	Body       []Statement
 	Decorators []Expression
+	DocString  string
 }
 
 func (c *ClassDef) statementNode() {}
