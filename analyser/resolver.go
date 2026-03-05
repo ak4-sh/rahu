@@ -20,12 +20,12 @@ type Resolver struct {
 	errors    []SemanticError
 	loopDepth int
 
-	Resolved   map[*ast.Name]*Symbol
+	Resolved   map[ast.NodeID]*Symbol
 	inFunction bool
 
 	inClass      bool
 	currentClass *Symbol
-	ResolvedAttr map[*ast.Attribute]*Symbol
+	ResolvedAttr map[ast.NodeID]*Symbol
 	PendingAttrs []PendingAttr
 	selfName     string
 	ExprTypes    map[ast.Expression]*Symbol
@@ -41,11 +41,11 @@ func newResolver(global *Scope) *Resolver {
 		current:      global,
 		errors:       nil,
 		loopDepth:    0,
-		Resolved:     make(map[*ast.Name]*Symbol),
+		Resolved:     make(map[ast.NodeID]*Symbol),
 		inFunction:   false,
 		inClass:      false,
 		PendingAttrs: make([]PendingAttr, 0),
-		ResolvedAttr: make(map[*ast.Attribute]*Symbol),
+		ResolvedAttr: make(map[ast.NodeID]*Symbol),
 		selfName:     "",
 		ExprTypes:    make(map[ast.Expression]*Symbol),
 	}
@@ -84,7 +84,7 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 			r.visitExpr(t, Write)
 
 			if name, ok := t.(*ast.Name); ok && class != nil {
-				sym := r.Resolved[name]
+				sym := r.Resolved[name.ID]
 				if sym != nil {
 					sym.InstanceOf = class
 				}
@@ -98,11 +98,11 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 			}
 		}
 
-		classSym := r.current.Symbols[s.Name.ID]
+		classSym := r.current.Symbols[s.Name.Text]
 		if s.DocString != "" {
 			classSym.DocString = s.DocString
 		}
-		r.Resolved[s.Name] = classSym
+		r.Resolved[s.Name.ID] = classSym
 
 		for _, baseExpr := range s.Bases {
 			if baseExpr == nil {
@@ -115,13 +115,13 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 				continue
 			}
 
-			baseSym, ok := r.current.Lookup(name.ID)
+			baseSym, ok := r.current.Lookup(name.Text)
 			if !ok || baseSym == nil {
-				r.error(name.Pos, "undefined base class: "+name.ID)
+				r.error(name.Pos, "undefined base class: "+name.Text)
 			}
 
 			if baseSym.Kind != SymClass {
-				r.error(name.Pos, name.ID+" is not a class")
+				r.error(name.Pos, name.Text+" is not a class")
 				continue
 			}
 
@@ -129,7 +129,7 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		}
 
 		if classSym == nil || classSym.Inner == nil {
-			r.error(s.Pos, "internal compiler error: missing class symbol or scope for: "+s.Name.ID)
+			r.error(s.Pos, "internal compiler error: missing class symbol or scope for: "+s.Name.Text)
 			return
 		}
 
@@ -158,13 +158,13 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 			}
 		}
 
-		fnSym := r.current.Symbols[s.Name.ID]
+		fnSym := r.current.Symbols[s.Name.Text]
 		if s.DocString != "" {
 			fnSym.DocString = s.DocString
 		}
-		r.Resolved[s.Name] = fnSym
+		r.Resolved[s.Name.ID] = fnSym
 		if fnSym == nil || fnSym.Inner == nil {
-			r.error(s.Pos, "internal compiler error: missing function symbol or scope for "+s.Name.ID)
+			r.error(s.Pos, "internal compiler error: missing function symbol or scope for "+s.Name.Text)
 			return
 		}
 
@@ -173,7 +173,7 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		prevSelf := r.selfName
 
 		if r.inClass && len(s.Args) > 0 {
-			r.selfName = s.Args[0].Name.ID
+			r.selfName = s.Args[0].Name.Text
 		} else {
 			r.selfName = ""
 		}
@@ -249,21 +249,21 @@ func (r *Resolver) checkLoopContext(pos ast.Range, keyword string) {
 func (r *Resolver) resolveName(e *ast.Name, ctx NameContext) {
 	var sym *Symbol
 	if ctx == Write {
-		sym = r.current.Symbols[e.ID]
+		sym = r.current.Symbols[e.Text]
 
 		if sym == nil {
-			r.error(e.Pos, "internal error: write to undefined local "+e.ID)
+			r.error(e.Pos, "internal error: write to undefined local "+e.Text)
 			return
 		}
 	} else {
 		var ok bool
-		sym, ok = r.current.Lookup(e.ID)
+		sym, ok = r.current.Lookup(e.Text)
 		if !ok || sym == nil {
-			r.error(e.Pos, ("undefined name: " + e.ID))
+			r.error(e.Pos, ("undefined name: " + e.Text))
 			return
 		}
 	}
-	r.Resolved[e] = sym
+	r.Resolved[e.ID] = sym
 }
 
 func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
@@ -299,7 +299,7 @@ func (r *Resolver) visitExpr(expr ast.Expression, ctx NameContext) {
 		}
 
 		if name, ok := e.Func.(*ast.Name); ok {
-			sym := r.Resolved[name]
+			sym := r.Resolved[name.ID]
 
 			if sym != nil && sym.Kind == SymClass {
 				r.ExprTypes[e] = sym

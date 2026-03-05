@@ -4,6 +4,8 @@ import "rahu/lexer"
 
 type Node any
 
+type NodeID uint64
+
 type Operator int
 
 type Range struct {
@@ -45,8 +47,9 @@ func (n *Number) expressionNode() {}
 func (n *Number) Position() Range { return n.Pos }
 
 type Name struct {
-	ID  string
-	Pos Range
+	Text string
+	Pos  Range
+	ID   NodeID
 }
 
 func (n *Name) expressionNode() {}
@@ -269,6 +272,7 @@ type ClassDef struct {
 func (c *ClassDef) statementNode() {}
 
 type Attribute struct {
+	ID    NodeID
 	Pos   Range
 	Value Expression
 	Attr  *Name

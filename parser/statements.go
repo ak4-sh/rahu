@@ -158,19 +158,21 @@ func (p *Parser) parseFunc() a.Statement {
 		p.errorCurrent("expected function name after 'def'")
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
 		funcDef.Name = &a.Name{
-			ID:  "<incomplete>",
-			Pos: a.Range{Start: startPos, End: p.current.End},
+			Text: "<incomplete>",
+			Pos:  a.Range{Start: startPos, End: p.current.End},
+			ID:   p.newNodeID(),
 		}
 		return funcDef
 	}
 
 	// funcDef.Name = p.current.Literal
 	funcDef.Name = &a.Name{
-		ID: p.current.Literal,
+		Text: p.current.Literal,
 		Pos: a.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		},
+		ID: p.newNodeID(),
 	}
 	funcDef.NamePos = a.Range{
 		Start: p.current.Start,
@@ -209,8 +211,9 @@ func (p *Parser) parseFunc() a.Statement {
 			arg := a.FuncArg{
 				// Name: p.current.Literal,
 				Name: &a.Name{
-					ID:  p.current.Literal,
-					Pos: a.Range{Start: start, End: end},
+					Text: p.current.Literal,
+					Pos:  a.Range{Start: start, End: end},
+					ID:   p.newNodeID(),
 				},
 				Pos: a.Range{Start: start, End: end},
 			}
@@ -323,19 +326,21 @@ func (p *Parser) parseClass() a.Statement {
 			End:   p.current.End,
 		}
 		def.Name = &a.Name{
-			ID: "<incomplete>",
+			Text: "<incomplete>",
 			Pos: a.Range{
 				Start: startPos,
 				End:   p.current.End,
 			},
+			ID: p.newNodeID(),
 		}
 		return &def
 	}
 
 	// def.Name = p.current.Literal
 	def.Name = &a.Name{
-		ID:  p.current.Literal,
-		Pos: a.Range{Start: startPos, End: p.current.End},
+		Text: p.current.Literal,
+		Pos:  a.Range{Start: p.current.Start, End: p.current.End},
+		ID:   p.newNodeID(),
 	}
 
 	p.advance()
@@ -357,11 +362,12 @@ func (p *Parser) parseClass() a.Statement {
 			switch p.current.Type {
 			case lexer.NAME:
 				name := a.Name{
-					ID: p.current.Literal,
+					Text: p.current.Literal,
 					Pos: a.Range{
 						Start: p.current.Start,
 						End:   p.current.End,
 					},
+					ID: p.newNodeID(),
 				}
 
 				def.Bases = append(def.Bases, &name)

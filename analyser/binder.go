@@ -14,22 +14,22 @@ func (r *Resolver) BindMembers() {
 			continue
 		}
 
-		baseSym := r.Resolved[base]
+		baseSym := r.Resolved[base.ID]
 		if baseSym == nil {
 			continue
 		}
 
 		if p.Class != nil && p.SelfName != "" &&
-			base.ID == p.SelfName &&
+			base.Text == p.SelfName &&
 			baseSym.Kind == SymParameter {
 
-			sym, ok := p.Class.Members.Lookup(a.Attr.ID)
+			sym, ok := p.Class.Members.Lookup(a.Attr.Text)
 			if !ok {
-				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.ID)
+				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.Text)
 				continue
 			}
 
-			r.ResolvedAttr[a] = sym
+			r.ResolvedAttr[a.ID] = sym
 			continue
 		}
 
@@ -37,13 +37,13 @@ func (r *Resolver) BindMembers() {
 		if baseSym.InstanceOf != nil {
 			class := baseSym.InstanceOf
 
-			sym, ok := class.Members.Lookup(a.Attr.ID)
+			sym, ok := class.Members.Lookup(a.Attr.Text)
 			if !ok {
-				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.ID)
+				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.Text)
 				continue
 			}
 
-			r.ResolvedAttr[a] = sym
+			r.ResolvedAttr[a.ID] = sym
 			continue
 		}
 	}
@@ -54,8 +54,8 @@ func ResolveWithAttrs(
 	global *Scope,
 ) (
 	[]SemanticError,
-	map[*ast.Name]*Symbol,
-	map[*ast.Attribute]*Symbol,
+	map[ast.NodeID]*Symbol,
+	map[ast.NodeID]*Symbol,
 	[]PendingAttr,
 ) {
 	r := newResolver(global)

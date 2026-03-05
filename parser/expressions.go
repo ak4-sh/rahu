@@ -149,11 +149,12 @@ func (p *Parser) parsePrimary() a.Expression {
 		return ret
 	case l.NAME:
 		n := &a.Name{
-			ID: p.current.Literal,
+			Text: p.current.Literal,
 			Pos: a.Range{
 				Start: p.current.Start,
 				End:   p.current.End,
 			},
+			ID: p.newNodeID(),
 		}
 		p.advance()
 		return n
@@ -172,7 +173,7 @@ func (p *Parser) parsePrimary() a.Expression {
 
 		first := p.parseExpression(LOWEST)
 		if first == nil {
-			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 
 		if p.current.Type != l.COMMA {
@@ -217,7 +218,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
 			p.errorCurrent("expected expression after '-' ")
-			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 		endPos := operand.Position().End
 		return &a.UnaryOp{
@@ -232,7 +233,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
 			p.errorCurrent("expected expression after '+'")
-			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 		endPos := operand.Position().End
 		return &a.UnaryOp{
@@ -247,7 +248,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		expr := p.parseExpression(PREFIX)
 		if expr == nil {
 			p.errorCurrent("expected expression after 'not'")
-			return &a.Name{ID: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}}
+			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 		endPos := expr.Position().End
 		return &a.UnaryOp{
@@ -261,8 +262,9 @@ func (p *Parser) parsePrimary() a.Expression {
 		endPos := p.current.End
 		p.advance()
 		return &a.Name{
-			ID:  "None",
-			Pos: a.Range{Start: startPos, End: endPos},
+			Text: "None",
+			Pos:  a.Range{Start: startPos, End: endPos},
+			ID:   p.newNodeID(),
 		}
 
 	}

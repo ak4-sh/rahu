@@ -16,7 +16,7 @@ func TestFunctionScope(t *testing.T) {
 	p := parser.New(input)
 	module := p.Parse()
 
-	global := BuildScopes(module)
+	global, _ := BuildScopes(module)
 
 	if _, ok := global.Symbols["f"]; !ok {
 		t.Fatal("missing function symbol f")
@@ -39,7 +39,7 @@ func TestSimpleResolution(t *testing.T) {
 
 	p := parser.New(src)
 	module := p.Parse()
-	global := BuildScopes(module)
+	global, _ := BuildScopes(module)
 
 	resolver, errs := Resolve(module, global)
 	if len(errs) != 0 {
@@ -49,7 +49,7 @@ func TestSimpleResolution(t *testing.T) {
 	var xUses []*ast.Name
 	collectNames(module, &xUses)
 
-	if resolver.Resolved[xUses[0]].Name != "x" {
+	if resolver.Resolved[xUses[0].ID].Name != "x" {
 		t.Fatal("x did not resolve to symbol x")
 	}
 }

@@ -11,7 +11,10 @@ import (
 	"rahu/parser/ast"
 )
 
-type SymbolKind int
+type (
+	SymbolKind int
+	SymbolID   uint64
+)
 
 const (
 	SymVariable SymbolKind = iota
@@ -38,6 +41,8 @@ type Symbol struct {
 	Bases      []*Symbol
 	InstanceOf *Symbol
 	DocString  string
+	Def        ast.NodeID
+	ID         SymbolID
 }
 
 type ScopeKind int

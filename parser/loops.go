@@ -181,11 +181,12 @@ func (p *Parser) parseForTarget() a.Expression {
 	}
 
 	first := &a.Name{
-		ID: p.current.Literal,
+		Text: p.current.Literal,
 		Pos: a.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		},
+		ID: p.newNodeID(),
 	}
 	p.advance()
 
@@ -207,11 +208,12 @@ func (p *Parser) parseForTarget() a.Expression {
 			}
 			targets = append(
 				targets, &a.Name{
-					ID: p.current.Literal,
+					Text: p.current.Literal,
 					Pos: a.Range{
 						Start: p.current.Start,
 						End:   p.current.End,
 					},
+					ID: p.newNodeID(),
 				})
 			p.advance()
 		}

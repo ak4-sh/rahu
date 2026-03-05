@@ -15,11 +15,12 @@ func (p *Parser) parseAttribute(left a.Expression) a.Expression {
 	}
 
 	attr := &a.Name{
-		ID: p.current.Literal,
+		Text: p.current.Literal,
 		Pos: a.Range{
 			Start: p.current.Start,
 			End:   p.current.End,
 		},
+		ID: p.newNodeID(),
 	}
 
 	p.advance() // consume name
@@ -31,5 +32,6 @@ func (p *Parser) parseAttribute(left a.Expression) a.Expression {
 		},
 		Attr:  attr,
 		Value: left,
+		ID:    p.newNodeID(),
 	}
 }

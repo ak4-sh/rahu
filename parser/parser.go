@@ -49,11 +49,17 @@ func (p *Parser) Errors() []Error {
 }
 
 type Parser struct {
-	lexer   *lexer.Lexer
-	current lexer.Token
-	peek    lexer.Token
+	lexer      *lexer.Lexer
+	current    lexer.Token
+	peek       lexer.Token
+	nextNodeID ast.NodeID
 
 	errors []Error
+}
+
+func (p *Parser) newNodeID() ast.NodeID {
+	p.nextNodeID++
+	return p.nextNodeID
 }
 
 func (p *Parser) error(span ast.Range, msg string) {

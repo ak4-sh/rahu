@@ -11,14 +11,36 @@ type ScopeBuilder struct {
 	current      *Scope
 	inFunction   bool
 	selfName     string
+	nextSymID    SymbolID
+	Defs         map[ast.NodeID]*Symbol
 }
 
-func BuildScopes(module *ast.Module) *Scope {
+func (b *ScopeBuilder) newSymID() SymbolID {
+	b.nextSymID++
+	return b.nextSymID
+}
+
+func (b *ScopeBuilder) define(scope *Scope, n *ast.Name, kind SymbolKind, span ast.Range) {
+	sym := &Symbol{
+		ID:   b.newSymID(),
+		Name: n.Text,
+		Kind: kind,
+		Span: span,
+		Def:  n.ID,
+	}
+	_ = scope.Define(sym)
+	b.Defs[n.ID] = sym
+}
+
+func BuildScopes(module *ast.Module) (*Scope, map[ast.NodeID]*Symbol) {
 	builtins := NewBuiltinScope()
 	global := NewScope(builtins, ScopeGlobal)
-	b := &ScopeBuilder{current: global}
+	b := &ScopeBuilder{
+		current: global,
+		Defs:    make(map[ast.NodeID]*Symbol),
+	}
 	b.visitModule(module)
-	return global
+	return global, b.Defs
 }
 
 func (b *ScopeBuilder) visitModule(m *ast.Module) {
@@ -63,24 +85,24 @@ func (b *ScopeBuilder) visitStmt(stmt ast.Statement) {
 func (b *ScopeBuilder) visitAugAssign(a *ast.AugAssign) {
 	switch tt := a.Target.(type) {
 	case *ast.Name:
-		_ = b.current.Define(&Symbol{
-			Name: tt.ID,
-			Kind: SymVariable,
-			Span: tt.Pos,
-		})
+		b.define(b.current, tt, SymVariable, tt.Pos)
 
 	case *ast.Attribute:
 		if b.currentClass != nil && b.inFunction {
 			base, ok := tt.Value.(*ast.Name)
-			if ok && base.ID == b.selfName {
+			if ok && base.Text == b.selfName {
 				if b.currentClass.Attrs == nil {
 					b.currentClass.Attrs = NewScope(nil, ScopeAttr)
 				}
-				_ = b.currentClass.Attrs.Define(&Symbol{
-					Name: tt.Attr.ID,
+				sym := &Symbol{
+					Name: tt.Attr.Text,
 					Kind: SymAttr,
 					Span: tt.Attr.Pos,
-				})
+					Def:  tt.Attr.ID,
+					ID:   b.newSymID(),
+				}
+				_ = b.currentClass.Attrs.Define(sym)
+				b.Defs[tt.Attr.ID] = sym
 			}
 		}
 	}
@@ -124,11 +146,7 @@ func (b *ScopeBuilder) visitWhile(w *ast.WhileLoop) {
 
 func (b *ScopeBuilder) visitFor(f *ast.For) {
 	if name, ok := f.Target.(*ast.Name); ok {
-		_ = b.current.Define(&Symbol{
-			Name: name.ID,
-			Kind: SymVariable,
-			Span: name.Pos,
-		})
+		b.define(b.current, name, SymVariable, name.Pos)
 	}
 
 	for _, stmt := range f.Body {
@@ -150,11 +168,7 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 	for _, t := range a.Targets {
 		switch tt := t.(type) {
 		case *ast.Name:
-			_ = b.current.Define(&Symbol{
-				Name: tt.ID,
-				Kind: SymVariable,
-				Span: tt.Pos,
-			})
+			b.define(b.current, tt, SymVariable, tt.Pos)
 
 		case *ast.Attribute:
 			if b.currentClass == nil || !b.inFunction {
@@ -162,7 +176,7 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 			}
 			base, ok := tt.Value.(*ast.Name)
 
-			if !ok || base.ID != b.selfName {
+			if !ok || base.Text != b.selfName {
 				break
 			}
 
@@ -170,11 +184,15 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 				b.currentClass.Attrs = NewScope(nil, ScopeAttr)
 			}
 
-			_ = b.currentClass.Attrs.Define(&Symbol{
-				Name: tt.Attr.ID,
+			sym := &Symbol{
+				Name: tt.Attr.Text,
 				Kind: SymAttr,
 				Span: tt.Attr.Pos,
-			})
+				Def:  tt.Attr.ID,
+				ID:   b.newSymID(),
+			}
+			_ = b.currentClass.Attrs.Define(sym)
+			b.Defs[tt.Attr.ID] = sym
 
 		}
 	}
@@ -183,19 +201,22 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 }
 
 func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
-	if c.Name.ID == "<incomplete>" {
+	if c.Name.Text == "<incomplete>" {
 		return
 	}
 
 	classScope := NewScope(b.current, ScopeClass)
 
 	classSym := &Symbol{
-		Name: c.Name.ID,
+		Name: c.Name.Text,
 		Kind: SymClass,
-		Span: c.Pos,
+		Span: c.Name.Pos,
+		ID:   b.newSymID(),
+		Def:  c.Name.ID,
 	}
 	classScope.Owner = classSym
 	_ = b.current.Define(classSym)
+	b.Defs[c.Name.ID] = classSym
 
 	classSym.Inner = classScope
 	prev := b.current
@@ -214,26 +235,29 @@ func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
 }
 
 func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
-	if f.Name.ID == "<incomplete>" {
+	if f.Name.Text == "<incomplete>" {
 		return
 	}
 
 	fnScope := NewScope(b.current, ScopeFunction)
 
 	fnSym := &Symbol{
-		Name: f.Name.ID,
+		Name: f.Name.Text,
 		Kind: SymFunction,
 		Span: f.NamePos,
+		ID:   b.newSymID(),
+		Def:  f.Name.ID,
 	}
 
 	fnScope.Owner = fnSym
 
 	_ = b.current.Define(fnSym)
+	b.Defs[f.Name.ID] = fnSym
 
 	fnSym.Inner = fnScope
 	prevSelf := b.selfName
 	if b.current.Kind == ScopeClass && len(f.Args) > 0 {
-		b.selfName = f.Args[0].Name.ID
+		b.selfName = f.Args[0].Name.Text
 	} else {
 		b.selfName = ""
 	}
@@ -243,11 +267,7 @@ func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
 	b.inFunction = true
 
 	for _, arg := range f.Args {
-		_ = b.current.Define(&Symbol{
-			Name: arg.Name.ID,
-			Kind: SymParameter,
-			Span: arg.Pos,
-		})
+		b.define(b.current, arg.Name, SymParameter, arg.Pos)
 	}
 
 	for _, stmt := range f.Body {
