@@ -37,6 +37,7 @@ type Symbol struct {
 	Members    *Scope
 	Bases      []*Symbol
 	InstanceOf *Symbol
+	DocString  string
 }
 
 type ScopeKind int

@@ -99,6 +99,9 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		}
 
 		classSym := r.current.Symbols[s.Name.ID]
+		if s.DocString != "" {
+			classSym.DocString = s.DocString
+		}
 		r.Resolved[s.Name] = classSym
 
 		for _, baseExpr := range s.Bases {
@@ -156,6 +159,9 @@ func (r *Resolver) visitStmt(stmt ast.Statement) {
 		}
 
 		fnSym := r.current.Symbols[s.Name.ID]
+		if s.DocString != "" {
+			fnSym.DocString = s.DocString
+		}
 		r.Resolved[s.Name] = fnSym
 		if fnSym == nil || fnSym.Inner == nil {
 			r.error(s.Pos, "internal compiler error: missing function symbol or scope for "+s.Name.ID)
