@@ -10,6 +10,9 @@ It's not meant to replace Pyright or pylsp. It's meant to be **understandable**.
 
 All internal source locations are stored as **byte offsets**. Line and column only appear at the LSP boundary.
 
+
+<img src="assets/demo.gif" alt="LSP Demo" width="600">
+
 ## Current Status
 
 ### Lexer — full Python tokenization
