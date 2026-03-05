@@ -20,6 +20,7 @@ type Conn struct {
 	outgoing  chan outbound
 	errors    chan error
 	once      sync.Once
+	closeOnce sync.Once
 	ctx       context.Context
 	cancel    context.CancelFunc
 	writeDone chan struct{}
@@ -49,11 +50,16 @@ func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *
 func (c *Conn) markClosed() {
 	c.closing.Do(func() {
 		close(c.closed)
-		close(c.outgoing)
 	})
 }
 
 func (c *Conn) enqueueBytes(b []byte) error {
+	select {
+	case <-c.closed:
+		return fmt.Errorf("connection closed")
+	default:
+	}
+
 	select {
 	case <-c.closed:
 		return fmt.Errorf("connection closed")
@@ -92,24 +98,36 @@ func (c *Conn) writeLoop() {
 		close(c.writeDone)
 	}()
 
-	for msg := range c.outgoing {
+	for {
+		select {
+		case <-c.closed:
+			// Shutdown initiated. Drain the remaining messages, then exit.
+			for {
+				select {
+				case msg := <-c.outgoing:
+					c.writeMessage(msg)
+				default:
+					return // Buffer is fully drained
+				}
+			}
 
-		header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg.payload))
-
-		if _, err := c.w.WriteString(header); err != nil {
-			c.fail(err)
-			return
+		case msg := <-c.outgoing:
+			c.writeMessage(msg)
 		}
+	}
+}
 
-		if _, err := c.w.Write(msg.payload); err != nil {
-			c.fail(err)
-			return
-		}
-		if err := c.w.Flush(); err != nil {
-			c.fail(err)
-			return
-		}
-
+// Extracted for readability
+func (c *Conn) writeMessage(msg outbound) {
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg.payload))
+	if _, err := c.w.WriteString(header); err != nil {
+		c.fail(err)
+	}
+	if _, err := c.w.Write(msg.payload); err != nil {
+		c.fail(err)
+	}
+	if err := c.w.Flush(); err != nil {
+		c.fail(err)
 	}
 }
 
@@ -147,7 +165,9 @@ func (c *Conn) Close() error {
 	c.markClosed()
 	<-c.writeDone
 	c.cancel()
-	_ = c.closeFn()
+	c.closeOnce.Do(func() {
+		_ = c.closeFn()
+	})
 	return nil
 }
 
@@ -171,7 +191,11 @@ func (c *Conn) fail(err error) {
 		c.reportError(err)
 		c.markClosed()
 		c.cancel()
-		_ = c.closeFn()
+		c.closeOnce.Do(
+			func() {
+				_ = c.closeFn()
+			},
+		)
 	})
 }
 

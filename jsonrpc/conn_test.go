@@ -69,3 +69,43 @@ func TestConn_SendResponse(t *testing.T) {
 		t.Fatalf("missing response body")
 	}
 }
+
+// TestConn_GracefulDrain checks if the JSONRPC connection drains gracefully if
+// a burst of messages are sent and the comm. channel is closed abruptly
+func TestConn_GracefulDrain(t *testing.T) {
+	in := bytes.NewBuffer(nil)
+	out := &bytes.Buffer{}
+
+	conn := NewConn(
+		bufio.NewReader(in),
+		bufio.NewWriter(out),
+		func() error { return nil },
+	)
+
+	conn.Start()
+
+	// Since c.outgoing has a buffer of 100, these enqueue instantly.
+	numMessages := 50
+	for i := range numMessages {
+		err := conn.Notify("test_drain", i)
+		if err != nil {
+			t.Fatalf("failed to enqueue message %d: %v", i, err)
+		}
+	}
+
+	// This signals c.closed, forcing the writeLoop to enter its draining phase.
+	// conn.Close() will block until the writeLoop finishes draining and closes writeDone.
+	err := conn.Close()
+	if err != nil {
+		t.Fatalf("unexpected error on Close: %v", err)
+	}
+
+	// Because Close() waited for the drain to finish, it is now safe to read the buffer
+	// without any mutexes or data races.
+	output := out.String()
+	actualCount := strings.Count(output, `"method":"test_drain"`)
+
+	if actualCount != numMessages {
+		t.Fatalf("expected %d messages to be drained and written, but found %d", numMessages, actualCount)
+	}
+}
