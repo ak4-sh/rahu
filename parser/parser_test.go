@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"os"
 	"testing"
 
 	"rahu/parser/ast"
@@ -27,7 +28,7 @@ func TestSimpleAssignment(t *testing.T) {
 	}
 
 	target, ok := assign.Targets[0].(*ast.Name)
-	if !ok || target.ID != "x" {
+	if !ok || target.Text != "x" {
 		t.Fatalf("expected target 'x', got %v", target)
 	}
 
@@ -316,15 +317,15 @@ func TestFunctionDefinition(t *testing.T) {
 		t.Fatalf("expected FunctionDef, got %T", module.Body[0])
 	}
 
-	if funcDef.Name.ID != "add" {
-		t.Fatalf("expected name 'add', got %q", funcDef.Name.ID)
+	if funcDef.Name.Text != "add" {
+		t.Fatalf("expected name 'add', got %q", funcDef.Name.Text)
 	}
 
 	if len(funcDef.Args) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(funcDef.Args))
 	}
 
-	if funcDef.Args[0].Name.ID != "x" || funcDef.Args[1].Name.ID != "y" {
+	if funcDef.Args[0].Name.Text != "x" || funcDef.Args[1].Name.Text != "y" {
 		t.Fatalf("unexpected arg names: %v", funcDef.Args)
 	}
 
@@ -373,7 +374,7 @@ func TestFunctionCall(t *testing.T) {
 	}
 
 	funcName, ok := call.Func.(*ast.Name)
-	if !ok || funcName.ID != "add" {
+	if !ok || funcName.Text != "add" {
 		t.Fatalf("expected function 'add', got %v", call.Func)
 	}
 
@@ -449,7 +450,7 @@ func TestFunctionCallNestedCalls(t *testing.T) {
 	}
 
 	innerFunc, ok := innerCall.Func.(*ast.Name)
-	if !ok || innerFunc.ID != "bar" {
+	if !ok || innerFunc.Text != "bar" {
 		t.Fatalf("expected inner call to 'bar', got %v", innerCall.Func)
 	}
 
@@ -570,7 +571,7 @@ func TestForLoop(t *testing.T) {
 	}
 
 	target, ok := forStmt.Target.(*ast.Name)
-	if !ok || target.ID != "i" {
+	if !ok || target.Text != "i" {
 		t.Fatalf("expected target 'i', got %v", forStmt.Target)
 	}
 
@@ -849,5 +850,33 @@ func TestNestedControlFlow(t *testing.T) {
 	_, ok = ifStmt.Body[0].(*ast.Continue)
 	if !ok {
 		t.Fatalf("expected Continue in if body, got %T", ifStmt.Body[0])
+	}
+}
+
+func BenchmarkParseMega(b *testing.B) {
+	src, err := os.ReadFile("../mega.py")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	input := string(src)
+
+	for b.Loop() {
+		p := New(input)
+		_ = p.Parse()
+	}
+}
+
+func BenchmarkParseSmall(b *testing.B) {
+	src, err := os.ReadFile("../longerScript.py")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	input := string(src)
+
+	for b.Loop() {
+		p := New(input)
+		_ = p.Parse()
 	}
 }
