@@ -51,7 +51,11 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		kind = "symbol"
 	}
 
-	value := fmt.Sprintf("**%s** `%s`", kind, sym.Name)
+	value := fmt.Sprintf(
+		"```python\n%s(%s)\n```",
+		kind,
+		sym.Name,
+	)
 
 	if sym.Kind == a.SymFunction && sym.Inner != nil {
 		params := []string{}
@@ -75,7 +79,11 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 	}
 
 	if sym.Kind == a.SymVariable && sym.InstanceOf != nil {
-		value = fmt.Sprintf("**%s** `%s`", kind, sym.Name)
+		value = fmt.Sprintf(
+			"```\n%s(%s)\n```",
+			kind,
+			sym.Name,
+		)
 	}
 
 	filename := u.FilenameFromURI(doc.URI)
@@ -103,13 +111,23 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 
 	if name := l.NameAtPos(doc.AST, offset); name != nil {
 		if sym, ok := doc.Symbols[name]; ok && sym != nil {
-			return s.hoverForSymbol(doc, sym), nil
+			hov := s.hoverForSymbol(doc, sym)
+			if hov != nil {
+				hovPos := ToRange(doc.LineIndex, sym.Span)
+				hov.Range = &hovPos
+			}
+			return hov, nil
 		}
 	}
 
 	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
 		if sym, ok := doc.AttrSymbols[attr]; ok && sym != nil {
-			return s.hoverForSymbol(doc, sym), nil
+			hov := s.hoverForSymbol(doc, sym)
+			if hov != nil {
+				hovPos := ToRange(doc.LineIndex, sym.Span)
+				hov.Range = &hovPos
+			}
+			return hov, nil
 		}
 	}
 	return nil, jsonrpc.InvalidParamsError(nil)
