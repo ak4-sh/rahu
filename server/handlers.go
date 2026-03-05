@@ -135,7 +135,7 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 	)
 
 	if name := l.NameAtPos(doc.AST, offset); name != nil {
-		if sym, ok := doc.Symbols[name]; ok && sym != nil {
+		if sym, ok := doc.Symbols[name.ID]; ok && sym != nil {
 			hov := s.hoverForSymbol(doc, sym)
 			if hov != nil {
 				hovPos := ToRange(doc.LineIndex, sym.Span)
@@ -146,7 +146,7 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 	}
 
 	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
-		if sym, ok := doc.AttrSymbols[attr]; ok && sym != nil {
+		if sym, ok := doc.AttrSymbols[attr.ID]; ok && sym != nil {
 			hov := s.hoverForSymbol(doc, sym)
 			if hov != nil {
 				hovPos := ToRange(doc.LineIndex, sym.Span)
@@ -226,12 +226,24 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		p.Position.Character,
 	)
 
+	// Attribute definitions first (obj.x)
+	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
+		if sym, ok := doc.AttrSymbols[attr.ID]; ok && sym != nil && !sym.Span.IsEmpty() {
+			return &lsp.Location{
+				URI:   doc.URI,
+				Range: ToRange(doc.LineIndex, sym.Span),
+			}, nil
+		}
+	}
+
+	// Regular names
 	if name := l.NameAtPos(doc.AST, offset); name != nil {
-		if sym, ok := doc.Symbols[name]; ok && sym != nil {
+		if sym, ok := doc.Symbols[name.ID]; ok && sym != nil {
 			if sym.Kind != a.SymBuiltin &&
 				sym.Kind != a.SymConstant &&
 				sym.Kind != a.SymType &&
 				!sym.Span.IsEmpty() {
+
 				return &lsp.Location{
 					URI:   doc.URI,
 					Range: ToRange(doc.LineIndex, sym.Span),
@@ -240,14 +252,6 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		}
 	}
 
-	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
-		if sym, ok := doc.AttrSymbols[attr]; ok && sym != nil && !sym.Span.IsEmpty() {
-			return &lsp.Location{
-				URI:   doc.URI,
-				Range: ToRange(doc.LineIndex, sym.Span),
-			}, nil
-		}
-	}
 	return nil, jsonrpc.InvalidParamsError(nil)
 }
 

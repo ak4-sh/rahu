@@ -19,6 +19,7 @@ func promoteOneClass(cls *Symbol) {
 	// 1. Methods
 	if cls.Inner != nil {
 		for _, s := range cls.Inner.Symbols {
+			s.Scope = cls.Members
 			cls.Members.Symbols[s.Name] = s
 		}
 	}
@@ -26,7 +27,8 @@ func promoteOneClass(cls *Symbol) {
 	// 2. Instance attributes
 	if cls.Attrs != nil {
 		for _, a := range cls.Attrs.Symbols {
-			cls.Members.Define(a)
+			a.Scope = cls.Members
+			cls.Members.Symbols[a.Name] = a
 		}
 	}
 
@@ -40,6 +42,7 @@ func promoteOneClass(cls *Symbol) {
 		for name, sym := range base.Members.Symbols {
 			// Do not override child definitions
 			if _, exists := cls.Members.Symbols[name]; !exists {
+				sym.Scope = cls.Members
 				cls.Members.Symbols[name] = sym
 			}
 		}

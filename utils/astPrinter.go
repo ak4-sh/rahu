@@ -97,7 +97,7 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 		printAST(w, n.Right, indent+4, opts)
 
 	case *ast.Name:
-		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+n.ID+")"))
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+n.Text+")"))
 
 	case *ast.Number:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Number("+n.Value+")"))
@@ -125,14 +125,14 @@ func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
 		printAST(w, n.Value, indent+2, opts)
 
 	case ast.FuncArg:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FuncArg("+n.Name.ID+")"))
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FuncArg("+n.Name.Text+")"))
 		if n.Default != nil {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Default:"))
 			printAST(w, n.Default, indent+4, opts)
 		}
 
 	case *ast.FunctionDef:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+n.Name.ID+"):"))
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+n.Name.Text+"):"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Args:"))
 		for _, a := range n.Args {
 			printAST(w, a, indent+4, opts)

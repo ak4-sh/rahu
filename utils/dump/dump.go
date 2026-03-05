@@ -71,7 +71,7 @@ func main() {
 		return
 	}
 
-	global := analyser.BuildScopes(module)
+	global, _ := analyser.BuildScopes(module)
 
 	header("=== SCOPES ===")
 	dumpScope(global, 0)
@@ -98,15 +98,21 @@ func main() {
 	}
 
 	header("=== RESOLVED NAMES ===")
+	nameByID := collectNameNodes(module)
 
 	type nameEntry struct {
+		id   ast.NodeID
 		name *ast.Name
 		sym  *analyser.Symbol
 	}
 
 	var names []nameEntry
-	for n, s := range resolved {
-		names = append(names, nameEntry{n, s})
+	for id, s := range resolved {
+		n := nameByID[id]
+		if n == nil {
+			continue
+		}
+		names = append(names, nameEntry{id: id, name: n, sym: s})
 	}
 
 	sort.Slice(names, func(i, j int) bool {
@@ -116,7 +122,7 @@ func main() {
 	for _, e := range names {
 		okLine(fmt.Sprintf(
 			"%s @ [%d,%d] -> %s (%s)",
-			e.name.ID,
+			e.name.Text,
 			e.name.Pos.Start,
 			e.name.Pos.End,
 			e.sym.Name,
@@ -193,7 +199,7 @@ func dumpClassAttrs(s *analyser.Scope) {
 
 // ------------------------------------------------------------
 
-func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Symbol) {
+func dumpAttrBindings(module *ast.Module, attrs map[ast.NodeID]*analyser.Symbol) {
 	var walkExpr func(ast.Expression)
 
 	walkExpr = func(e ast.Expression) {
@@ -203,16 +209,16 @@ func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Sym
 
 			base := "<expr>"
 			if n, ok := v.Value.(*ast.Name); ok {
-				base = n.ID
+				base = n.Text
 			}
 
-			sym := attrs[v]
+			sym := attrs[v.ID]
 
 			if sym == nil {
 				errLine(fmt.Sprintf(
 					"UNBOUND %s.%s at [%d,%d]",
 					base,
-					v.Attr.ID,
+					v.Attr.Text,
 					v.Attr.Pos.Start,
 					v.Attr.Pos.End,
 				))
@@ -220,7 +226,7 @@ func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Sym
 				okLine(fmt.Sprintf(
 					"BOUND   %s.%s -> %s (%s) at [%d,%d]",
 					base,
-					v.Attr.ID,
+					v.Attr.Text,
 					sym.Name,
 					sym.Kind,
 					v.Attr.Pos.Start,
@@ -300,6 +306,125 @@ func dumpAttrBindings(module *ast.Module, attrs map[*ast.Attribute]*analyser.Sym
 	for _, st := range module.Body {
 		walkStmt(st)
 	}
+}
+
+func collectNameNodes(module *ast.Module) map[ast.NodeID]*ast.Name {
+	result := make(map[ast.NodeID]*ast.Name)
+
+	var walkExpr func(ast.Expression)
+	walkExpr = func(e ast.Expression) {
+		switch v := e.(type) {
+		case *ast.Name:
+			result[v.ID] = v
+		case *ast.Attribute:
+			if v.Attr != nil {
+				result[v.Attr.ID] = v.Attr
+			}
+			walkExpr(v.Value)
+		case *ast.BinOp:
+			walkExpr(v.Left)
+			walkExpr(v.Right)
+		case *ast.UnaryOp:
+			walkExpr(v.Operand)
+		case *ast.BooleanOp:
+			for _, x := range v.Values {
+				walkExpr(x)
+			}
+		case *ast.Compare:
+			walkExpr(v.Left)
+			for _, x := range v.Right {
+				walkExpr(x)
+			}
+		case *ast.Call:
+			walkExpr(v.Func)
+			for _, x := range v.Args {
+				walkExpr(x)
+			}
+		case *ast.Tuple:
+			for _, x := range v.Elts {
+				walkExpr(x)
+			}
+		case *ast.List:
+			for _, x := range v.Elts {
+				walkExpr(x)
+			}
+		}
+	}
+
+	var walkStmt func(ast.Statement)
+	walkStmt = func(st ast.Statement) {
+		switch s := st.(type) {
+		case *ast.Assign:
+			for _, t := range s.Targets {
+				walkExpr(t)
+			}
+			walkExpr(s.Value)
+		case *ast.AugAssign:
+			walkExpr(s.Target)
+			walkExpr(s.Value)
+		case *ast.ExprStmt:
+			walkExpr(s.Value)
+		case *ast.Return:
+			if s.Value != nil {
+				walkExpr(s.Value)
+			}
+		case *ast.FunctionDef:
+			if s.Name != nil {
+				result[s.Name.ID] = s.Name
+			}
+			for _, arg := range s.Args {
+				if arg.Name != nil {
+					result[arg.Name.ID] = arg.Name
+				}
+				if arg.Default != nil {
+					walkExpr(arg.Default)
+				}
+			}
+			for _, b := range s.Body {
+				walkStmt(b)
+			}
+		case *ast.ClassDef:
+			if s.Name != nil {
+				result[s.Name.ID] = s.Name
+			}
+			for _, base := range s.Bases {
+				if base != nil {
+					walkExpr(base)
+				}
+			}
+			for _, b := range s.Body {
+				walkStmt(b)
+			}
+		case *ast.If:
+			walkExpr(s.Test)
+			for _, b := range s.Body {
+				walkStmt(b)
+			}
+			for _, b := range s.Orelse {
+				walkStmt(b)
+			}
+		case *ast.For:
+			walkExpr(s.Target)
+			walkExpr(s.Iter)
+			for _, b := range s.Body {
+				walkStmt(b)
+			}
+			for _, b := range s.Orelse {
+				walkStmt(b)
+			}
+		case *ast.WhileLoop:
+			walkExpr(s.Test)
+			for _, b := range s.Body {
+				walkStmt(b)
+			}
+		}
+	}
+
+	for _, st := range module.Body {
+		walkStmt(st)
+	}
+
+	return result
 }
 
 func dumpClassMembers(s *analyser.Scope) {

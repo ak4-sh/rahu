@@ -11,10 +11,10 @@ func (s *Server) analyze(doc *Document) {
 	p := parser.New(doc.Text)
 	module := p.Parse()
 
-	global := analyser.BuildScopes(module)
+	global, defs := analyser.BuildScopes(module)
 	resolver, semErrs := analyser.Resolve(module, global)
 
-	s.SetAnalysis(doc.URI, module, resolver.Resolved, resolver.ResolvedAttr, semErrs)
+	s.SetAnalysis(doc.URI, module, defs, resolver.Resolved, resolver.ResolvedAttr, semErrs)
 
 	diags := toDiagnostics(doc.LineIndex, p.Errors(), semErrs)
 	s.publishDiagnostics(doc.URI, diags)
