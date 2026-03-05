@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,11 +51,22 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		kind = "symbol"
 	}
 
-	value := fmt.Sprintf(
-		"```python\n%s(%s)\n```",
-		kind,
-		sym.Name,
-	)
+	var builder strings.Builder
+	builder.WriteString("```python\n")
+	builder.WriteString(kind)
+	builder.WriteString("(")
+	builder.WriteString(sym.Name)
+	builder.WriteString(")\n```")
+
+	if sym.Kind == a.SymClass && sym.DocString != "" {
+		builder.Reset()
+		builder.WriteString("```python\n")
+		builder.WriteString(kind)
+		builder.WriteString("(")
+		builder.WriteString(sym.Name)
+		builder.WriteString(")\n```\n\n")
+		builder.WriteString(sym.DocString)
+	}
 
 	if sym.Kind == a.SymFunction && sym.Inner != nil {
 		params := []string{}
@@ -71,29 +82,43 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 			kind = "method"
 		}
 
-		value = fmt.Sprintf(
-			"```python\n%s(%s)\n```",
-			name,
-			strings.Join(params, ", "),
-		)
+		builder.Reset()
+		builder.WriteString("```python\n")
+		builder.WriteString(name)
+		builder.WriteString("(")
+		builder.WriteString(strings.Join(params, ", "))
+		builder.WriteString(")\n")
+
+		if sym.DocString != "" {
+
+			builder.WriteString("```\n")
+			builder.WriteString(sym.DocString)
+		} else {
+			builder.WriteString("```")
+		}
+
 	}
 
 	if sym.Kind == a.SymVariable && sym.InstanceOf != nil {
-		value = fmt.Sprintf(
-			"```\n%s(%s)\n```",
-			kind,
-			sym.Name,
-		)
+		builder.Reset()
+		builder.WriteString("```\n")
+		builder.WriteString(kind)
+		builder.WriteString("(")
+		builder.WriteString(sym.Name)
+		builder.WriteString(")\n```")
 	}
 
 	filename := u.FilenameFromURI(doc.URI)
 	line, _ := doc.LineIndex.OffsetToPosition(sym.Span.Start)
-	value += fmt.Sprintf("\n\nDefined in %s:%d", filename, line+1)
+	builder.WriteString("\n\n")
+	builder.WriteString(filename)
+	builder.WriteString(":")
+	builder.WriteString(strconv.Itoa(line + 1))
 
 	return &lsp.Hover{
 		Contents: lsp.MarkupContent{
 			Kind:  "markdown",
-			Value: value,
+			Value: builder.String(),
 		},
 	}
 }
