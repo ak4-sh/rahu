@@ -1,28 +1,28 @@
 # rahu
 
-A Python Language Server built in Go from scratch — no LSP libraries, no Python runtime, just pure static goodness.
+A Python Language Server built in Go from scratch — no LSP libraries, no Python runtime, just static analysis end-to-end.
 
 ## Why?
 
-Most language servers are... complicated. Rahu exists to understand Python at the source level — how does code actually flow, what names mean, how do classes inherit from each other?
+Most language servers are powerful but hard to reason about. Rahu exists to make the core mechanics visible: tokenization, parsing, scoping, name resolution, and LSP wiring.
 
-It's not meant to replace Pyright or pylsp. It's meant to be **understandable**. Every line of code here should be readable, every data structure traceable. If you want to understand how a language server actually works under the hood, this is the repo.
+It's not trying to replace Pyright or pylsp. It's trying to be **understandable**. Every stage should be inspectable, every data structure traceable, and every feature grounded in clear compiler-style passes.
 
-All internal source locations are stored as **byte offsets**. Line and column only appear at the LSP boundary.
+All internal source locations are stored as **byte offsets**. Line/column translation happens only at the LSP boundary.
 
 
 <img src="assets/demo.gif" alt="LSP Demo" width="600">
 
 ## Current Status
 
-### Lexer — full Python tokenization
+### Lexer — robust tokenization
 
 - Single and multi-character operators (`+`, `==`, `//`, `**`, `>>=`, `:=`, etc.)
 - String literals (single-line and triple-quoted)
 - Number literals (int, float, hex, binary, octal)
 - Keywords and identifiers
 - INDENT/DEDENT with tab/space consistency enforcement
-- All positions stored as half-open byte ranges `[start, end)`
+- Positions stored as half-open byte ranges `[start, end)`
 
 ### Parser — recursive descent + Pratt
 
@@ -41,12 +41,14 @@ All internal source locations are stored as **byte offsets**. Line and column on
 - List literals, tuple unpacking
 - Right-associative `**` operator
 
-Parser recovers from errors — it'll keep parsing even if something's syntactically wrong. Every AST node carries its byte span.
+Parser recovers from errors and continues building a best-effort AST. AST names and attributes now carry stable `NodeID`s, so later analysis stages can key lookups by identity that survives traversal and map usage.
 
-### Semantic Analyser — LEGB scoping + inheritance
+### Semantic Analyser — LEGB scopes + class modeling
 
-- Lexical scopes: builtin → global → function → class
+- Lexical scopes: builtin -> global -> function -> class
 - Python-style name resolution (LEGB)
+- Definition tracking map from `NodeID -> Symbol` during scope building
+- Name and attribute resolution maps keyed by `NodeID`
 - Builtin functions: `print`, `range`, `len`, `int`, `str`, `bool`, `list`, `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `open`, `super`, `hasattr`, `getattr`, `setattr`, `input`, `float`
 
 **Symbol kinds:**
@@ -69,9 +71,11 @@ Parser recovers from errors — it'll keep parsing even if something's syntactic
 - Document lifecycle (`didOpen`, `didChange`, `didClose`)
 - Full and incremental text sync
 - Publishes diagnostics (syntax + semantic errors)
-- **Go-to-definition** — jumps to variables, functions, parameters, classes, attributes
+- **Go-to-definition** — resolves variables, functions, parameters, classes, and attributes (`obj.attr`)
 - **Hover** — basic implementation showing symbol info
 - `definitionProvider` and `hoverProvider` capabilities advertised
+
+Server-side document analysis stores AST + definition map + resolved symbol maps + semantic diagnostics per open document.
 
 ### JSON-RPC Transport
 
@@ -79,6 +83,13 @@ Parser recovers from errors — it'll keep parsing even if something's syntactic
 - Request/response correlation
 - Notification dispatch
 - Panic recovery in handlers
+
+### Testing
+
+- JSON-RPC transport/frame tests are consolidated in `jsonrpc/jsonrpc_test.go`
+- Parser benchmarks live in `parser/parser_test.go`
+- Server lookup/definition-oriented tests and benchmarks are grouped in `server/benchmark_test.go`
+- Core parser/analyser/server packages are covered by `go test ./...`
 
 ## What's Missing
 
@@ -101,12 +112,18 @@ Parser recovers from errors — it'll keep parsing even if something's syntactic
 - Rename
 - Code actions / formatting
 
-### Performance
+### Performance and infrastructure
 
 - No analysis debouncing (re-parses everything on every keystroke)
 - No incremental parsing
 - No AST reuse across edits
 - No structured logging
+
+### Testing depth
+
+- No full in-memory end-to-end LSP session suite yet
+- More semantic error-path coverage is still needed (resolver/binder edge cases)
+- Parser recovery and malformed-input branch coverage can be expanded further
 
 ## Project Structure
 
@@ -126,8 +143,9 @@ rahu/
 │   ├── resolver.go    # Name resolution
 │   ├── promoter.go    # Inheritance member promotion
 │   └── binder.go      # Attribute binding
-└── utils/             # Debug tools
-    └── dump/          # CLI for dumping analysis output
+├── utils/             # Debug tools
+│   └── dump/          # CLI for dumping analysis output
+└── notes/             # Project notes and planning docs
 ```
 
 ## Architecture
@@ -140,15 +158,15 @@ editor keystroke
   -> update Document text + line index
   -> lex entire file (byte offsets)
   -> parse tokens into AST
-  -> build scopes
-  -> resolve names
+  -> build scopes + definition map
+  -> resolve names and attributes
   -> promote class members (inheritance)
-  -> bind attributes
+  -> store AST + defs + resolved symbols on Document
   -> convert byte spans to LSP ranges
   -> publish diagnostics
 ```
 
-Everything runs on byte offsets internally. Line/column only shows up when talking to the editor.
+Everything runs on byte offsets internally. Line/column is only used for protocol I/O.
 
 ## Sample Output
 
@@ -306,9 +324,11 @@ go run ./utils/dump path/to/file.py
 # Point your editor's Python language server to: go run ./cmd/lsp
 ```
 
+Tip: run `go test ./...` before wiring Rahu into an editor config so parser/analyser/server changes are validated first.
+
 ## Tech Stack
 
-- **Go 1.26** — that's it. One runtime, no dependencies worth mentioning.
+- **Go 1.26** - one runtime, minimal dependencies.
 - No external LSP libraries
 - No Python interpreter — pure static analysis
 
