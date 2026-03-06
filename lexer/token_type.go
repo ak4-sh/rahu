@@ -1,100 +1,101 @@
 package lexer
 
-type TokenType string
+//go:generate stringer -type=TokenType
+type TokenType int
 
 const (
-	EOF     TokenType = "EOF"
-	ILLEGAL TokenType = "ILLEGAL"
+	EOF TokenType = iota
+	ILLEGAL
 
-	NAME   TokenType = "NAME"
-	NUMBER TokenType = "NUMBER"
-	STRING TokenType = "STRING"
+	NAME
+	NUMBER
+	STRING
 
-	NEWLINE TokenType = "NEWLINE"
-	INDENT  TokenType = "INDENT"
-	DEDENT  TokenType = "DEDENT"
+	NEWLINE
+	INDENT
+	DEDENT
 
-	LPAR             TokenType = "LPAR"
-	RPAR             TokenType = "RPAR"
-	LSQB             TokenType = "LSQB"
-	RSQB             TokenType = "RSQB"
-	COLON            TokenType = "COLON"
-	SEMI             TokenType = "SEMI"
-	PLUS             TokenType = "PLUS"
-	MINUS            TokenType = "MINUS"
-	STAR             TokenType = "STAR"
-	SLASH            TokenType = "SLASH"
-	VBAR             TokenType = "VBAR"
-	AMPER            TokenType = "AMPER"
-	LESS             TokenType = "LESS"
-	GREATER          TokenType = "GREATER"
-	EQUAL            TokenType = "EQUAL"
-	DOT              TokenType = "DOT"
-	PERCENT          TokenType = "PERCENT"
-	LBRACE           TokenType = "LBRACE"
-	RBRACE           TokenType = "RBRACE"
-	EQEQUAL          TokenType = "EQEQUAL"
-	NOTEQUAL         TokenType = "NOTEQUAL"
-	LESSEQUAL        TokenType = "LESSEQUAL"
-	GREATEREQUAL     TokenType = "GREATEREQUAL"
-	TILDE            TokenType = "TILDE"
-	CIRCUMFLEX       TokenType = "CIRCUMFLEX"
-	LEFTSHIFT        TokenType = "LEFTSHIFT"
-	RIGHTSHIFT       TokenType = "RIGHTSHIFT"
-	DOUBLESTAR       TokenType = "DOUBLESTAR"
-	PLUSEQUAL        TokenType = "PLUSEQUAL"
-	MINEQUAL         TokenType = "MINEQUAL"
-	STAREQUAL        TokenType = "STAREQUAL"
-	SLASHEQUAL       TokenType = "SLASHEQUAL"
-	PERCENTEQUAL     TokenType = "PERCENTEQUAL"
-	AMPEREQUAL       TokenType = "AMPEREQUAL"
-	VBAREQUAL        TokenType = "VBAREQUAL"
-	CIRCUMFLEXEQUAL  TokenType = "CIRCUMFLEXEQUAL"
-	LEFTSHIFTEQUAL   TokenType = "LEFTSHIFTEQUAL"
-	RIGHTSHIFTEQUAL  TokenType = "RIGHTSHIFTEQUAL"
-	DOUBLESTAREQUAL  TokenType = "DOUBLESTAREQUAL"
-	DOUBLESLASH      TokenType = "DOUBLESLASH"
-	DOUBLESLASHEQUAL TokenType = "DOUBLESLASHEQUAL"
-	AT               TokenType = "AT"
-	ATEQUAL          TokenType = "ATEQUAL"
-	RARROW           TokenType = "RARROW"
-	ELLIPSIS         TokenType = "ELLIPSIS"
-	COLONEQUAL       TokenType = "COLONEQUAL"
-	EXCLAMATION      TokenType = "EXCLAMATION"
-	COMMA            TokenType = "COMMA"
+	LPAR
+	RPAR
+	LSQB
+	RSQB
+	COLON
+	SEMI
+	PLUS
+	MINUS
+	STAR
+	SLASH
+	VBAR
+	AMPER
+	LESS
+	GREATER
+	EQUAL
+	DOT
+	PERCENT
+	LBRACE
+	RBRACE
+	EQEQUAL
+	NOTEQUAL
+	LESSEQUAL
+	GREATEREQUAL
+	TILDE
+	CIRCUMFLEX
+	LEFTSHIFT
+	RIGHTSHIFT
+	DOUBLESTAR
+	PLUSEQUAL
+	MINEQUAL
+	STAREQUAL
+	SLASHEQUAL
+	PERCENTEQUAL
+	AMPEREQUAL
+	VBAREQUAL
+	CIRCUMFLEXEQUAL
+	LEFTSHIFTEQUAL
+	RIGHTSHIFTEQUAL
+	DOUBLESTAREQUAL
+	DOUBLESLASH
+	DOUBLESLASHEQUAL
+	AT
+	ATEQUAL
+	RARROW
+	ELLIPSIS
+	COLONEQUAL
+	EXCLAMATION
+	COMMA
 
-	FALSE               TokenType = "FALSE"
-	NONE                TokenType = "NONE"
-	TRUE                TokenType = "TRUE"
-	AND                 TokenType = "AND"
-	AS                  TokenType = "AS"
-	ASSERT              TokenType = "ASSERT"
-	BREAK               TokenType = "BREAK"
-	CLASS               TokenType = "CLASS"
-	CONTINUE            TokenType = "CONTINUE"
-	DEF                 TokenType = "DEF"
-	DEL                 TokenType = "DEL"
-	ELIF                TokenType = "ELIF"
-	ELSE                TokenType = "ELSE"
-	EXCEPT              TokenType = "EXCEPT"
-	FINALLY             TokenType = "FINALLY"
-	FOR                 TokenType = "FOR"
-	FROM                TokenType = "FROM"
-	GLOBAL              TokenType = "GLOBAL"
-	IF                  TokenType = "IF"
-	IMPORT              TokenType = "IMPORT"
-	IN                  TokenType = "IN"
-	IS                  TokenType = "IS"
-	LAMBDA              TokenType = "LAMBDA"
-	NONLOCAL            TokenType = "NONLOCAL"
-	NOT                 TokenType = "NOT"
-	OR                  TokenType = "OR"
-	PASS                TokenType = "PASS"
-	RAISE               TokenType = "RAISE"
-	RETURN              TokenType = "RETURN"
-	TRY                 TokenType = "TRY"
-	WHILE               TokenType = "WHILE"
-	WITH                TokenType = "WITH"
-	YIELD               TokenType = "YIELD"
-	UNTERMINATED_STRING TokenType = "UNTERMINATED_STRING"
+	FALSE
+	NONE
+	TRUE
+	AND
+	AS
+	ASSERT
+	BREAK
+	CLASS
+	CONTINUE
+	DEF
+	DEL
+	ELIF
+	ELSE
+	EXCEPT
+	FINALLY
+	FOR
+	FROM
+	GLOBAL
+	IF
+	IMPORT
+	IN
+	IS
+	LAMBDA
+	NONLOCAL
+	NOT
+	OR
+	PASS
+	RAISE
+	RETURN
+	TRY
+	WHILE
+	WITH
+	YIELD
+	UNTERMINATED_STRING
 )

@@ -82,6 +82,73 @@ func (l *Lexer) readChar() {
 	l.readPosition++
 }
 
+func (l *Lexer) parseSingleCharOp() (TokenType, bool) {
+	var tok TokenType
+
+	switch l.ch {
+	case '(':
+		tok = LPAR
+	case ')':
+		tok = RPAR
+	case '[':
+		tok = LSQB
+	case ']':
+		tok = RSQB
+	case '{':
+		tok = LBRACE
+	case '}':
+		tok = RBRACE
+	case ':':
+		tok = COLON
+	case ',':
+		tok = COMMA
+	case ';':
+		tok = SEMI
+	case '+':
+		tok = PLUS
+	case '-':
+		tok = MINUS
+	case '*':
+		tok = STAR
+	case '/':
+		tok = SLASH
+	case '|':
+		tok = VBAR
+	case '&':
+		tok = AMPER
+	case '<':
+		tok = LESS
+	case '>':
+		tok = GREATER
+	case '=':
+		tok = EQUAL
+	case '.':
+		tok = DOT
+	case '%':
+		tok = PERCENT
+	case '~':
+		tok = TILDE
+	case '^':
+		tok = CIRCUMFLEX
+	case '@':
+		tok = AT
+	case '!':
+		tok = EXCLAMATION
+	default:
+		return ILLEGAL, false
+	}
+
+	if tok == LPAR || tok == LSQB || tok == LBRACE {
+		l.parenDepth++
+	} else if tok == RPAR || tok == RSQB || tok == RBRACE {
+		if l.parenDepth > 0 {
+			l.parenDepth--
+		}
+	}
+
+	return tok, true
+}
+
 func (l *Lexer) peek() byte {
 	if l.readPosition >= len(l.input) {
 		return 0
@@ -146,10 +213,7 @@ func (l *Lexer) isDigit() bool {
 }
 
 func isDigit(val byte) bool {
-	if val >= '0' && val <= '9' {
-		return true
-	}
-	return false
+	return val >= '0' && val <= '9'
 }
 
 func (l *Lexer) isChar() bool {
@@ -159,39 +223,65 @@ func (l *Lexer) isChar() bool {
 	return false
 }
 
-func (l *Lexer) readNumber() string {
-	var sb strings.Builder
-	sb.WriteByte(l.ch)
-	hasDot := false
-	for {
-		l.readChar()
-		if l.ch == '.' && !hasDot && isDigit(l.peek()) {
-			hasDot = true
-			sb.WriteByte(l.ch)
-		} else if !l.isDigit() {
-			break
-		} else {
-			sb.WriteByte(l.ch)
-		}
-	}
-	return sb.String()
-}
-
 func (l *Lexer) isIdentifierChar() bool {
 	return l.isChar() || l.isDigit() || l.ch == '_'
 }
 
-func (l *Lexer) readIdentifier() string {
-	var sb strings.Builder
-	sb.WriteByte(l.ch)
-	for {
-		l.readChar()
-		if !l.isIdentifierChar() {
-			break
-		}
-		sb.WriteByte(l.ch)
+func (l *Lexer) readNumber() string {
+	start := l.position
+
+	for l.readPosition < len(l.input) && isDigit(l.input[l.readPosition]) {
+		l.readPosition++
 	}
-	return sb.String()
+
+	if l.readPosition < len(l.input) && l.input[l.readPosition] == '.' {
+		if l.readPosition+1 < len(l.input) && isDigit(l.input[l.readPosition+1]) {
+			l.readPosition += 2 // consume the '.' and the first digit
+
+			for l.readPosition < len(l.input) && isDigit(l.input[l.readPosition]) {
+				l.readPosition++
+			}
+		}
+	}
+
+	lit := l.input[start:l.readPosition]
+	l.position = l.readPosition
+
+	if l.position < len(l.input) {
+		l.ch = l.input[l.position]
+	} else {
+		l.ch = 0
+	}
+	l.readPosition++
+
+	return lit
+}
+
+func (l *Lexer) readIdentifier() string {
+	start := l.position
+	l.readPosition = l.position + 1
+
+	for l.readPosition < len(l.input) && isIdentifierByte(l.input[l.readPosition]) {
+		l.readPosition++
+	}
+
+	lit := l.input[start:l.readPosition]
+
+	l.position = l.readPosition
+
+	if l.position < len(l.input) {
+		l.ch = l.input[l.position]
+	} else {
+		l.ch = 0
+	}
+
+	l.readPosition++
+
+	return lit
+}
+
+func isIdentifierByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 func (l *Lexer) readString(quoteType byte) (string, TokenType) {
@@ -260,6 +350,7 @@ func (l *Lexer) countLeadingSpaces() (int, error) {
 	seenSpace := false
 	seenTab := false
 
+loop:
 	for {
 		peekPos := l.position + count
 		if peekPos >= len(l.input) {
@@ -267,14 +358,15 @@ func (l *Lexer) countLeadingSpaces() (int, error) {
 		}
 		curr := l.input[peekPos]
 
-		if curr == ' ' {
+		switch curr {
+		case ' ':
 			seenSpace = true
 			count++
-		} else if curr == '\t' {
+		case '\t':
 			seenTab = true
 			count++
-		} else {
-			break
+		default:
+			break loop
 		}
 	}
 
@@ -467,18 +559,9 @@ func (l *Lexer) NextToken() Token {
 		}
 	}
 
-	if typ, ok := SingleCharOps[string(l.ch)]; ok {
+	if typ, ok := l.parseSingleCharOp(); ok {
 		start := l.position
 		lit := string(l.ch)
-		switch l.ch {
-		case '(', '[', '{':
-			l.parenDepth++
-		case ')', ']', '}':
-			if l.parenDepth > 0 {
-				l.parenDepth--
-			}
-		}
-
 		l.readChar()
 		return Token{
 			Type:    typ,
