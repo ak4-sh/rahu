@@ -35,11 +35,11 @@ import (
 )
 
 type Token struct {
-	Start   int
+	Start   uint32
 	Literal string
 	Type    TokenType
 	File    string
-	End     int
+	End     uint32
 }
 
 func (t *Token) String() string {
@@ -48,14 +48,14 @@ func (t *Token) String() string {
 
 type Lexer struct {
 	input         string
-	position      int
-	readPosition  int
+	position      uint32
+	readPosition  uint32
 	ch            byte
-	indentStack   []int
+	indentStack   []uint32
 	atLineStart   bool
 	pendingTokens []Token
 	indentChar    byte
-	parenDepth    int
+	parenDepth    uint32
 }
 
 func New(input string) *Lexer {
@@ -63,7 +63,7 @@ func New(input string) *Lexer {
 		input:         input,
 		position:      0,
 		readPosition:  0,
-		indentStack:   []int{0},
+		indentStack:   []uint32{0},
 		pendingTokens: []Token{},
 		atLineStart:   true,
 	}
@@ -72,7 +72,7 @@ func New(input string) *Lexer {
 }
 
 func (l *Lexer) readChar() {
-	if l.readPosition >= len(l.input) {
+	if l.readPosition >= uint32(len(l.input)) {
 		l.ch = 0
 	} else {
 		l.ch = l.input[l.readPosition]
@@ -138,9 +138,10 @@ func (l *Lexer) parseSingleCharOp() (TokenType, bool) {
 		return ILLEGAL, false
 	}
 
-	if tok == LPAR || tok == LSQB || tok == LBRACE {
+	switch tok {
+	case LPAR, LSQB, LBRACE:
 		l.parenDepth++
-	} else if tok == RPAR || tok == RSQB || tok == RBRACE {
+	case RPAR, RSQB, RBRACE:
 		if l.parenDepth > 0 {
 			l.parenDepth--
 		}
@@ -150,15 +151,15 @@ func (l *Lexer) parseSingleCharOp() (TokenType, bool) {
 }
 
 func (l *Lexer) peek() byte {
-	if l.readPosition >= len(l.input) {
+	if l.readPosition >= uint32(len(l.input)) {
 		return 0
 	}
 	return l.input[l.readPosition]
 }
 
-func (l *Lexer) peekAhead(delta int) byte {
+func (l *Lexer) peekAhead(delta uint32) byte {
 	nextPos := l.readPosition + delta
-	if nextPos >= len(l.input) {
+	if nextPos >= uint32(len(l.input)) {
 		return 0
 	}
 	return l.input[nextPos]
@@ -183,9 +184,9 @@ func (l *Lexer) skipWhitespaceAndComments() {
 	}
 }
 
-func (l *Lexer) isMultiCharToken() (TokenType, int, bool) {
+func (l *Lexer) isMultiCharToken() (TokenType, uint32, bool) {
 	// Try 3-char token first (longest match)
-	if l.position+3 <= len(l.input) {
+	if l.position+3 <= uint32(len(l.input)) {
 		token := l.input[l.position : l.position+3]
 		if tokType, ok := MultiCharOps[token]; ok {
 			return tokType, 3, true
@@ -193,7 +194,7 @@ func (l *Lexer) isMultiCharToken() (TokenType, int, bool) {
 	}
 
 	// Try 2-char token
-	if l.position+2 <= len(l.input) {
+	if l.position+2 <= uint32(len(l.input)) {
 		token := l.input[l.position : l.position+2]
 		if tokType, ok := MultiCharOps[token]; ok {
 			return tokType, 2, true
@@ -230,15 +231,15 @@ func (l *Lexer) isIdentifierChar() bool {
 func (l *Lexer) readNumber() string {
 	start := l.position
 
-	for l.readPosition < len(l.input) && isDigit(l.input[l.readPosition]) {
+	for l.readPosition < uint32(len(l.input)) && isDigit(l.input[l.readPosition]) {
 		l.readPosition++
 	}
 
-	if l.readPosition < len(l.input) && l.input[l.readPosition] == '.' {
-		if l.readPosition+1 < len(l.input) && isDigit(l.input[l.readPosition+1]) {
+	if l.readPosition < uint32(len(l.input)) && l.input[l.readPosition] == '.' {
+		if l.readPosition+1 < uint32(len(l.input)) && isDigit(l.input[l.readPosition+1]) {
 			l.readPosition += 2 // consume the '.' and the first digit
 
-			for l.readPosition < len(l.input) && isDigit(l.input[l.readPosition]) {
+			for l.readPosition < uint32(len(l.input)) && isDigit(l.input[l.readPosition]) {
 				l.readPosition++
 			}
 		}
@@ -247,7 +248,7 @@ func (l *Lexer) readNumber() string {
 	lit := l.input[start:l.readPosition]
 	l.position = l.readPosition
 
-	if l.position < len(l.input) {
+	if l.position < uint32(len(l.input)) {
 		l.ch = l.input[l.position]
 	} else {
 		l.ch = 0
@@ -261,7 +262,7 @@ func (l *Lexer) readIdentifier() string {
 	start := l.position
 	l.readPosition = l.position + 1
 
-	for l.readPosition < len(l.input) && isIdentifierByte(l.input[l.readPosition]) {
+	for l.readPosition < uint32(len(l.input)) && isIdentifierByte(l.input[l.readPosition]) {
 		l.readPosition++
 	}
 
@@ -269,7 +270,7 @@ func (l *Lexer) readIdentifier() string {
 
 	l.position = l.readPosition
 
-	if l.position < len(l.input) {
+	if l.position < uint32(len(l.input)) {
 		l.ch = l.input[l.position]
 	} else {
 		l.ch = 0
@@ -345,15 +346,16 @@ func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
 	}
 }
 
-func (l *Lexer) countLeadingSpaces() (int, error) {
-	count := 0
+func (l *Lexer) countLeadingSpaces() (uint32, error) {
+	var count uint32
+	count = 0
 	seenSpace := false
 	seenTab := false
 
 loop:
 	for {
 		peekPos := l.position + count
-		if peekPos >= len(l.input) {
+		if peekPos >= uint32(len(l.input)) {
 			break
 		}
 		curr := l.input[peekPos]
