@@ -347,8 +347,7 @@ func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
 }
 
 func (l *Lexer) countLeadingSpaces() (uint32, error) {
-	var count uint32
-	count = 0
+	var count uint32 = 0
 	seenSpace := false
 	seenTab := false
 
