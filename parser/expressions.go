@@ -47,7 +47,7 @@ func (p *Parser) parseExpression(minBP int) a.Expression {
 				Left:  left,
 				Ops:   ops,
 				Right: rights,
-				Pos:   a.Range{Start: startPos, End: endPos},
+				Pos:   a.Range{Start: int(startPos), End: int(endPos)},
 			}
 			continue
 		}
@@ -120,8 +120,8 @@ func (p *Parser) parsePrimary() a.Expression {
 		n := &a.Number{
 			Value: p.current.Literal,
 			Pos: a.Range{
-				Start: p.current.Start,
-				End:   p.current.End,
+				Start: int(p.current.Start),
+				End:   int(p.current.End),
 			},
 		}
 		p.advance()
@@ -130,8 +130,8 @@ func (p *Parser) parsePrimary() a.Expression {
 		ret := &a.Boolean{
 			Value: true,
 			Pos: a.Range{
-				Start: p.current.Start,
-				End:   p.current.End,
+				Start: int(p.current.Start),
+				End:   int(p.current.End),
 			},
 		}
 		p.advance()
@@ -141,8 +141,8 @@ func (p *Parser) parsePrimary() a.Expression {
 		ret := &a.Boolean{
 			Value: false,
 			Pos: a.Range{
-				Start: p.current.Start,
-				End:   p.current.End,
+				Start: int(p.current.Start),
+				End:   int(p.current.End),
 			},
 		}
 		p.advance()
@@ -151,8 +151,8 @@ func (p *Parser) parsePrimary() a.Expression {
 		n := &a.Name{
 			Text: p.current.Literal,
 			Pos: a.Range{
-				Start: p.current.Start,
-				End:   p.current.End,
+				Start: int(p.current.Start),
+				End:   int(p.current.End),
 			},
 			ID: p.newNodeID(),
 		}
@@ -168,12 +168,12 @@ func (p *Parser) parsePrimary() a.Expression {
 		if p.current.Type == l.RPAR {
 			endPos := p.current.Start
 			p.advance()
-			return &a.Tuple{Elts: []a.Expression{}, Pos: a.Range{Start: startPos, End: endPos}}
+			return &a.Tuple{Elts: []a.Expression{}, Pos: a.Range{Start: int(startPos), End: int(endPos)}}
 		}
 
 		first := p.parseExpression(LOWEST)
 		if first == nil {
-			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
+			return &a.Name{Text: "", Pos: a.Range{Start: int(startPos), End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 
 		if p.current.Type != l.COMMA {
@@ -197,7 +197,7 @@ func (p *Parser) parsePrimary() a.Expression {
 
 		endPos := p.current.Start
 		p.advance()
-		return &a.Tuple{Elts: elts, Pos: a.Range{Start: startPos, End: endPos}}
+		return &a.Tuple{Elts: elts, Pos: a.Range{Start: int(startPos), End: int(endPos)}}
 
 	case l.LSQB:
 		return p.parseList()
@@ -205,8 +205,8 @@ func (p *Parser) parsePrimary() a.Expression {
 		s := &a.String{
 			Value: p.current.Literal,
 			Pos: a.Range{
-				Start: p.current.Start,
-				End:   p.current.End,
+				Start: int(p.current.Start),
+				End:   int(p.current.End),
 			},
 		}
 		p.advance()
@@ -218,13 +218,13 @@ func (p *Parser) parsePrimary() a.Expression {
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
 			p.errorCurrent("expected expression after '-' ")
-			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
+			return &a.Name{Text: "", Pos: a.Range{Start: int(startPos), End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 		endPos := operand.Position().End
 		return &a.UnaryOp{
 			Op:      a.USub,
 			Operand: operand,
-			Pos:     a.Range{Start: startPos, End: endPos},
+			Pos:     a.Range{Start: int(startPos), End: int(endPos)},
 		}
 
 	case l.PLUS:
@@ -233,13 +233,13 @@ func (p *Parser) parsePrimary() a.Expression {
 		operand := p.parseExpression(PREFIX)
 		if operand == nil {
 			p.errorCurrent("expected expression after '+'")
-			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
+			return &a.Name{Text: "", Pos: a.Range{Start: int(startPos), End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 		endPos := operand.Position().End
 		return &a.UnaryOp{
 			Op:      a.UAdd,
 			Operand: operand,
-			Pos:     a.Range{Start: startPos, End: endPos},
+			Pos:     a.Range{Start: int(startPos), End: int(endPos)},
 		}
 
 	case l.NOT:
@@ -248,13 +248,13 @@ func (p *Parser) parsePrimary() a.Expression {
 		expr := p.parseExpression(PREFIX)
 		if expr == nil {
 			p.errorCurrent("expected expression after 'not'")
-			return &a.Name{Text: "", Pos: a.Range{Start: startPos, End: p.currentRange().End}, ID: p.newNodeID()}
+			return &a.Name{Text: "", Pos: a.Range{Start: int(startPos), End: p.currentRange().End}, ID: p.newNodeID()}
 		}
 		endPos := expr.Position().End
 		return &a.UnaryOp{
 			Op:      a.Not,
 			Operand: expr,
-			Pos:     a.Range{Start: startPos, End: endPos},
+			Pos:     a.Range{Start: int(startPos), End: int(endPos)},
 		}
 
 	case l.NONE:
@@ -263,7 +263,7 @@ func (p *Parser) parsePrimary() a.Expression {
 		p.advance()
 		return &a.Name{
 			Text: "None",
-			Pos:  a.Range{Start: startPos, End: endPos},
+			Pos:  a.Range{Start: int(startPos), End: int(endPos)},
 			ID:   p.newNodeID(),
 		}
 
@@ -312,7 +312,7 @@ func (p *Parser) parseList() a.Expression {
 		return &a.List{
 			Elts: elts,
 			Pos: a.Range{
-				Start: startPos,
+				Start: int(startPos),
 				End:   p.currentRange().End,
 			},
 		}
@@ -320,5 +320,5 @@ func (p *Parser) parseList() a.Expression {
 
 	endPos := p.current.Start
 	p.advance()
-	return &a.List{Elts: elts, Pos: a.Range{Start: startPos, End: endPos}}
+	return &a.List{Elts: elts, Pos: a.Range{Start: int(startPos), End: int(endPos)}}
 }

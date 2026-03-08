@@ -6,7 +6,7 @@ import (
 )
 
 func (p *Parser) parseFor() a.Statement {
-	startPos := p.current.Start
+	startPos := int(p.current.Start)
 	forStmt := &a.For{Pos: a.Range{Start: startPos}}
 	p.advance()
 	forStmt.Target = p.parseForTarget()
@@ -118,7 +118,7 @@ func (p *Parser) parseFor() a.Statement {
 	}
 
 	forStmt.Orelse = orelse
-	forStmt.Pos.End = endPos
+	forStmt.Pos.End = int(endPos)
 	return forStmt
 }
 
@@ -169,7 +169,7 @@ func (p *Parser) parseWhile() a.Statement {
 	if p.current.Type == lexer.DEDENT {
 		p.advance()
 	}
-	whileStmt.Pos = a.Range{Start: startPos, End: endPos}
+	whileStmt.Pos = a.Range{Start: int(startPos), End: int(endPos)}
 
 	return whileStmt
 }
@@ -183,8 +183,8 @@ func (p *Parser) parseForTarget() a.Expression {
 	first := &a.Name{
 		Text: p.current.Literal,
 		Pos: a.Range{
-			Start: p.current.Start,
-			End:   p.current.End,
+			Start: int(p.current.Start),
+			End:   int(p.current.End),
 		},
 		ID: p.newNodeID(),
 	}
@@ -210,8 +210,8 @@ func (p *Parser) parseForTarget() a.Expression {
 				targets, &a.Name{
 					Text: p.current.Literal,
 					Pos: a.Range{
-						Start: p.current.Start,
-						End:   p.current.End,
+						Start: int(p.current.Start),
+						End:   int(p.current.End),
 					},
 					ID: p.newNodeID(),
 				})

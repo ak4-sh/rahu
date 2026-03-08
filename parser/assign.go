@@ -23,7 +23,7 @@ func (p *Parser) parseAugAssign() a.Statement {
 		Target: target,
 		Op:     op,
 		Value:  value,
-		Pos:    a.Range{Start: start, End: end},
+		Pos:    a.Range{Start: int(start), End: int(end)},
 	}
 }
 
@@ -34,7 +34,7 @@ func (p *Parser) parseAssignment() a.Statement {
 		target := p.parseExpression(LOWEST)
 		if target == nil {
 			p.errorCurrent("expected assignment target")
-			return &a.Assign{Targets: targets, Value: nil, Pos: a.Range{Start: start, End: p.current.Start}}
+			return &a.Assign{Targets: targets, Value: nil, Pos: a.Range{Start: int(start), End: int(p.current.Start)}}
 		}
 		switch target.(type) {
 		case *a.Name, *a.Attribute, *a.Tuple, *a.List:
@@ -52,14 +52,14 @@ func (p *Parser) parseAssignment() a.Statement {
 	if p.current.Type != lexer.EQUAL {
 		p.error(
 			a.Range{
-				Start: start,
-				End:   p.current.Start,
+				Start: int(start),
+				End:   int(p.current.Start),
 			},
 			"expected '=' in assignment",
 		)
 		p.syncTo(lexer.EQUAL, lexer.NEWLINE, lexer.EOF)
 		if p.current.Type != lexer.EQUAL {
-			return &a.Assign{Targets: targets, Value: nil, Pos: a.Range{Start: start, End: p.current.Start}}
+			return &a.Assign{Targets: targets, Value: nil, Pos: a.Range{Start: int(start), End: int(p.current.Start)}}
 		}
 
 	}
@@ -77,8 +77,8 @@ func (p *Parser) parseAssignment() a.Statement {
 	} else if p.current.Type != lexer.EOF {
 		p.error(
 			a.Range{
-				Start: assgnEnd,
-				End:   p.current.End,
+				Start: int(assgnEnd),
+				End:   int(p.current.End),
 			},
 			"expected newline after assignment",
 		)
@@ -87,6 +87,6 @@ func (p *Parser) parseAssignment() a.Statement {
 	return &a.Assign{
 		Targets: targets,
 		Value:   value,
-		Pos:     a.Range{Start: start, End: assgnEnd},
+		Pos:     a.Range{Start: int(start), End: int(assgnEnd)},
 	}
 }

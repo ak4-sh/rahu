@@ -68,8 +68,8 @@ func (p *Parser) error(span ast.Range, msg string) {
 
 func (p *Parser) currentRange() ast.Range {
 	return ast.Range{
-		Start: p.current.Start,
-		End:   p.current.End,
+		Start: int(p.current.Start),
+		End:   int(p.current.End),
 	}
 }
 
@@ -143,9 +143,9 @@ func (p *Parser) parseAssignmentFromFirst(start int, first ast.Expression) ast.S
 	}
 
 	if p.current.Type != lexer.EQUAL {
-		p.error(ast.Range{Start: start, End: p.current.Start}, "expected '=' in assignment")
+		p.error(ast.Range{Start: start, End: int(p.current.Start)}, "expected '=' in assignment")
 		p.syncTo(lexer.NEWLINE, lexer.EOF)
-		return &ast.Assign{Targets: targets, Value: nil, Pos: ast.Range{Start: start, End: p.current.Start}}
+		return &ast.Assign{Targets: targets, Value: nil, Pos: ast.Range{Start: start, End: int(p.current.Start)}}
 	}
 	p.advance()
 	value := p.parseExpression(LOWEST)
@@ -153,7 +153,7 @@ func (p *Parser) parseAssignmentFromFirst(start int, first ast.Expression) ast.S
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
 	}
-	return &ast.Assign{Targets: targets, Value: value, Pos: ast.Range{Start: start, End: end}}
+	return &ast.Assign{Targets: targets, Value: value, Pos: ast.Range{Start: start, End: int(end)}}
 }
 
 func (p *Parser) isAugAssign() bool {
@@ -173,7 +173,7 @@ func (p *Parser) parseAugAssignFromFirst(start int, target ast.Expression) ast.S
 	if p.current.Type == lexer.NEWLINE {
 		p.advance()
 	}
-	return &ast.AugAssign{Target: target, Op: op, Value: value, Pos: ast.Range{Start: start, End: end}}
+	return &ast.AugAssign{Target: target, Op: op, Value: value, Pos: ast.Range{Start: start, End: int(end)}}
 }
 
 func (p *Parser) parseStatement() ast.Statement {
@@ -203,7 +203,7 @@ func (p *Parser) parseStatement() ast.Statement {
 		if p.current.Type == lexer.EQUAL || p.current.Type == lexer.COMMA {
 			switch expr.(type) {
 			case *ast.Name, *ast.Attribute, *ast.Tuple, *ast.List:
-				return p.parseAssignmentFromFirst(start, expr)
+				return p.parseAssignmentFromFirst(int(start), expr)
 			}
 		}
 
@@ -218,7 +218,7 @@ func (p *Parser) parseStatement() ast.Statement {
 			p.current.Type == lexer.RIGHTSHIFTEQUAL {
 			switch expr.(type) {
 			case *ast.Name, *ast.Attribute:
-				return p.parseAugAssignFromFirst(start, expr)
+				return p.parseAugAssignFromFirst(int(start), expr)
 			}
 		}
 
@@ -238,8 +238,8 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	if p.current.Type == lexer.BREAK {
 		pos := ast.Range{
-			Start: p.current.Start,
-			End:   p.current.End,
+			Start: int(p.current.Start),
+			End:   int(p.current.End),
 		}
 		p.advance()
 		if p.current.Type == lexer.NEWLINE {
@@ -250,8 +250,8 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	if p.current.Type == lexer.CONTINUE {
 		pos := ast.Range{
-			Start: p.current.Start,
-			End:   p.current.End,
+			Start: int(p.current.Start),
+			End:   int(p.current.End),
 		}
 		p.advance()
 		if p.current.Type == lexer.NEWLINE {
@@ -277,8 +277,8 @@ func (p *Parser) parseStatement() ast.Statement {
 	}
 
 	p.error(ast.Range{
-		Start: p.current.Start,
-		End:   p.current.End,
+		Start: int(p.current.Start),
+		End:   int(p.current.End),
 	},
 		"unexpected token: "+p.current.String(),
 	)

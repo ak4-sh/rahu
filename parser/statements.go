@@ -70,7 +70,7 @@ func (p *Parser) parseIf() a.Statement {
 		orelse = append(orelse, elifStmt)
 
 		if ifNode, ok := elifStmt.(*a.If); ok {
-			endPos = ifNode.Pos.End
+			endPos = uint32(ifNode.Pos.End)
 		}
 	case lexer.ELSE:
 		p.advance()
@@ -121,8 +121,8 @@ func (p *Parser) parseIf() a.Statement {
 
 	ifExpr.Orelse = orelse
 	ifExpr.Pos = a.Range{
-		Start: startPos,
-		End:   endPos,
+		Start: int(startPos),
+		End:   int(endPos),
 	}
 
 	return ifExpr
@@ -134,7 +134,7 @@ func (p *Parser) parseReturn() a.Statement {
 	if p.current.Type == lexer.NEWLINE || p.current.Type == lexer.EOF {
 		endPos := p.current.Start
 		p.advance()
-		return &a.Return{Value: nil, Pos: a.Range{Start: startPos, End: endPos}}
+		return &a.Return{Value: nil, Pos: a.Range{Start: int(startPos), End: int(endPos)}}
 	}
 
 	value := p.parseExpression(LOWEST)
@@ -144,11 +144,11 @@ func (p *Parser) parseReturn() a.Statement {
 		p.advance()
 	}
 
-	return &a.Return{Value: value, Pos: a.Range{Start: startPos, End: endPos}}
+	return &a.Return{Value: value, Pos: a.Range{Start: int(startPos), End: int(endPos)}}
 }
 
 func (p *Parser) parseFunc() a.Statement {
-	startPos := p.current.Start
+	startPos := int(p.current.Start)
 	p.advance()
 	funcDef := &a.FunctionDef{
 		DocString: "",
@@ -159,7 +159,7 @@ func (p *Parser) parseFunc() a.Statement {
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
 		funcDef.Name = &a.Name{
 			Text: "<incomplete>",
-			Pos:  a.Range{Start: startPos, End: p.current.End},
+			Pos:  a.Range{Start: startPos, End: int(p.current.End)},
 			ID:   p.newNodeID(),
 		}
 		return funcDef
@@ -169,14 +169,14 @@ func (p *Parser) parseFunc() a.Statement {
 	funcDef.Name = &a.Name{
 		Text: p.current.Literal,
 		Pos: a.Range{
-			Start: p.current.Start,
-			End:   p.current.End,
+			Start: int(p.current.Start),
+			End:   int(p.current.End),
 		},
 		ID: p.newNodeID(),
 	}
 	funcDef.NamePos = a.Range{
-		Start: p.current.Start,
-		End:   p.current.End,
+		Start: int(p.current.Start),
+		End:   int(p.current.End),
 	}
 	p.advance() // advance past func name
 
@@ -212,10 +212,10 @@ func (p *Parser) parseFunc() a.Statement {
 				// Name: p.current.Literal,
 				Name: &a.Name{
 					Text: p.current.Literal,
-					Pos:  a.Range{Start: start, End: end},
+					Pos:  a.Range{Start: int(start), End: int(end)},
 					ID:   p.newNodeID(),
 				},
-				Pos: a.Range{Start: start, End: end},
+				Pos: a.Range{Start: int(start), End: int(end)},
 			}
 
 			p.advance()
@@ -305,7 +305,7 @@ func (p *Parser) parseFunc() a.Statement {
 
 	funcDef.Body = funcBody
 	endPos := p.current.Start
-	funcDef.Pos = a.Range{Start: startPos, End: endPos}
+	funcDef.Pos = a.Range{Start: startPos, End: int(endPos)}
 
 	return funcDef
 }
@@ -322,14 +322,14 @@ func (p *Parser) parseClass() a.Statement {
 		p.errorCurrent("expected classname after `class`")
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
 		def.Pos = a.Range{
-			Start: startPos,
-			End:   p.current.End,
+			Start: int(startPos),
+			End:   int(p.current.End),
 		}
 		def.Name = &a.Name{
 			Text: "<incomplete>",
 			Pos: a.Range{
-				Start: startPos,
-				End:   p.current.End,
+				Start: int(startPos),
+				End:   int(p.current.End),
 			},
 			ID: p.newNodeID(),
 		}
@@ -339,7 +339,7 @@ func (p *Parser) parseClass() a.Statement {
 	// def.Name = p.current.Literal
 	def.Name = &a.Name{
 		Text: p.current.Literal,
-		Pos:  a.Range{Start: p.current.Start, End: p.current.End},
+		Pos:  a.Range{Start: int(p.current.Start), End: int(p.current.End)},
 		ID:   p.newNodeID(),
 	}
 
@@ -349,8 +349,8 @@ func (p *Parser) parseClass() a.Statement {
 		p.errorCurrent("expected `(` or `:` after class name")
 		p.syncTo(lexer.NEWLINE, lexer.COLON, lexer.EOF)
 		def.Pos = a.Range{
-			Start: startPos,
-			End:   p.current.End,
+			Start: int(startPos),
+			End:   int(p.current.End),
 		}
 		return &def
 	}
@@ -364,8 +364,8 @@ func (p *Parser) parseClass() a.Statement {
 				name := a.Name{
 					Text: p.current.Literal,
 					Pos: a.Range{
-						Start: p.current.Start,
-						End:   p.current.End,
+						Start: int(p.current.Start),
+						End:   int(p.current.End),
 					},
 					ID: p.newNodeID(),
 				}
@@ -391,8 +391,8 @@ func (p *Parser) parseClass() a.Statement {
 		p.syncTo(lexer.COLON, lexer.EOF, lexer.RPAR)
 		if p.current.Type != lexer.COLON {
 			def.Pos = a.Range{
-				Start: startPos,
-				End:   p.current.End,
+				Start: int(startPos),
+				End:   int(p.current.End),
 			}
 			return &def
 		}
@@ -405,8 +405,8 @@ func (p *Parser) parseClass() a.Statement {
 		p.syncTo(lexer.EOF, lexer.NEWLINE)
 		if p.current.Type != lexer.NEWLINE {
 			def.Pos = a.Range{
-				Start: startPos,
-				End:   p.current.End,
+				Start: int(startPos),
+				End:   int(p.current.End),
 			}
 			return &def
 		}
@@ -418,8 +418,8 @@ func (p *Parser) parseClass() a.Statement {
 		p.syncTo(lexer.INDENT, lexer.DEDENT, lexer.EOF)
 		if p.current.Type != lexer.INDENT {
 			def.Pos = a.Range{
-				Start: startPos,
-				End:   p.current.End,
+				Start: int(startPos),
+				End:   int(p.current.End),
 			}
 
 			return &def
@@ -448,6 +448,6 @@ func (p *Parser) parseClass() a.Statement {
 
 	def.Body = body
 	endPos := p.current.End
-	def.Pos = a.Range{Start: startPos, End: endPos}
+	def.Pos = a.Range{Start: int(startPos), End: int(endPos)}
 	return &def
 }

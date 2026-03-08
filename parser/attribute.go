@@ -17,8 +17,8 @@ func (p *Parser) parseAttribute(left a.Expression) a.Expression {
 	attr := &a.Name{
 		Text: p.current.Literal,
 		Pos: a.Range{
-			Start: p.current.Start,
-			End:   p.current.End,
+			Start: int(p.current.Start),
+			End:   int(p.current.End),
 		},
 		ID: p.newNodeID(),
 	}
@@ -27,8 +27,8 @@ func (p *Parser) parseAttribute(left a.Expression) a.Expression {
 
 	return &a.Attribute{
 		Pos: a.Range{
-			Start: start,
-			End:   p.current.End,
+			Start: int(start),
+			End:   int(p.current.End),
 		},
 		Attr:  attr,
 		Value: left,

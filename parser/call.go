@@ -80,6 +80,6 @@ func (p *Parser) parseCall(funcExpr a.Expression) a.Expression {
 	return &a.Call{
 		Func: funcExpr,
 		Args: args,
-		Pos:  a.Range{Start: startPos, End: endPos},
+		Pos:  a.Range{Start: startPos, End: int(endPos)},
 	}
 }
