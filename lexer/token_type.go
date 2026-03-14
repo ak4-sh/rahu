@@ -1,7 +1,7 @@
 package lexer
 
 //go:generate stringer -type=TokenType
-type TokenType int
+type TokenType uint32
 
 const (
 	EOF TokenType = iota
