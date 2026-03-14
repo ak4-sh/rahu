@@ -5,6 +5,40 @@ import (
 	a "rahu/parser/ast"
 )
 
+func canStartExpression(t lexer.TokenType) bool {
+	switch t {
+	case lexer.NAME, lexer.NUMBER, lexer.STRING, lexer.LPAR, lexer.LSQB, lexer.MINUS, lexer.PLUS, lexer.NOT, lexer.TRUE, lexer.FALSE, lexer.NONE:
+		return true
+	case lexer.UNTERMINATED_STRING:
+		return false
+	default:
+		return false
+	}
+}
+
+func (p *Parser) isAugAssign() bool {
+	switch p.current.Type {
+	case lexer.PLUSEQUAL,
+		lexer.MINEQUAL,
+		lexer.SLASHEQUAL,
+		lexer.STAREQUAL,
+		lexer.DOUBLESLASHEQUAL,
+		lexer.DOUBLESTAREQUAL,
+		lexer.AMPEREQUAL,
+		lexer.LEFTSHIFTEQUAL,
+		lexer.RIGHTSHIFTEQUAL:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Parser) consumeOptionalNewline() {
+	if p.current.Type == lexer.NEWLINE {
+		p.advance()
+	}
+}
+
 func (p *Parser) tokenTypeToOperator(t lexer.TokenType) a.Operator {
 	switch t {
 	case lexer.PLUS:
