@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"fmt"
+
 	l "rahu/lexer"
 	a "rahu/parser/ast"
 )
@@ -42,17 +44,17 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 			lastRight := rights[len(rights)-1]
 			endPos := p.tree.Nodes[lastRight].End
 
-			leftId := p.tree.NewNode(
+			leftID := p.tree.NewNode(
 				a.NodeCompare,
 				startPos,
 				endPos,
 			)
-			p.tree.AddChild(leftId, left)
+			p.tree.AddChild(leftID, left)
 			for _, child := range rights {
-				p.tree.AddChild(leftId, child)
+				p.tree.AddChild(leftID, child)
 			}
 
-			left = leftId
+			left = leftID
 			continue
 		}
 
@@ -100,12 +102,12 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 			return left
 		}
 
-		binOpId := p.tree.NewNode(a.NodeBinOp, p.tree.Nodes[left].Start, p.tree.Nodes[right].End)
+		binOpID := p.tree.NewNode(a.NodeBinOp, p.tree.Nodes[left].Start, p.tree.Nodes[right].End)
 
-		p.tree.Nodes[binOpId].Data = uint32(p.tokenTypeToOperator(opTok.Type))
-		p.tree.AddChild(binOpId, left)
-		p.tree.AddChild(binOpId, right)
-		left = binOpId
+		p.tree.Nodes[binOpID].Data = uint32(p.tokenTypeToOperator(opTok.Type))
+		p.tree.AddChild(binOpID, left)
+		p.tree.AddChild(binOpID, right)
+		left = binOpID
 	}
 	return left
 }
@@ -129,5 +131,161 @@ func (p *Parser) parseAttribute(left a.NodeID) a.NodeID {
 }
 
 func (p *Parser) parsePrimary() a.NodeID {
+	switch p.current.Type {
+	case l.UNTERMINATED_STRING:
+		p.errorCurrent("unterminated string literal")
+		p.advance()
+		return a.NoNode
+
+	case l.NUMBER:
+		n := p.tree.NewNode(a.NodeNumber, p.current.Start, p.current.End)
+		idx := uint32(len(p.tree.Numbers))
+		p.tree.Numbers = append(p.tree.Numbers, p.current.Literal)
+		p.tree.Nodes[n].Data = idx
+		p.advance()
+		return n
+
+	case l.TRUE:
+		ret := p.tree.NewNode(a.NodeBoolean, p.current.Start, p.current.End)
+		p.tree.Nodes[ret].Data = uint32(a.TRUE)
+		p.advance()
+		return ret
+
+	case l.FALSE:
+		ret := p.tree.NewNode(a.NodeBoolean, p.current.Start, p.current.End)
+		p.tree.Nodes[ret].Data = uint32(a.FALSE)
+		p.advance()
+		return ret
+
+	case l.NAME:
+		ret := p.tree.NewNode(a.NodeName, p.current.Start, p.current.End)
+		idx := uint32(len(p.tree.Names))
+		p.tree.Names = append(p.tree.Names, p.current.Literal)
+		p.tree.Nodes[ret].Data = idx
+		p.advance()
+		return ret
+
+	case l.LPAR:
+		startPos := p.current.Start
+		p.advance()
+
+		// empty tuple
+		if p.current.Type == l.RPAR {
+			endPos := p.current.Start
+			p.advance()
+			return p.tree.NewNode(a.NodeTuple, startPos, endPos)
+		}
+
+		first := p.parseExpression(LOWEST)
+		if first == a.NoNode {
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+
+		if p.current.Type != l.COMMA {
+			if p.current.Type != l.RPAR {
+				p.errorCurrent("expected ')' after expression")
+				return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+			}
+
+			p.advance()
+			return first
+		}
+
+		elts := []a.NodeID{first}
+		for p.current.Type == l.COMMA {
+			p.advance()
+			if p.current.Type == l.RPAR {
+				break
+			}
+
+			elt := p.parseExpression(LOWEST)
+			if elt == a.NoNode {
+				p.errorCurrent("expected expression after ','")
+				return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+			}
+			elts = append(elts, elt)
+		}
+
+		if p.current.Type != l.RPAR {
+			p.errorCurrent("expected ')' after tuple")
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+
+		endPos := p.current.Start
+		p.advance()
+		ret := p.tree.NewNode(a.NodeTuple, startPos, endPos)
+		for _, child := range elts {
+			p.tree.AddChild(ret, child)
+		}
+		return ret
+
+	case l.LSQB:
+		return p.parseList()
+
+	case l.STRING:
+		idx := uint32(len(p.tree.Strings))
+		p.tree.Strings = append(p.tree.Strings, p.current.Literal)
+		ret := p.tree.NewNode(a.NodeString, p.current.Start, p.current.End)
+		p.tree.Nodes[ret].Data = idx
+		p.advance()
+		return ret
+
+	case l.MINUS:
+		startPos := p.current.Start
+		p.advance()
+		operand := p.parseExpression(PREFIX)
+		if operand == a.NoNode {
+			p.errorCurrent("expected expression after '-'")
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+		endPos := p.tree.Nodes[operand].End
+		ret := p.tree.NewNode(a.NodeUnaryOp, startPos, endPos)
+		p.tree.Nodes[ret].Data = uint32(a.USub)
+		p.tree.AddChild(ret, operand)
+		return ret
+
+	case l.PLUS:
+		startPos := p.current.Start
+		p.advance()
+		operand := p.parseExpression(PREFIX)
+		if operand == a.NoNode {
+			p.errorCurrent("expected expression after '+'")
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+
+		endPos := p.tree.Nodes[operand].End
+		ret := p.tree.NewNode(a.NodeUnaryOp, startPos, endPos)
+		p.tree.Nodes[ret].Data = uint32(a.UAdd)
+		p.tree.AddChild(ret, operand)
+		return ret
+
+	case l.NOT:
+		startPos := p.current.Start
+		p.advance()
+		expr := p.parseExpression(PREFIX)
+		if expr == a.NoNode {
+			p.errorCurrent("expected expression after 'not'")
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+
+		endpos := p.tree.Nodes[expr].End
+		ret := p.tree.NewNode(a.NodeUnaryOp, startPos, endpos)
+		p.tree.Nodes[ret].Data = uint32(a.Not)
+		p.tree.AddChild(ret, expr)
+		return ret
+
+	case l.NONE:
+		startPos := p.current.Start
+		endPos := p.current.End
+		p.advance()
+		ret := p.tree.NewNode(a.NodeNone, startPos, endPos)
+		return ret
+	}
+	p.errorCurrent(fmt.Sprintf("unexpected token %v", p.current))
+	p.advance()
+	return a.NoNode
+}
+
+func (p *Parser) parseList() a.NodeID {
 	panic("unimplemented")
 }
