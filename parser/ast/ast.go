@@ -34,11 +34,17 @@ type (
 	Operator        uint8
 	CompareOp       uint8
 	BooleanOperator uint8
+	BooleanVal      uint8
 )
 
 const (
 	And BooleanOperator = iota
 	Or
+)
+
+const (
+	TRUE BooleanVal = iota
+	FALSE
 )
 
 const (
@@ -119,12 +125,17 @@ func New(numTokens int) *AST {
 	numberCap := min(numTokens/8, 200)
 	nodeCap := min(numTokens*2, 800)
 
-	return &AST{
+	a := AST{
 		Nodes:   make([]Node, 1, nodeCap),
 		Names:   make([]string, 0, nameCap),
 		Strings: make([]string, 0, stringCap),
 		Numbers: make([]string, 0, numberCap),
 	}
+	a.Names = append(a.Names, "")
+	a.Names = append(a.Names, "None")
+	a.Numbers = append(a.Numbers, "")
+	a.Strings = append(a.Strings, "")
+	return &a
 }
 
 func (n Node) Range() (uint32, uint32) {
