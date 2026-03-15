@@ -126,10 +126,6 @@ func (p *Parser) postfixParseLoop(left a.NodeID) a.NodeID {
 	}
 }
 
-func (p *Parser) parseAttribute(left a.NodeID) a.NodeID {
-	panic("unimplemented")
-}
-
 func (p *Parser) parsePrimary() a.NodeID {
 	switch p.current.Type {
 	case l.UNTERMINATED_STRING:
@@ -287,5 +283,56 @@ func (p *Parser) parsePrimary() a.NodeID {
 }
 
 func (p *Parser) parseList() a.NodeID {
-	panic("unimplemented")
+	startPos := p.current.Start
+	p.advance()
+	elts := []a.NodeID{}
+
+	if p.current.Type != l.RSQB {
+		first := p.parseExpression(LOWEST)
+		if first != a.NoNode {
+			elts = append(elts, first)
+		} else {
+			p.errorCurrent("expected expression in list")
+		}
+
+		for p.current.Type == l.COMMA {
+			p.advance()
+			if p.current.Type == l.RSQB {
+				break
+			}
+
+			elt := p.parseExpression(LOWEST)
+			if elt != a.NoNode {
+				elts = append(elts, elt)
+			} else {
+				p.errorCurrent("expected expression after ',' in list")
+				break
+			}
+		}
+	}
+
+	if p.current.Type != l.RSQB {
+		p.errorCurrent("expected ']' after list elements")
+		p.syncTo(l.RSQB, l.NEWLINE, l.EOF)
+		endPos := p.current.Start
+
+		if p.current.Type == l.RSQB {
+			endPos = p.current.Start
+			p.advance()
+		}
+
+		ret := p.tree.NewNode(a.NodeList, startPos, endPos)
+		for _, child := range elts {
+			p.tree.AddChild(ret, child)
+		}
+		return ret
+	}
+
+	endPos := p.current.Start
+	p.advance()
+	ret := p.tree.NewNode(a.NodeList, startPos, endPos)
+	for _, child := range elts {
+		p.tree.AddChild(ret, child)
+	}
+	return ret
 }
