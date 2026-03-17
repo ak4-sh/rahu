@@ -1,7 +1,5 @@
 package ast
 
-import l "rahu/lexer"
-
 //go:generate stringer -type=NodeKind
 
 type (
@@ -20,21 +18,22 @@ type (
 		End   uint32
 
 		FirstChild  NodeID
+		LastChild   NodeID
 		NextSibling NodeID
 	}
 	AST struct {
 		Root  NodeID
 		Nodes []Node
 
-		Names      []string
-		Strings    []string
-		Numbers    []string
-		TokenTypes []l.TokenType
+		Names   []string
+		Strings []string
+		Numbers []string
 	}
 	Operator        uint8
 	CompareOp       uint8
 	BooleanOperator uint8
 	BooleanVal      uint8
+	AugAssignOp     uint8
 )
 
 const (
@@ -54,6 +53,23 @@ const (
 	LtE                    // <=
 	Gt                     // >
 	GtE                    // >=
+)
+
+const (
+	AugInvalid AugAssignOp = iota
+	AugAdd
+	AugSub
+	AugMul
+	AugDiv
+	AugFloorDiv
+	AugPow
+	AugAnd
+	AugLShift
+	AugRShift
+	AugMod
+	AugOr
+	AugXor
+	AugMatMul
 )
 
 type UnaryOperator uint8
@@ -155,75 +171,59 @@ func (a *AST) NewNode(kind NodeKind, start, end uint32) NodeID {
 		End:         end,
 		FirstChild:  NoNode,
 		NextSibling: NoNode,
+		LastChild:   NoNode,
 	})
 
 	return id
 }
 
 func (a *AST) Reset() {
+	a.Root = NoNode
 	a.Nodes = a.Nodes[:1]
+
 	a.Names = a.Names[:0]
 	a.Strings = a.Strings[:0]
 	a.Numbers = a.Numbers[:0]
+
+	a.Names = append(a.Names, "", "None")
+	a.Strings = append(a.Strings, "")
+	a.Numbers = append(a.Numbers, "")
 }
 
 func (a *AST) Node(id NodeID) Node {
 	return a.Nodes[id]
 }
 
-// AddChild attaches `child` as the last child of `parent`.
+// AddChild attaches child as the last child of parent.
 //
-// The AST stores children as a singly-linked list using the `FirstChild` and
-// `NextSibling` fields. `FirstChild` points to the first child node and each
-// child links to the next through `NextSibling`.
-//
-// Behavior:
-//
-//   - If either `parent` or `child` is `NoNode`, the call is ignored.
-//   - If the parent has no children (`FirstChild == NoNode`), `child` becomes
-//     the first child.
-//   - Otherwise the existing sibling chain is traversed and `child` is appended
-//     at the end.
-//
-// This preserves insertion order of children while keeping the node structure
+// Children are stored as a singly linked sibling list.
+// FirstChild points to the first child, LastChild to the last child,
+// and each child links to the next through NextSibling.
 func (a *AST) AddChild(parent, child NodeID) {
 	if parent == NoNode || child == NoNode {
 		return
 	}
 
 	p := &a.Nodes[parent]
+	a.Nodes[child].NextSibling = NoNode
 
-	// first child
 	if p.FirstChild == NoNode {
 		p.FirstChild = child
+		p.LastChild = child
 		return
 	}
 
-	// walk sibling chain
-	cur := p.FirstChild
-	for {
-		next := a.Nodes[cur].NextSibling
-		if next == NoNode {
-			a.Nodes[cur].NextSibling = child
-			return
-		}
-		cur = next
-	}
+	a.Nodes[p.LastChild].NextSibling = child
+	p.LastChild = child
 }
 
 func (a *AST) LastChild(id NodeID) NodeID {
-	c := a.Nodes[id].FirstChild
-	if c == NoNode {
+	if id == NoNode {
 		return NoNode
 	}
-
-	for a.Nodes[c].NextSibling != NoNode {
-		c = a.Nodes[c].NextSibling
-	}
-
-	return c
+	return a.Nodes[id].LastChild
 }
 
 // NodeAssign invariant
-// Child 0 ... n -1 -> targets
-// ChildN -> value
+// Child0 -> value
+// Child 1 ... n -> targets
