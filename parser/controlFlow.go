@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	l "rahu/lexer"
 	a "rahu/parser/ast"
 )
@@ -268,12 +270,185 @@ func (p *Parser) parseWhile() a.NodeID {
 	return ret
 }
 
+func (p *Parser) parseClassBases() a.NodeID {
+	start := p.current.Start // at '('
+	bases := p.tree.NewNode(a.NodeBaseList, start, start)
+	p.advance() // consume '('
+
+	for p.current.Type != l.RPAR && p.current.Type != l.EOF {
+		expr := p.parseExpression(LOWEST)
+		if expr == a.NoNode {
+			p.errorCurrent("expected expression in class base list")
+			p.syncTo(l.COMMA, l.RPAR, l.COLON, l.EOF)
+		} else {
+			p.tree.AddChild(bases, expr)
+		}
+
+		if p.current.Type == l.COMMA {
+			p.advance()
+			continue
+		}
+		break
+	}
+
+	if p.current.Type != l.RPAR {
+		p.errorCurrent("expected ')' after class base list")
+	} else {
+		p.tree.Nodes[bases].End = p.current.End
+		p.advance()
+	}
+
+	return bases
+}
+
 func (p *Parser) parseClass() a.NodeID {
-	panic("unimplemented")
+	startPos := p.current.Start
+	p.advance()
+
+	if p.current.Type != l.NAME {
+		p.errorCurrent("expected classname after `class`")
+		p.syncTo(l.NEWLINE, l.COLON, l.EOF)
+		name := p.tree.NewNameNode(startPos, p.current.End, "<incomplete>")
+		class := p.tree.NewNode(a.NodeClassDef, startPos, p.current.End)
+		p.tree.AddChild(class, name)
+		return class
+	}
+
+	className := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
+
+	p.advance()
+
+	if p.current.Type != l.COLON && (p.current.Type != l.LPAR) {
+		p.errorCurrent("expected `(` or `:` after class name")
+		p.syncTo(l.NEWLINE, l.COLON, l.EOF)
+		ret := p.tree.NewNode(a.NodeClassDef, startPos, p.current.End)
+		p.tree.AddChild(ret, className)
+		return ret
+	}
+
+	bases := a.NoNode
+
+	if p.current.Type == l.LPAR {
+		bases = p.parseClassBases()
+	}
+
+	if p.current.Type != l.COLON {
+		p.errorCurrent("expected `:` after class header")
+		p.syncTo(l.COLON, l.EOF, l.RPAR)
+		if p.current.Type != l.COLON {
+			def := p.tree.NewNode(a.NodeClassDef, startPos, p.current.End)
+			p.tree.AddChild(def, className)
+			if bases != a.NoNode {
+				p.tree.AddChild(def, bases)
+			}
+			return def
+		}
+	}
+	p.advance()
+
+	if p.current.Type != l.NEWLINE {
+		p.errorCurrent("expected newline after `:`")
+		p.syncTo(l.EOF, l.NEWLINE)
+		if p.current.Type != l.NEWLINE {
+			def := p.tree.NewNode(a.NodeClassDef, startPos, p.current.End)
+			p.tree.AddChild(def, className)
+			if bases != a.NoNode {
+				p.tree.AddChild(def, bases)
+			}
+			return def
+		}
+	}
+	p.advance()
+	for p.current.Type == l.NEWLINE {
+		p.advance()
+	}
+
+	if p.current.Type != l.INDENT {
+		p.errorCurrent("expected indent after class definition")
+		p.syncTo(l.INDENT, l.DEDENT, l.EOF)
+		if p.current.Type != l.INDENT {
+			def := p.tree.NewNode(a.NodeClassDef, startPos, p.current.End)
+			p.tree.AddChild(def, className)
+			if bases != a.NoNode {
+				p.tree.AddChild(def, bases)
+			}
+			return def
+		}
+	}
+	p.advance()
+
+	bodyStmts := p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
+	docString := ""
+	atStart := true
+
+	for p.current.Type != l.EOF && p.current.Type != l.DEDENT {
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+			continue
+		}
+		if atStart && p.current.Type == l.STRING {
+			docString = strings.TrimSpace(p.current.Literal)
+			p.advance()
+			atStart = false
+			continue
+		}
+
+		atStart = false
+		stmt := p.parseStatement()
+		if stmt != a.NoNode {
+			p.tree.AddChild(bodyStmts, stmt)
+			p.tree.Nodes[bodyStmts].End = p.tree.Nodes[stmt].End
+
+		}
+	}
+
+	endPos := p.current.End
+	if p.current.Type == l.DEDENT {
+		endPos = p.current.End
+		p.advance()
+	}
+
+	if p.tree.Nodes[bodyStmts].End == p.tree.Nodes[bodyStmts].Start {
+		p.tree.Nodes[bodyStmts].End = endPos
+	}
+
+	def := p.tree.NewNode(a.NodeClassDef, startPos, endPos)
+	p.tree.AddChild(def, className)
+	if bases != a.NoNode {
+		p.tree.AddChild(def, bases)
+	}
+	if docString != "" {
+		idx := uint32(len(p.tree.Strings))
+		p.tree.Strings = append(p.tree.Strings, docString)
+		p.tree.Nodes[def].Data = idx
+	}
+
+	p.tree.AddChild(def, bodyStmts)
+	return def
 }
 
 func (p *Parser) parseReturn() a.NodeID {
-	panic("unimplemented")
+	startPos := p.current.Start
+	p.advance()
+	if p.current.Type == l.NEWLINE || p.current.Type == l.EOF {
+		endPos := p.current.Start
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+		}
+		return p.tree.NewNode(a.NodeReturn, startPos, endPos)
+	}
+
+	value := p.parseExpression(LOWEST)
+	endPos := p.current.Start
+	if p.current.Type == l.NEWLINE {
+		p.advance()
+	}
+
+	ret := p.tree.NewNode(a.NodeReturn, startPos, endPos)
+	if value != a.NoNode {
+		p.tree.AddChild(ret, value)
+	}
+	return ret
 }
 
 func (p *Parser) parseIf() a.NodeID {
