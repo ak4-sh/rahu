@@ -123,6 +123,7 @@ const (
 	NodeArg
 	NodeErrExp
 	NodeSubScript
+	NodeBaseList
 )
 
 const NoNode NodeID = 0
@@ -215,6 +216,22 @@ func (a *AST) AddChild(parent, child NodeID) {
 
 	a.Nodes[p.LastChild].NextSibling = child
 	p.LastChild = child
+}
+
+func (a *AST) NewNameNode(start, end uint32, name string) NodeID {
+	id := a.NewNode(NodeName, start, end)
+	idx := uint32(len(a.Names))
+	a.Names = append(a.Names, name)
+	a.Nodes[id].Data = idx
+	return id
+}
+
+func (a *AST) NewStringNode(start, end uint32, s string) NodeID {
+	id := a.NewNode(NodeString, start, end)
+	idx := uint32(len(a.Strings))
+	a.Strings = append(a.Strings, s)
+	a.Nodes[id].Data = idx
+	return id
 }
 
 func (a *AST) LastChild(id NodeID) NodeID {
