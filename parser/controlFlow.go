@@ -452,5 +452,182 @@ func (p *Parser) parseReturn() a.NodeID {
 }
 
 func (p *Parser) parseIf() a.NodeID {
-	panic("unimplemented")
+	startPos := p.current.Start
+	p.advance()
+
+	testCond := p.parseExpression(LOWEST)
+	if testCond == a.NoNode {
+		p.errorCurrent("invalid test condition for if")
+		return a.NoNode
+	}
+
+	if p.current.Type != l.COLON {
+		p.errorCurrent("expected `:` after if condition")
+		p.syncTo(l.COLON, l.NEWLINE, l.EOF)
+		if p.current.Type == l.COLON {
+			p.advance()
+		}
+
+		ret := p.tree.NewNode(a.NodeIf, startPos, p.current.End)
+		p.tree.AddChild(ret, testCond)
+		return ret
+	}
+
+	p.advance()
+
+	if p.current.Type != l.NEWLINE {
+		p.errorCurrent("expected newline after `:`")
+		p.syncTo(l.NEWLINE, l.EOF)
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+		} else {
+			ret := p.tree.NewNode(a.NodeIf, startPos, p.current.End)
+			p.tree.AddChild(ret, testCond)
+			return ret
+		}
+	} else {
+		p.advance()
+	}
+
+	if p.current.Type != l.INDENT {
+		p.errorCurrent("expected indentation block after if condition")
+		p.syncTo(l.INDENT, l.DEDENT, l.EOF)
+		if p.current.Type != l.INDENT {
+			ret := p.tree.NewNode(a.NodeIf, startPos, p.current.End)
+			p.tree.AddChild(ret, testCond)
+			return ret
+		}
+	}
+
+	p.advance()
+
+	body := a.NoNode
+	bodyStartPos := p.current.Start
+	bodyStmts := []a.NodeID{}
+	bodyEndPos := p.current.Start
+
+	for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+			continue
+		}
+		stmt := p.parseStatement()
+		if stmt != a.NoNode {
+			bodyStmts = append(bodyStmts, stmt)
+			bodyEndPos = p.tree.Nodes[stmt].End
+		}
+	}
+
+	if len(bodyStmts) > 0 {
+		body = p.tree.NewNode(a.NodeBlock, bodyStartPos, bodyEndPos)
+		for _, child := range bodyStmts {
+			p.tree.AddChild(body, child)
+		}
+	}
+
+	endPos := p.current.Start
+
+	if p.current.Type == l.DEDENT {
+		endPos = p.current.Start
+		p.advance()
+	}
+
+	orElseStmts := []a.NodeID{}
+	orElseBlock := a.NoNode
+
+	switch p.current.Type {
+	case l.ELIF:
+		elifStmt := p.parseIf()
+		if elifStmt != a.NoNode {
+			endPos = p.tree.Nodes[elifStmt].End
+		} else {
+			elifStmt = p.tree.NewNode(a.NodeErrStmt, p.current.Start, p.current.End)
+		}
+
+		orElseStmts = append(orElseStmts, elifStmt)
+	case l.ELSE:
+		p.advance()
+		if p.current.Type != l.COLON {
+			p.errorCurrent("expected `:` after else")
+			p.syncTo(l.COLON, l.NEWLINE, l.EOF)
+			if p.current.Type != l.COLON {
+				ret := p.tree.NewNode(a.NodeIf, startPos, endPos)
+				p.tree.AddChild(ret, testCond)
+				p.tree.AddChild(ret, body)
+				return ret
+			}
+		}
+
+		p.advance()
+
+		if p.current.Type != l.NEWLINE {
+			p.errorCurrent("expected newline after `else:`")
+			p.syncTo(l.NEWLINE, l.EOF)
+			if p.current.Type == l.NEWLINE {
+				p.advance()
+			} else {
+				ret := p.tree.NewNode(a.NodeIf, startPos, endPos)
+				p.tree.AddChild(ret, testCond)
+				if body != a.NoNode {
+					p.tree.AddChild(ret, body)
+				}
+				return ret
+			}
+		} else {
+			p.advance()
+		}
+
+		if p.current.Type != l.INDENT {
+			p.errorCurrent("expected indent block after `else:`")
+			p.syncTo(l.INDENT, l.DEDENT, l.EOF)
+			if p.current.Type != l.INDENT {
+				ret := p.tree.NewNode(a.NodeIf, startPos, endPos)
+				p.tree.AddChild(ret, testCond)
+				if body != a.NoNode {
+					p.tree.AddChild(ret, body)
+				}
+				return ret
+			}
+		}
+
+		p.advance()
+
+		for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
+			if p.current.Type == l.NEWLINE {
+				p.advance()
+				continue
+			}
+
+			stmt := p.parseStatement()
+			if stmt != a.NoNode {
+				orElseStmts = append(orElseStmts, stmt)
+				endPos = p.tree.Nodes[stmt].End
+			}
+		}
+
+		if p.current.Type == l.DEDENT {
+			p.advance()
+		}
+	}
+
+	ret := p.tree.NewNode(a.NodeIf, startPos, endPos)
+	p.tree.AddChild(ret, testCond)
+	if body != a.NoNode {
+		p.tree.AddChild(ret, body)
+	}
+	if len(orElseStmts) > 0 {
+		orElseBlock = p.tree.NewNode(
+			a.NodeBlock,
+			p.tree.Nodes[orElseStmts[0]].Start,
+			p.tree.Nodes[orElseStmts[len(orElseStmts)-1]].End,
+		)
+
+		for _, child := range orElseStmts {
+			p.tree.AddChild(orElseBlock, child)
+		}
+
+		p.tree.AddChild(ret, orElseBlock)
+	}
+
+	return ret
 }
