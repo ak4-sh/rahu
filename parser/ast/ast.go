@@ -1,5 +1,9 @@
 package ast
 
+import (
+	"strings"
+)
+
 //go:generate stringer -type=NodeKind
 
 type (
@@ -25,9 +29,10 @@ type (
 		Root  NodeID
 		Nodes []Node
 
-		Names   []string
-		Strings []string
-		Numbers []string
+		Names     []string
+		Strings   []string
+		Numbers   []string
+		nameIndex map[string]uint32
 	}
 	Operator        uint8
 	CompareOp       uint8
@@ -93,6 +98,11 @@ const (
 )
 
 const (
+	// NodeModule
+	// Children:
+	//   0..n -> top-level statements
+	// Data:
+	//   unused
 	NodeModule NodeKind = iota
 	NodeAssign
 	NodeAugAssign
@@ -120,10 +130,12 @@ const (
 	NodeClassDef
 	NodeExprStmt
 	NodeBlock
-	NodeArg
+	NodeArgs
 	NodeErrExp
 	NodeSubScript
 	NodeBaseList
+	NodeErrStmt
+	NodeParam
 )
 
 const NoNode NodeID = 0
@@ -143,15 +155,19 @@ func New(numTokens int) *AST {
 	nodeCap := min(numTokens*2, 800)
 
 	a := AST{
-		Nodes:   make([]Node, 1, nodeCap),
-		Names:   make([]string, 0, nameCap),
-		Strings: make([]string, 0, stringCap),
-		Numbers: make([]string, 0, numberCap),
+		Nodes:     make([]Node, 1, nodeCap),
+		Names:     make([]string, 0, nameCap),
+		Strings:   make([]string, 0, stringCap),
+		Numbers:   make([]string, 0, numberCap),
+		nameIndex: map[string]uint32{},
 	}
 	a.Names = append(a.Names, "")
 	a.Names = append(a.Names, "None")
 	a.Numbers = append(a.Numbers, "")
 	a.Strings = append(a.Strings, "")
+	a.nameIndex[""] = 0
+	a.nameIndex["None"] = 1
+
 	return &a
 }
 
@@ -189,6 +205,10 @@ func (a *AST) Reset() {
 	a.Names = append(a.Names, "", "None")
 	a.Strings = append(a.Strings, "")
 	a.Numbers = append(a.Numbers, "")
+	a.nameIndex = map[string]uint32{
+		"":     0,
+		"None": 1,
+	}
 }
 
 func (a *AST) Node(id NodeID) Node {
@@ -218,11 +238,21 @@ func (a *AST) AddChild(parent, child NodeID) {
 	p.LastChild = child
 }
 
-func (a *AST) NewNameNode(start, end uint32, name string) NodeID {
-	id := a.NewNode(NodeName, start, end)
+func (a *AST) internName(name string) uint32 {
+	if idx, ok := a.nameIndex[name]; ok {
+		return idx
+	}
+
+	name = strings.Clone(name) // detach from lexer input
 	idx := uint32(len(a.Names))
 	a.Names = append(a.Names, name)
-	a.Nodes[id].Data = idx
+	a.nameIndex[name] = idx
+	return idx
+}
+
+func (a *AST) NewNameNode(start, end uint32, name string) NodeID {
+	id := a.NewNode(NodeName, start, end)
+	a.Nodes[id].Data = a.internName(name)
 	return id
 }
 
