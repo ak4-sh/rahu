@@ -26,48 +26,32 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 
 ### Parser — recursive descent + Pratt over an arena-backed AST
 
-**Statements working:**
-- Assignment and augmented assignment (`+=`, `-=`, etc.)
-- `if` / `elif` / `else`
-- `for` (with `else`) and `while`
-- `def` with default arguments
-- `class` with inheritance (base class support!)
-- `return`, `break`, `continue`
+- Assignments, augmented assignments, `if` / `elif` / `else`, `for`, `while`, `def`, `class`, `return`, `break`, `continue`
+- `import` / `from ... import ...`, including relative `from` imports
+- Function calls, keyword arguments, attribute access, list/tuple/dict literals, subscripts, and slices
+- Bare tuple returns like `return a, b`
+- Subscript assignment targets like `a[0] = x`
+- Best-effort error recovery instead of stopping at the first syntax error
 
-**Expressions:**
-- Binary ops, comparisons (including chained `1 < x < 10`)
-- Boolean `and` / `or`, unary `-` / `+` / `not`
-- Function calls, attribute access (`obj.attr`)
-- List literals, tuple unpacking
-- Right-associative `**` operator
+The AST is stored in a compact arena with stable `NodeID`s, contiguous node storage, sibling-linked children, and side tables for names/strings/numbers.
 
-Parser recovers from errors and continues building a best-effort AST. The tree is stored as a compact arena with stable `NodeID`s, contiguous node storage, sibling-linked children, and side tables for names/strings/numbers so later analysis stages can key lookups by identity and avoid per-node allocations.
+### Semantic Analyser — LEGB scopes, imports, classes, and lightweight types
 
-### Semantic Analyser — LEGB scopes + class modeling
+- LEGB name resolution with definition tracking and resolved name/attribute maps keyed by `NodeID`
+- Builtin constants, builtin types, and a useful slice of builtin functions
+- Import binding against indexed workspace modules, including relative `from` imports
+- Class inheritance, member promotion, and `self.x = ...` instance attribute discovery
+- Lightweight explicit type model with inferred instances, unions, list/tuple/subscript element typing, and `list.append(...)` mutation typing
+- Typed hover and smarter completion built on top of inferred values
 
-- Lexical scopes: builtin -> global -> function -> class
-- Python-style name resolution (LEGB)
-- Definition tracking map from `NodeID -> Symbol` during scope building
-- Name and attribute resolution maps keyed by `NodeID`
-- Builtin constants: `True`, `False`, `None`
-- Builtin types: `int`, `str`, `float`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bytes`, `bytearray`, `complex`, `object`
-- Builtin functions include `print`, `range`, `len`, `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `open`, `super`, `getattr`, `setattr`, `input`, `float`, and more from the standard builtin set
-
-**Symbol kinds:**
-- variable, function, class, parameter, builtin, constant, type, attribute
-
-**What it catches:**
+**Catches today:**
 - Undefined names
+- Undefined attributes
+- Undefined base classes
+- Unresolved modules
+- Missing imported names
 - `return` outside a function
 - `break` / `continue` outside a loop
-
-**Class inheritance:**
-- Tracks base classes in class definitions
-- Promotes base class members into child classes
-- Overridden methods are respected (Dog's `speak` overrides Animal's)
-- Instance attributes discovered via `self.x = ...` are tracked
-- Simple constructor calls can attach an inferred instance type to variables
-- Class and function docstrings are attached to symbols and surfaced in hover
 
 ### LSP Server — JSON-RPC 2.0 over stdio
 
@@ -75,11 +59,23 @@ Parser recovers from errors and continues building a best-effort AST. The tree i
 - Document lifecycle (`didOpen`, `didChange`, `didClose`)
 - Full document sync is advertised to clients; the server can also apply ranged edits internally
 - Publishes diagnostics (syntax + semantic errors)
-- **Go-to-definition** — resolves variables, functions, parameters, classes, and attributes (`obj.attr`)
-- **Hover** — shows symbol kind/signature, owning class for methods, docstrings, and `file:line`
-- `definitionProvider` and `hoverProvider` capabilities advertised
+- **Go-to-definition**
+- **Hover**
+- **References**
+- **Rename** + **prepare rename**
+- **Document symbols** + **workspace symbols**
+- **Workspace-aware completion**
+- Startup indexing progress via LSP work-done progress
 
-Server-side document analysis stores AST + definition map + resolved symbol maps + semantic diagnostics per open document. Re-analysis is debounced on document changes before the full parse/analyse pipeline runs again.
+Server-side analysis stores AST, definitions, resolved symbols, semantic diagnostics, and inferred types. Re-analysis is debounced on document changes, and dependent modules are refreshed through the workspace graph.
+
+### Workspace Indexing
+
+- Indexes Python modules under the workspace root at startup
+- Builds semantic snapshots for every indexed module
+- Extracts exports and import dependencies
+- Tracks reverse dependencies so dependents can be refreshed on change
+- Prefers open-buffer contents over on-disk files
 
 ### JSON-RPC Transport
 
@@ -91,8 +87,9 @@ Server-side document analysis stores AST + definition map + resolved symbol maps
 ### Testing
 
 - JSON-RPC transport/frame tests are consolidated in `jsonrpc/jsonrpc_test.go`
-- Parser benchmarks live in `parser/parser_test.go`
-- Server lookup/definition-oriented tests and benchmarks are grouped in `server/benchmark_test.go`
+- Parser coverage lives in `parser/parser_test.go`
+- Semantic analysis coverage lives in `analyser/analyser_test.go`
+- Workspace/indexing/LSP behavior is covered in `server/*_test.go`
 - CI runs `go build ./...` and `go test ./...`
 
 ### Performance
@@ -137,28 +134,39 @@ Takeaway: the arena-backed AST is directionally faster overall, with a `-45.31%`
 
 ### Language features
 
-- Imports (`import`, `from ... import`)
-- Subscripts and slicing (`a[0]`, `a[1:3]`)
-- Dictionaries and sets
+- Set literals
 - `try` / `except` / `finally`
 - `*args` / `**kwargs`
 - `with`, `lambda`, comprehensions, decorators
 - `async` / `await`, `yield`
 - Bitwise operators
 - String escape sequences
+- A few Python newline / line-joining edge cases
+
+### Typing and semantics
+
+- Return type inference
+- Dict and set typing
+- More mutation typing beyond `list.append(...)`
+- Maybe-undefined member diagnostics on unions
+- Annotation support
+- `typing`-aware behavior
+- Stdlib and external package resolution outside the workspace root
 
 ### LSP features
 
-- Find references
-- Completion
-- Rename
+- Semantic tokens
+- Signature help
 - Code actions / formatting
+- Attribute/member references
+- Attribute/member rename
 
 ### Performance and infrastructure
 
 - No incremental parsing
 - No AST reuse across edits
 - No structured logging
+- No external environment indexing yet
 
 ### Testing depth
 
@@ -191,27 +199,46 @@ rahu/
 
 ## Architecture
 
-Every time you type:
+At startup:
+
+```
+initialize
+  -> index Python modules under workspace root
+  -> build semantic snapshots
+  -> extract exports + import dependencies
+  -> build reverse dependency graph
+```
+
+On edit:
 
 ```
 editor keystroke
   -> textDocument/didChange
   -> update Document text + line index
-  -> lex entire file (byte offsets)
-  -> parse tokens into AST
-  -> build scopes + definition map
-  -> resolve names and attributes
-  -> promote class members (inheritance)
-  -> store AST + defs + resolved symbols on Document
-  -> convert byte spans to LSP ranges
+  -> rebuild changed module
+  -> refresh affected dependents
   -> publish diagnostics
 ```
 
-Everything runs on byte offsets internally. Line/column is only used for protocol I/O.
+Inside a single analysis pass:
+
+```
+source text
+  -> lex
+  -> parse into arena-backed AST
+  -> build scopes + definitions
+  -> resolve names
+  -> bind attributes
+  -> promote class members
+  -> infer lightweight types
+  -> store snapshot / document analysis
+```
+
+Everything still runs on byte offsets internally. Line/column is only used for protocol I/O.
 
 ## Sample Output
 
-Here's what Rahu produces when analysing code with inheritance:
+The debug dump below is older than the current implementation. It is still useful for showing the class/member model, but it does not reflect the newer workspace import support, references/rename/completion work, or the lightweight type system.
 
 ```python
 class Animal:
@@ -347,7 +374,7 @@ Notice how:
 - Overridden methods (`speak`) are correctly tagged
 - Instance attributes via `self.x = ...` are tracked separately
 
-This output is older than the current implementation in one important way: Rahu now does simple instance tracking for constructor calls, so method/attribute lookup on variables like `d = Dog(...)` is better than this example suggests. The sample is still useful for showing inheritance and member promotion, but it no longer captures the full current hover/definition behavior.
+Rahu still models inheritance, promoted members, and instance attributes the same way, but it now does a much better job with constructor-based instance typing, container element typing, and workspace-aware editor features.
 
 ## Getting Started
 
