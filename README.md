@@ -24,7 +24,7 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 - INDENT/DEDENT with tab/space consistency enforcement
 - Positions stored as half-open byte ranges `[start, end)`
 
-### Parser — recursive descent + Pratt
+### Parser — recursive descent + Pratt over an arena-backed AST
 
 **Statements working:**
 - Assignment and augmented assignment (`+=`, `-=`, etc.)
@@ -41,7 +41,7 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 - List literals, tuple unpacking
 - Right-associative `**` operator
 
-Parser recovers from errors and continues building a best-effort AST. AST names and attributes now carry stable `NodeID`s, so later analysis stages can key lookups by identity that survives traversal and map usage.
+Parser recovers from errors and continues building a best-effort AST. The tree is stored as a compact arena with stable `NodeID`s, contiguous node storage, sibling-linked children, and side tables for names/strings/numbers so later analysis stages can key lookups by identity and avoid per-node allocations.
 
 ### Semantic Analyser — LEGB scopes + class modeling
 
@@ -49,10 +49,12 @@ Parser recovers from errors and continues building a best-effort AST. AST names 
 - Python-style name resolution (LEGB)
 - Definition tracking map from `NodeID -> Symbol` during scope building
 - Name and attribute resolution maps keyed by `NodeID`
-- Builtin functions: `print`, `range`, `len`, `int`, `str`, `bool`, `list`, `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `open`, `super`, `hasattr`, `getattr`, `setattr`, `input`, `float`
+- Builtin constants: `True`, `False`, `None`
+- Builtin types: `int`, `str`, `float`, `list`, `tuple`, `dict`, `set`, `frozenset`, `bytes`, `bytearray`, `complex`, `object`
+- Builtin functions include `print`, `range`, `len`, `type`, `isinstance`, `abs`, `max`, `min`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `open`, `super`, `getattr`, `setattr`, `input`, `float`, and more from the standard builtin set
 
 **Symbol kinds:**
-- variable, function, class, parameter, builtin, attribute
+- variable, function, class, parameter, builtin, constant, type, attribute
 
 **What it catches:**
 - Undefined names
@@ -64,18 +66,20 @@ Parser recovers from errors and continues building a best-effort AST. AST names 
 - Promotes base class members into child classes
 - Overridden methods are respected (Dog's `speak` overrides Animal's)
 - Instance attributes discovered via `self.x = ...` are tracked
+- Simple constructor calls can attach an inferred instance type to variables
+- Class and function docstrings are attached to symbols and surfaced in hover
 
 ### LSP Server — JSON-RPC 2.0 over stdio
 
 - Initialize/shutdown lifecycle
 - Document lifecycle (`didOpen`, `didChange`, `didClose`)
-- Full and incremental text sync
+- Full document sync is advertised to clients; the server can also apply ranged edits internally
 - Publishes diagnostics (syntax + semantic errors)
 - **Go-to-definition** — resolves variables, functions, parameters, classes, and attributes (`obj.attr`)
-- **Hover** — basic implementation showing symbol info
+- **Hover** — shows symbol kind/signature, owning class for methods, docstrings, and `file:line`
 - `definitionProvider` and `hoverProvider` capabilities advertised
 
-Server-side document analysis stores AST + definition map + resolved symbol maps + semantic diagnostics per open document.
+Server-side document analysis stores AST + definition map + resolved symbol maps + semantic diagnostics per open document. Re-analysis is debounced on document changes before the full parse/analyse pipeline runs again.
 
 ### JSON-RPC Transport
 
@@ -89,7 +93,45 @@ Server-side document analysis stores AST + definition map + resolved symbol maps
 - JSON-RPC transport/frame tests are consolidated in `jsonrpc/jsonrpc_test.go`
 - Parser benchmarks live in `parser/parser_test.go`
 - Server lookup/definition-oriented tests and benchmarks are grouped in `server/benchmark_test.go`
-- Core parser/analyser/server packages are covered by `go test ./...`
+- CI runs `go build ./...` and `go test ./...`
+
+### Performance
+
+- The AST is now arena-backed: nodes live in a contiguous slice and carry stable `NodeID`s, while names/strings/numbers are interned in side tables
+- This reduces allocation pressure and improves cache locality in parse, lookup, and semantic analysis passes
+- Benchmark coverage in `server/benchmark_test.go` includes startup, analysis at multiple file sizes, definition/hover lookup, throughput-style repeated analysis, parser-only cost, and full-pipeline cost
+
+Current benchmark snapshot (`benchstat test_results_pointers.txt test_results_arena.txt`):
+
+```text
+goos: darwin
+goarch: arm64
+pkg: rahu/server
+cpu: Apple M2 Pro
+                            │ test_results_pointers.txt │        test_results_arena.txt         │
+                            │          sec/op           │    sec/op     vs base                 │
+ServerStartup-10                           16.84n ± ∞ ¹   16.67n ± ∞ ¹        ~ (p=0.400 n=3) ²
+AnalysisSmall-10                           84.09µ ± ∞ ¹   55.19µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+AnalysisMedium-10                          183.5µ ± ∞ ¹   116.9µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+AnalysisLarge-10                           2.151m ± ∞ ¹   1.849m ± ∞ ¹        ~ (p=0.100 n=3) ²
+AnalysisExtraLarge-10                      8.795m ± ∞ ¹   7.954m ± ∞ ¹        ~ (p=0.100 n=3) ²
+DefinitionLookup-10                       205.30n ± ∞ ¹   30.35n ± ∞ ¹        ~ (p=0.100 n=3) ²
+HoverLookup-10                            207.10n ± ∞ ¹   34.14n ± ∞ ¹        ~ (p=0.100 n=3) ²
+ThroughputAnalysisSmall-10                 86.34µ ± ∞ ¹   74.49µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+ThroughputAnalysisMedium-10                187.5µ ± ∞ ¹   174.6µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+ThroughputAnalysisLarge-10                 2.163m ± ∞ ¹   2.345m ± ∞ ¹        ~ (p=0.100 n=3) ²
+DefinitionLookupAll-10                    12.169µ ± ∞ ¹   1.362µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+HoverLookupAll-10                         12.241µ ± ∞ ¹   1.416µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+ColdStartAnalysis-10                       86.74µ ± ∞ ¹   86.25µ ± ∞ ¹        ~ (p=0.700 n=3) ²
+ParserOnly-10                              1.238m ± ∞ ¹   1.474m ± ∞ ¹        ~ (p=0.700 n=3) ²
+FullPipeline-10                            2.299m ± ∞ ¹   2.574m ± ∞ ¹        ~ (p=0.100 n=3) ²
+geomean                                    57.81µ         31.62µ        -45.31%
+
+¹ need >= 6 samples for confidence interval at level 0.95
+² need >= 4 samples to detect a difference at alpha level 0.05
+```
+
+Takeaway: the arena-backed AST is directionally faster overall, with a `-45.31%` geomean on this benchmark set and especially large wins in definition/hover lookup paths. These numbers are still preliminary because each case has only `n=3`, so they should be read as indicative rather than statistically conclusive.
 
 ## What's Missing
 
@@ -114,7 +156,6 @@ Server-side document analysis stores AST + definition map + resolved symbol maps
 
 ### Performance and infrastructure
 
-- No analysis debouncing (re-parses everything on every keystroke)
 - No incremental parsing
 - No AST reuse across edits
 - No structured logging
@@ -306,7 +347,7 @@ Notice how:
 - Overridden methods (`speak`) are correctly tagged
 - Instance attributes via `self.x = ...` are tracked separately
 
-The `UNBOUND` attributes are calls on instance variables (`d.speak()`) — we're not yet tracking that `d` is an instance of `Dog`, so we can't resolve method lookups on arbitrary variables. That's the next big piece.
+This output is older than the current implementation in one important way: Rahu now does simple instance tracking for constructor calls, so method/attribute lookup on variables like `d = Dog(...)` is better than this example suggests. The sample is still useful for showing inheritance and member promotion, but it no longer captures the full current hover/definition behavior.
 
 ## Getting Started
 
@@ -317,8 +358,13 @@ go build ./...
 # Run tests
 go test ./...
 
-# Analyze a Python file
-go run ./utils/dump path/to/file.py
+# Analyze a Python file with the debug dump tool
+# (the current utility reads temp.py from the repo root)
+cp path/to/file.py temp.py
+go run ./utils/dump
+
+# Run the server benchmark suite
+go test -bench=. ./server
 
 # Use with your editor (LSP client required)
 # Point your editor's Python language server to: go run ./cmd/lsp
