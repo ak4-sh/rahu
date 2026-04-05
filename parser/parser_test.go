@@ -129,6 +129,78 @@ func TestParseFuncParamsAndDefaults(t *testing.T) {
 	requireKind(t, tree, bodyKids[0], a.NodeExprStmt)
 }
 
+func TestParseFuncParamAnnotation(t *testing.T) {
+	p, tree := parseSource(t, "def f(x: int):\n    x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	name, args, returnAnnotation, _ := tree.FunctionPartsWithReturn(fn)
+	if got := nameText(t, tree, name); got != "f" {
+		t.Fatalf("unexpected function name: got %q", got)
+	}
+	if returnAnnotation != a.NoNode {
+		t.Fatalf("unexpected return annotation: got %s", tree.Node(returnAnnotation).Kind)
+	}
+
+	params := requireChildCount(t, tree, args, 1)
+	paramName, annotation, defaultExpr := tree.ParamParts(params[0])
+	if got := nameText(t, tree, paramName); got != "x" {
+		t.Fatalf("unexpected param name: got %q", got)
+	}
+	if got := nameText(t, tree, annotation); got != "int" {
+		t.Fatalf("unexpected annotation: got %q", got)
+	}
+	if defaultExpr != a.NoNode {
+		t.Fatalf("unexpected default expression: got %s", tree.Node(defaultExpr).Kind)
+	}
+}
+
+func TestParseFuncParamAnnotationWithDefault(t *testing.T) {
+	p, tree := parseSource(t, "def f(x: int = 1):\n    x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, args, _, _ := tree.FunctionPartsWithReturn(fn)
+	params := requireChildCount(t, tree, args, 1)
+	_, annotation, defaultExpr := tree.ParamParts(params[0])
+	if got := nameText(t, tree, annotation); got != "int" {
+		t.Fatalf("unexpected annotation: got %q", got)
+	}
+	if got := numberValue(t, tree, defaultExpr); got != "1" {
+		t.Fatalf("unexpected default value: got %q", got)
+	}
+}
+
+func TestParseFuncReturnAnnotation(t *testing.T) {
+	p, tree := parseSource(t, "def f() -> int:\n    x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, returnAnnotation, body := tree.FunctionPartsWithReturn(fn)
+	if got := nameText(t, tree, returnAnnotation); got != "int" {
+		t.Fatalf("unexpected return annotation: got %q", got)
+	}
+	requireKind(t, tree, body, a.NodeBlock)
+}
+
+func TestParseFuncAnnotationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing param annotation", src: "def f(x:):\n    x\n", want: "expected type annotation after ':'"},
+		{name: "missing return annotation", src: "def f() ->:\n    x\n", want: "expected return type after '->'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
+	}
+}
+
 func TestParseFuncDocstringStoredOnFunction(t *testing.T) {
 	p, tree := parseSource(t, "def f():\n    \"doc\"\n    x\n")
 	requireNoParseErrors(t, p)
@@ -286,6 +358,42 @@ func TestParseSliceAssignmentShape(t *testing.T) {
 	requireKind(t, tree, assignKids[1], a.NodeSubScript)
 	targetKids := requireChildCount(t, tree, assignKids[1], 2)
 	requireKind(t, tree, targetKids[1], a.NodeSlice)
+}
+
+func TestParseAnnotatedAssignmentShape(t *testing.T) {
+	p, tree := parseSource(t, "x: int = 1\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeAnnAssign)
+	target, annotation, value := tree.AnnAssignParts(stmt)
+	if got := nameText(t, tree, target); got != "x" {
+		t.Fatalf("unexpected annotated assign target: got %q", got)
+	}
+	if got := nameText(t, tree, annotation); got != "int" {
+		t.Fatalf("unexpected annotation: got %q", got)
+	}
+	if got := numberValue(t, tree, value); got != "1" {
+		t.Fatalf("unexpected annotated assign value: got %q", got)
+	}
+}
+
+func TestParseAnnotatedAssignmentWithoutValue(t *testing.T) {
+	p, tree := parseSource(t, "x: int\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeAnnAssign)
+	target, annotation, value := tree.AnnAssignParts(stmt)
+	if got := nameText(t, tree, target); got != "x" {
+		t.Fatalf("unexpected annotated assign target: got %q", got)
+	}
+	if got := nameText(t, tree, annotation); got != "int" {
+		t.Fatalf("unexpected annotation: got %q", got)
+	}
+	if value != a.NoNode {
+		t.Fatalf("unexpected annotated assign value: got %s", tree.Node(value).Kind)
+	}
 }
 
 func TestParseSubscriptAugAssignShape(t *testing.T) {
@@ -619,6 +727,25 @@ func TestParseSubscriptShape(t *testing.T) {
 	}
 	if got := numberValue(t, tree, subKids[1]); got != "0" {
 		t.Fatalf("unexpected subscript index: got %q", got)
+	}
+}
+
+func TestParseSubscriptTupleIndexShape(t *testing.T) {
+	p, tree := parseSource(t, "a[x, y]\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, exprStmt, a.NodeExprStmt)
+	sub := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, sub, a.NodeSubScript)
+	subKids := requireChildCount(t, tree, sub, 2)
+	requireKind(t, tree, subKids[1], a.NodeTuple)
+	tupleKids := requireChildCount(t, tree, subKids[1], 2)
+	if got := nameText(t, tree, tupleKids[0]); got != "x" {
+		t.Fatalf("unexpected first tuple index: got %q", got)
+	}
+	if got := nameText(t, tree, tupleKids[1]); got != "y" {
+		t.Fatalf("unexpected second tuple index: got %q", got)
 	}
 }
 

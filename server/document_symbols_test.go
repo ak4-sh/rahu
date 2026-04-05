@@ -112,3 +112,19 @@ func TestDocumentSymbolTupleDestructuring(t *testing.T) {
 		t.Fatalf("unexpected destructured symbols: %+v", syms)
 	}
 }
+
+func TestDocumentSymbolAnnotatedVariable(t *testing.T) {
+	code := "x: int = 1\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	syms, err := s.DocumentSymbol(&lsp.DocumentSymbolParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatalf("unexpected documentSymbol error: %v", err)
+	}
+	if len(syms) != 1 || syms[0].Name != "x" || syms[0].Kind != lsp.SymbolKindVariable {
+		t.Fatalf("unexpected annotated variable symbols: %+v", syms)
+	}
+}
