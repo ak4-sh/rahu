@@ -282,6 +282,9 @@ func (p *Parser) parseList() a.NodeID {
 	if p.current.Type != l.RSQB {
 		first := p.parseExpression(LOWEST)
 		if first != a.NoNode {
+			if p.current.Type == l.FOR {
+				return p.parseListComp(startPos, first)
+			}
 			p.tree.AddChild(ret, first)
 			p.tree.Nodes[ret].End = p.tree.Nodes[first].End
 		} else {
@@ -322,5 +325,61 @@ func (p *Parser) parseList() a.NodeID {
 	endPos := p.current.Start
 	p.advance()
 	p.tree.Nodes[ret].End = endPos
+	return ret
+}
+
+func (p *Parser) parseListComp(startPos uint32, expr a.NodeID) a.NodeID {
+	ret := p.tree.NewNode(a.NodeListComp, startPos, p.tree.Nodes[expr].End)
+	p.tree.AddChild(ret, expr)
+	for p.current.Type == l.FOR {
+		clause := p.parseComprehensionClause()
+		if clause == a.NoNode {
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+		p.tree.AddChild(ret, clause)
+		p.tree.Nodes[ret].End = p.tree.Nodes[clause].End
+	}
+	if p.current.Type != l.RSQB {
+		p.errorCurrent("expected ']' after list comprehension")
+		return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+	}
+	endPos := p.current.Start
+	p.advance()
+	p.tree.Nodes[ret].End = endPos
+	return ret
+}
+
+func (p *Parser) parseComprehensionClause() a.NodeID {
+	startPos := p.current.Start
+	p.advance()
+	ret := p.tree.NewNode(a.NodeComprehension, startPos, startPos)
+	target := p.parseForTarget()
+	if target == a.NoNode {
+		p.errorCurrent("invalid expression for comprehension target")
+		return a.NoNode
+	}
+	p.tree.AddChild(ret, target)
+	if p.current.Type != l.IN {
+		p.errorCurrent("expected 'in' after comprehension target")
+		return ret
+	}
+	p.advance()
+	iter := p.parseExpression(LOWEST)
+	if iter == a.NoNode {
+		p.errorCurrent("invalid expression for comprehension iterator")
+		return ret
+	}
+	p.tree.AddChild(ret, iter)
+	p.tree.Nodes[ret].End = p.tree.Nodes[iter].End
+	for p.current.Type == l.IF {
+		p.advance()
+		filter := p.parseExpression(LOWEST)
+		if filter == a.NoNode {
+			p.errorCurrent("invalid expression for comprehension filter")
+			return ret
+		}
+		p.tree.AddChild(ret, filter)
+		p.tree.Nodes[ret].End = p.tree.Nodes[filter].End
+	}
 	return ret
 }

@@ -58,7 +58,8 @@ func main() {
 	fmt.Println(string(src))
 	fmt.Println()
 
-	p := parser.New(string(src))
+	source := string(src)
+	p := parser.New(source)
 	tree := p.Parse()
 
 	if errs := p.Errors(); len(errs) > 0 {
@@ -69,7 +70,7 @@ func main() {
 		return
 	}
 
-	global, _ := analyser.BuildScopes(tree)
+	global, _ := analyser.BuildScopes(tree, source)
 
 	header("=== SCOPES ===")
 	dumpScope(global, 0)

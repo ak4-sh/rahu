@@ -219,7 +219,7 @@ func (s *Server) extractImportsForModule(tree *ast.AST, importerURI lsp.Document
 func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, text string, lineIndex *source.LineIndex) *ModuleSnapshot {
 	p := parser.New(text)
 	tree := p.Parse()
-	global, defs := analyser.BuildScopes(tree)
+	global, defs := analyser.BuildScopes(tree, text)
 	resolver, semErrs := analyser.Resolve(tree, global)
 	stampSymbolURIs(uri, defs, resolver.Resolved, resolver.ResolvedAttr)
 

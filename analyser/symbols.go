@@ -55,21 +55,22 @@ type Type struct {
 }
 
 type Symbol struct {
-	Name       string
-	Kind       SymbolKind
-	Span       ast.Range
-	Scope      *Scope
-	Inner      *Scope
-	Attrs      *Scope
-	Members    *Scope
-	Bases      []*Symbol
-	InstanceOf *Symbol
-	Inferred   *Type
-	Returns    *Type
-	DocString  string
-	Def        ast.NodeID
-	ID         SymbolID
-	URI        lsp.DocumentURI
+	Name         string
+	Kind         SymbolKind
+	Span         ast.Range
+	Scope        *Scope
+	Inner        *Scope
+	Attrs        *Scope
+	Members      *Scope
+	Bases        []*Symbol
+	InstanceOf   *Symbol
+	Inferred     *Type
+	Returns      *Type
+	DocString    string
+	DefaultValue string // Text representation of default/initial value
+	Def          ast.NodeID
+	ID           SymbolID
+	URI          lsp.DocumentURI
 }
 
 type ScopeKind int
@@ -99,7 +100,7 @@ func NewScope(parent *Scope, kind ScopeKind) *Scope {
 		Symbols: make(map[string]*Symbol),
 	}
 
-	if parent != nil {
+	if parent != nil && parent.Kind != ScopeBuiltin {
 		parent.Children = append(parent.Children, scope)
 	}
 

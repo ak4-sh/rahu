@@ -250,7 +250,7 @@ func TestDefinition(t *testing.T) {
 			if !tt.expectNilDoc {
 				p := parser.New(tt.code)
 				tree := p.Parse()
-				global, _ := analyser.BuildScopes(tree)
+				global, _ := analyser.BuildScopes(tree, tt.code)
 				resolver, _ := analyser.Resolve(tree, global)
 
 				s.docs[uri] = &Document{
@@ -307,7 +307,7 @@ y = x
 
 	p := parser.New(code)
 	tree := p.Parse()
-	global, _ := analyser.BuildScopes(tree)
+	global, _ := analyser.BuildScopes(tree, code)
 	resolver, _ := analyser.Resolve(tree, global)
 
 	s.docs[uri] = &Document{
@@ -567,7 +567,7 @@ func BenchmarkFullPipeline(b *testing.B) {
 		p := parser.New(input)
 		tree := p.Parse()
 
-		global, _ := analyser.BuildScopes(tree)
+		global, _ := analyser.BuildScopes(tree, input)
 		analyser.PromoteClassMembers(global)
 		resolver, _ := analyser.Resolve(tree, global)
 

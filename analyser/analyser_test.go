@@ -16,7 +16,7 @@ func TestFunctionScope(t *testing.T) {
 	p := parser.New(input)
 	tree := p.Parse()
 
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, input)
 
 	if _, ok := global.Symbols["f"]; !ok {
 		t.Fatal("missing function symbol f")
@@ -39,7 +39,7 @@ func TestSimpleResolution(t *testing.T) {
 
 	p := parser.New(src)
 	tree := p.Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 
 	resolver, errs := Resolve(tree, global)
 	if len(errs) != 0 {
@@ -68,8 +68,20 @@ func collectNames(tree *ast.AST, id ast.NodeID, out *[]ast.NodeID) {
 	}
 }
 
+func findNodeByKind(t *testing.T, tree *ast.AST, kind ast.NodeKind) ast.NodeID {
+	t.Helper()
+	for id := ast.NodeID(1); int(id) < len(tree.Nodes); id++ {
+		if tree.Node(id).Kind == kind {
+			return id
+		}
+	}
+	t.Fatalf("missing node kind %s", kind)
+	return ast.NoNode
+}
+
 func TestBuildScopes_AllowsPartialFunctionHeader(t *testing.T) {
-	tree := parser.New("def foo(x=bar)").Parse()
+	src := "def foo(x=bar)"
+	tree := parser.New(src).Parse()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -77,7 +89,7 @@ func TestBuildScopes_AllowsPartialFunctionHeader(t *testing.T) {
 		}
 	}()
 
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	if _, ok := global.Symbols["foo"]; !ok {
 		t.Fatal("missing function symbol foo")
 	}
@@ -88,7 +100,8 @@ func TestBuildScopes_AllowsPartialFunctionHeader(t *testing.T) {
 }
 
 func TestBuildScopes_AllowsPartialClassHeader(t *testing.T) {
-	tree := parser.New("class Foo(Bar)").Parse()
+	src := "class Foo(Bar)"
+	tree := parser.New(src).Parse()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -96,7 +109,7 @@ func TestBuildScopes_AllowsPartialClassHeader(t *testing.T) {
 		}
 	}()
 
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	if _, ok := global.Symbols["Foo"]; !ok {
 		t.Fatal("missing class symbol Foo")
 	}
@@ -106,11 +119,62 @@ func TestBuildScopes_AllowsPartialClassHeader(t *testing.T) {
 	}
 }
 
+func TestBuildScopes_AllowsExceptPass(t *testing.T) {
+	src := "try:\n    risky\nexcept TypeError:\n    pass\n"
+	tree := parser.New(src).Parse()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("BuildScopes panicked on except pass: %v", r)
+		}
+	}()
+
+	global, _ := BuildScopes(tree, src)
+	if global == nil {
+		t.Fatal("expected global scope")
+	}
+}
+
+func TestBuildScopes_IgnoresUnknownStatementKinds(t *testing.T) {
+	tree := ast.New(8)
+	tree.Root = tree.NewNode(ast.NodeModule, 0, 0)
+	unknown := tree.NewNode(ast.NodeBlock, 0, 0)
+	tree.AddChild(tree.Root, unknown)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("BuildScopes panicked on unknown statement kind: %v", r)
+		}
+	}()
+
+	global, _ := BuildScopes(tree, "")
+	if global == nil {
+		t.Fatal("expected global scope")
+	}
+}
+
+func TestResolve_AllowsExceptPass(t *testing.T) {
+	src := "try:\n    risky\nexcept TypeError:\n    pass\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Resolve panicked on except pass: %v", r)
+		}
+	}()
+
+	_, errs := Resolve(tree, global)
+	if len(errs) == 0 {
+		// risky is unresolved in this fixture; the important part is that analysis stays alive.
+	}
+}
+
 func TestResolve_SubscriptAssignmentTarget(t *testing.T) {
 	src := "a = [1]\na[0] = 2\na[0] += 3\n"
 	tree := parser.New(src).Parse()
 
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	if _, ok := global.Symbols["a"]; !ok {
 		t.Fatal("missing symbol a")
 	}
@@ -124,7 +188,7 @@ func TestResolve_KeywordArgValueOnly(t *testing.T) {
 	src := "items = [1]\nfoo = print\nfoo(x=items[0])\n"
 	tree := parser.New(src).Parse()
 
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	if _, errs := Resolve(tree, global); len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
 	}
@@ -133,7 +197,7 @@ func TestResolve_KeywordArgValueOnly(t *testing.T) {
 func TestResolveConstructorCallAssignsInferredInstanceType(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\nx = Foo()\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	resolver, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -151,7 +215,7 @@ func TestResolveConstructorCallAssignsInferredInstanceType(t *testing.T) {
 func TestResolveParameterAnnotationAssignsType(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\ndef f(x: Foo):\n    x\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -170,7 +234,7 @@ func TestResolveParameterAnnotationAssignsType(t *testing.T) {
 func TestResolveReturnAnnotationSetsCallExprType(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\ndef make() -> Foo:\n    return Foo()\n\nx = make()\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	resolver, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -192,7 +256,7 @@ func TestResolveReturnAnnotationSetsCallExprType(t *testing.T) {
 func TestResolveListAnnotationAssignsElementType(t *testing.T) {
 	src := "def f(items: list[int]):\n    items\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -211,7 +275,7 @@ func TestResolveListAnnotationAssignsElementType(t *testing.T) {
 func TestResolveTupleAnnotationAssignsItems(t *testing.T) {
 	src := "def f(pair: tuple[str, int]):\n    pair\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -233,10 +297,98 @@ func TestResolveTupleAnnotationAssignsItems(t *testing.T) {
 	}
 }
 
+func TestResolveExceptAliasInBody(t *testing.T) {
+	src := "try:\n    risky\nexcept ValueError as err:\n    err\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) == 0 {
+		// risky is unresolved; ignore that by checking alias specifically.
+	}
+	var errNames []ast.NodeID
+	collectNames(tree, tree.Root, &errNames)
+	var use ast.NodeID
+	for _, id := range errNames {
+		if name, _ := tree.NameText(id); name == "err" && defs[id] == nil {
+			use = id
+			break
+		}
+	}
+	if use == ast.NoNode {
+		t.Fatal("missing except alias use")
+	}
+	if resolver.Resolved[use] == nil || resolver.Resolved[use].Name != "err" {
+		t.Fatalf("expected except alias to resolve, got %+v", resolver.Resolved[use])
+	}
+}
+
+func TestResolveListComprehensionBindsTargetAndInfersListType(t *testing.T) {
+	src := "xs = [1]\nvalues = [x for x in xs if x]\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	for _, err := range errs {
+		if err.Msg != "" {
+			// no-op, just keep full list in failure output below
+		}
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	valuesSym := defs[mustNameNode(t, tree, "values")]
+	if valuesSym == nil || valuesSym.Inferred == nil || valuesSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected list type on values, got %+v", valuesSym)
+	}
+	if valuesSym.Inferred.Elem == nil || valuesSym.Inferred.Elem.Kind != TypeBuiltin || valuesSym.Inferred.Elem.Symbol == nil || valuesSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected list[int], got %+v", valuesSym.Inferred)
+	}
+	comp := findNodeByKind(t, tree, ast.NodeListComp)
+	expr, clauses := tree.ListCompParts(comp)
+	if len(clauses) != 1 {
+		t.Fatalf("unexpected clauses: %+v", clauses)
+	}
+	target, _, filters := tree.ComprehensionParts(clauses[0])
+	if resolver.Resolved[expr] == nil || resolver.Resolved[expr].Name != "x" {
+		t.Fatalf("expected comprehension expr to resolve to x, got %+v", resolver.Resolved[expr])
+	}
+	if resolver.Resolved[target] == nil || resolver.Resolved[target].Name != "x" {
+		t.Fatalf("expected comprehension target to resolve to x, got %+v", resolver.Resolved[target])
+	}
+	if len(filters) != 1 || resolver.Resolved[filters[0]] == nil || resolver.Resolved[filters[0]].Name != "x" {
+		t.Fatalf("expected comprehension filter to resolve to x, got %+v", filters)
+	}
+	var leakErr *SemanticError
+	for i := range errs {
+		if errs[i].Msg == "undefined name: x" {
+			leakErr = &errs[i]
+		}
+	}
+	if leakErr != nil {
+		t.Fatalf("unexpected leaked-name error inside comprehension: %+v", leakErr)
+	}
+}
+
+func TestResolveListComprehensionTargetDoesNotLeak(t *testing.T) {
+	src := "xs = [1]\n[x for x in xs]\nx\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+	_, errs := Resolve(tree, global)
+	found := false
+	for _, err := range errs {
+		if err.Msg == "undefined name: x" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected comprehension target not to leak, got %+v", errs)
+	}
+}
+
 func TestResolveNestedListAnnotationAssignsNestedType(t *testing.T) {
 	src := "def f(matrix: list[list[int]]):\n    matrix\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -259,7 +411,7 @@ func TestResolveNestedListAnnotationAssignsNestedType(t *testing.T) {
 func TestResolveDictAnnotationAssignsKeyValueTypes(t *testing.T) {
 	src := "def f(mapping: dict[str, int]):\n    mapping\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -281,7 +433,7 @@ func TestResolveDictAnnotationAssignsKeyValueTypes(t *testing.T) {
 func TestResolveSetAnnotationAssignsElementType(t *testing.T) {
 	src := "def f(items: set[int]):\n    items\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -300,7 +452,7 @@ func TestResolveSetAnnotationAssignsElementType(t *testing.T) {
 func TestResolveNestedDictAnnotationAssignsNestedTypes(t *testing.T) {
 	src := "def f(nested: dict[str, list[int]]):\n    nested\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -325,7 +477,7 @@ func TestResolveNestedDictAnnotationAssignsNestedTypes(t *testing.T) {
 func TestResolveAnnotatedVariableAssignsBuiltinType(t *testing.T) {
 	src := "x: int = 1\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -340,7 +492,7 @@ func TestResolveAnnotatedVariableAssignsBuiltinType(t *testing.T) {
 func TestResolveAnnotatedVariableWithoutValueAssignsType(t *testing.T) {
 	src := "x: set[int]\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -355,7 +507,7 @@ func TestResolveAnnotatedVariableWithoutValueAssignsType(t *testing.T) {
 func TestResolveAnnotatedVariablePrefersAnnotationOverEmptyLiteral(t *testing.T) {
 	src := "items: list[int] = []\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -370,7 +522,7 @@ func TestResolveAnnotatedVariablePrefersAnnotationOverEmptyLiteral(t *testing.T)
 func TestResolvePropagatesInstanceTypeAcrossAssignment(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\nx = Foo()\ny = x\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -385,7 +537,7 @@ func TestResolvePropagatesInstanceTypeAcrossAssignment(t *testing.T) {
 func TestResolveRepeatedAssignmentBuildsUnionType(t *testing.T) {
 	src := "class Foo:\n    pass\n\nclass Bar:\n    pass\n\nx = Foo()\nx = Bar()\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -403,7 +555,7 @@ func TestResolveRepeatedAssignmentBuildsUnionType(t *testing.T) {
 func TestResolveListLiteralBuildsElementType(t *testing.T) {
 	src := "class Foo:\n    pass\n\nxs = [Foo()]\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -418,7 +570,7 @@ func TestResolveListLiteralBuildsElementType(t *testing.T) {
 func TestResolveMixedListLiteralBuildsUnionElementType(t *testing.T) {
 	src := "class Foo:\n    pass\n\nclass Bar:\n    pass\n\nxs = [Foo(), Bar()]\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -433,7 +585,7 @@ func TestResolveMixedListLiteralBuildsUnionElementType(t *testing.T) {
 func TestResolveTupleSubscriptBuildsUnionElementType(t *testing.T) {
 	src := "class Foo:\n    pass\n\nclass Bar:\n    pass\n\nt = (Foo(), Bar())\nx = t[0]\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -448,7 +600,7 @@ func TestResolveTupleSubscriptBuildsUnionElementType(t *testing.T) {
 func TestResolveSpecialBuiltinNameGuard(t *testing.T) {
 	src := "if __name__ == \"__main__\":\n    pass\n"
 	tree := parser.New(src).Parse()
-	global, _ := BuildScopes(tree)
+	global, _ := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -458,7 +610,7 @@ func TestResolveSpecialBuiltinNameGuard(t *testing.T) {
 func TestResolveSpecialBuiltinNamePropagatesStrType(t *testing.T) {
 	src := "x = __name__\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -473,7 +625,7 @@ func TestResolveSpecialBuiltinNamePropagatesStrType(t *testing.T) {
 func TestResolveDictLiteralTraversal(t *testing.T) {
 	src := "base = 1\ndef sq(x):\n    return x\ndef sin(x):\n    return x\ndata = {\"name\": base, \"root\": sq(16), \"sine\": sin(0)}\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -488,7 +640,7 @@ func TestResolveDictLiteralTraversal(t *testing.T) {
 func TestResolveListAppendNoUndefinedAttributeAndPropagatesElementType(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\nxs = []\nxs.append(Foo())\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
@@ -503,7 +655,7 @@ func TestResolveListAppendNoUndefinedAttributeAndPropagatesElementType(t *testin
 func TestResolveListAppendBuildsUnionElementType(t *testing.T) {
 	src := "class Foo:\n    pass\n\nclass Bar:\n    pass\n\nxs = []\nxs.append(Foo())\nxs.append(Bar())\n"
 	tree := parser.New(src).Parse()
-	global, defs := BuildScopes(tree)
+	global, defs := BuildScopes(tree, src)
 	_, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)

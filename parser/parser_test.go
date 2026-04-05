@@ -274,6 +274,124 @@ func TestParseIfElifAsNestedIfBlock(t *testing.T) {
 	}
 }
 
+func TestParseTryExceptElseFinallyShape(t *testing.T) {
+	p, tree := parseSource(t, "try:\n    risky\nexcept ValueError as err:\n    handle\nelse:\n    ok\nfinally:\n    cleanup\n")
+	requireNoParseErrors(t, p)
+
+	tryNode := moduleStmt(t, tree, 0)
+	requireKind(t, tree, tryNode, a.NodeTry)
+	body, excepts, elseBlock, finallyBlock := tree.TryParts(tryNode)
+	requireKind(t, tree, body, a.NodeBlock)
+	if len(excepts) != 1 {
+		t.Fatalf("unexpected except count: %d", len(excepts))
+	}
+	requireKind(t, tree, excepts[0], a.NodeExcept)
+	excType, asName, exceptBody := tree.ExceptParts(excepts[0])
+	if got := nameText(t, tree, excType); got != "ValueError" {
+		t.Fatalf("unexpected except type: got %q", got)
+	}
+	if got := nameText(t, tree, asName); got != "err" {
+		t.Fatalf("unexpected except alias: got %q", got)
+	}
+	requireKind(t, tree, exceptBody, a.NodeBlock)
+	requireKind(t, tree, elseBlock, a.NodeBlock)
+	requireKind(t, tree, finallyBlock, a.NodeBlock)
+}
+
+func TestParseTryFinallyShape(t *testing.T) {
+	p, tree := parseSource(t, "try:\n    risky\nfinally:\n    cleanup\n")
+	requireNoParseErrors(t, p)
+
+	tryNode := moduleStmt(t, tree, 0)
+	requireKind(t, tree, tryNode, a.NodeTry)
+	body, excepts, elseBlock, finallyBlock := tree.TryParts(tryNode)
+	requireKind(t, tree, body, a.NodeBlock)
+	if len(excepts) != 0 {
+		t.Fatalf("unexpected except count: %d", len(excepts))
+	}
+	if elseBlock != a.NoNode {
+		t.Fatalf("unexpected else block: %v", elseBlock)
+	}
+	requireKind(t, tree, finallyBlock, a.NodeBlock)
+}
+
+func TestParsePassStatement(t *testing.T) {
+	p, tree := parseSource(t, "pass\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodePass)
+}
+
+func TestParseIfBodyPassStatement(t *testing.T) {
+	p, tree := parseSource(t, "if x:\n    pass\n")
+	requireNoParseErrors(t, p)
+
+	ifNode := moduleStmt(t, tree, 0)
+	requireKind(t, tree, ifNode, a.NodeIf)
+	ifKids := requireChildCount(t, tree, ifNode, 2)
+	body := ifKids[1]
+	requireKind(t, tree, body, a.NodeBlock)
+	bodyStmt := requireChildCount(t, tree, body, 1)[0]
+	requireKind(t, tree, bodyStmt, a.NodePass)
+}
+
+func TestParseTryExceptPassStatement(t *testing.T) {
+	p, tree := parseSource(t, "try:\n    risky\nexcept TypeError:\n    pass\n")
+	requireNoParseErrors(t, p)
+
+	tryNode := moduleStmt(t, tree, 0)
+	requireKind(t, tree, tryNode, a.NodeTry)
+	_, excepts, _, _ := tree.TryParts(tryNode)
+	if len(excepts) != 1 {
+		t.Fatalf("unexpected except count: %d", len(excepts))
+	}
+	_, _, body := tree.ExceptParts(excepts[0])
+	requireKind(t, tree, body, a.NodeBlock)
+	bodyStmt := requireChildCount(t, tree, body, 1)[0]
+	requireKind(t, tree, bodyStmt, a.NodePass)
+}
+
+func TestParseListComprehensionShape(t *testing.T) {
+	p, tree := parseSource(t, "[x for x in xs if x]\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeExprStmt)
+	comp := requireChildCount(t, tree, stmt, 1)[0]
+	requireKind(t, tree, comp, a.NodeListComp)
+	expr, clauses := tree.ListCompParts(comp)
+	if got := nameText(t, tree, expr); got != "x" {
+		t.Fatalf("unexpected list comp expr: got %q", got)
+	}
+	if len(clauses) != 1 {
+		t.Fatalf("unexpected clause count: %d", len(clauses))
+	}
+	target, iter, filters := tree.ComprehensionParts(clauses[0])
+	if got := nameText(t, tree, target); got != "x" {
+		t.Fatalf("unexpected target: got %q", got)
+	}
+	if got := nameText(t, tree, iter); got != "xs" {
+		t.Fatalf("unexpected iter: got %q", got)
+	}
+	if len(filters) != 1 || nameText(t, tree, filters[0]) != "x" {
+		t.Fatalf("unexpected filters: %+v", filters)
+	}
+}
+
+func TestParseListComprehensionMultipleClauses(t *testing.T) {
+	p, tree := parseSource(t, "[(x, y) for x in xs for y in ys]\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	comp := requireChildCount(t, tree, stmt, 1)[0]
+	requireKind(t, tree, comp, a.NodeListComp)
+	_, clauses := tree.ListCompParts(comp)
+	if len(clauses) != 2 {
+		t.Fatalf("unexpected clause count: %d", len(clauses))
+	}
+}
+
 func TestParseClassBasesAndDocstring(t *testing.T) {
 	p, tree := parseSource(t, "class C(A, B):\n    \"doc\"\n    x\n")
 	requireNoParseErrors(t, p)

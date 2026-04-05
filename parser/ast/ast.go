@@ -124,6 +124,7 @@ const (
 	NodeFor
 	NodeWhile
 	NodeReturn
+	NodePass
 	NodeBreak
 	NodeContinue
 	NodeFunctionDef
@@ -143,6 +144,10 @@ const (
 	NodeKeywordArg
 	NodeDict
 	NodeAnnAssign
+	NodeTry
+	NodeExcept
+	NodeListComp
+	NodeComprehension
 )
 
 const NoNode NodeID = 0
