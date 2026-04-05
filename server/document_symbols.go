@@ -119,6 +119,9 @@ func buildDocumentSymbols(doc *Document) []lsp.DocumentSymbol {
 				result = append(result, assignmentSymbols(doc, stmt, target)...)
 				value = target
 			}
+		case ast.NodeAnnAssign:
+			target, _, _ := doc.Tree.AnnAssignParts(stmt)
+			result = append(result, assignmentSymbols(doc, stmt, target)...)
 		}
 	}
 	return result
