@@ -26,9 +26,11 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 
 ### Parser — recursive descent + Pratt over an arena-backed AST
 
-- Assignments, augmented assignments, `if` / `elif` / `else`, `for`, `while`, `def`, `class`, `return`, `break`, `continue`
+- Assignments, augmented assignments, annotated assignments, `if` / `elif` / `else`, `for`, `while`, `def`, `class`, `return`, `break`, `continue`, `pass`
+- `try` / `except` / `else` / `finally`
 - `import` / `from ... import ...`, including relative `from` imports
-- Function calls, keyword arguments, attribute access, list/tuple/dict literals, subscripts, and slices
+- Function calls, keyword arguments, attribute access, list/tuple/dict literals, list comprehensions, subscripts, and slices
+- Parameter annotations, return annotations, and variable annotations
 - Bare tuple returns like `return a, b`
 - Subscript assignment targets like `a[0] = x`
 - Best-effort error recovery instead of stopping at the first syntax error
@@ -41,8 +43,10 @@ The AST is stored in a compact arena with stable `NodeID`s, contiguous node stor
 - Builtin constants, builtin types, and a useful slice of builtin functions
 - Import binding against indexed workspace modules, including relative `from` imports
 - Class inheritance, member promotion, and `self.x = ...` instance attribute discovery
-- Lightweight explicit type model with inferred instances, unions, list/tuple/subscript element typing, and `list.append(...)` mutation typing
-- Typed hover and smarter completion built on top of inferred values
+- Except-alias binding and comprehension-local scope handling
+- Lightweight explicit type model with inferred instances, unions, annotation-driven list/tuple/dict/set typing, subscript result typing, and `list.append(...)` mutation typing
+- Captures default values for parameters and simple assignments so hover/signature help can surface them
+- Typed hover, signature help, and smarter completion built on top of inferred values
 
 **Catches today:**
 - Undefined names
@@ -61,21 +65,25 @@ The AST is stored in a compact arena with stable `NodeID`s, contiguous node stor
 - Publishes diagnostics (syntax + semantic errors)
 - **Go-to-definition**
 - **Hover**
+- **Completion**
+- **Signature help**
+- **Semantic tokens**
 - **References**
 - **Rename** + **prepare rename**
 - **Document symbols** + **workspace symbols**
-- **Workspace-aware completion**
 - Startup indexing progress via LSP work-done progress
 
-Server-side analysis stores AST, definitions, resolved symbols, semantic diagnostics, and inferred types. Re-analysis is debounced on document changes, and dependent modules are refreshed through the workspace graph.
+Server-side analysis stores AST, definitions, resolved symbols, semantic diagnostics, inferred types, and indexed lookup structures for fast editor features. Re-analysis is debounced on document changes, and dependent modules are refreshed through the workspace graph.
 
 ### Workspace Indexing
 
-- Indexes Python modules under the workspace root at startup
-- Builds semantic snapshots for every indexed module
+- Indexes Python modules under the workspace root after `initialized`
+- Builds semantic snapshots in parallel, prioritizing files near the active workspace area
 - Extracts exports and import dependencies
 - Tracks reverse dependencies so dependents can be refreshed on change
+- Uses LRU module snapshot caching to bound resident analysis state
 - Prefers open-buffer contents over on-disk files
+- Discovers Python environment search roots and lazily resolves external modules outside the workspace when imports require them
 
 ### JSON-RPC Transport
 
@@ -89,55 +97,27 @@ Server-side analysis stores AST, definitions, resolved symbols, semantic diagnos
 - JSON-RPC transport/frame tests are consolidated in `jsonrpc/jsonrpc_test.go`
 - Parser coverage lives in `parser/parser_test.go`
 - Semantic analysis coverage lives in `analyser/analyser_test.go`
-- Workspace/indexing/LSP behavior is covered in `server/*_test.go`
+- LSP/editor behavior is covered in focused suites such as `server/signature_help_test.go`, `server/semantic_tokens_test.go`, `server/references_test.go`, `server/rename_test.go`, and `server/prepare_rename_test.go`
+- Workspace/import/indexing behavior is covered in `server/imports_test.go`, `server/workspace_test.go`, and `server/lru_test.go`
+- Indexed lookup behavior is covered in `server/locate/posindex_test.go`
 - CI runs `go build ./...` and `go test ./...`
 
 ### Performance
 
-- The AST is now arena-backed: nodes live in a contiguous slice and carry stable `NodeID`s, while names/strings/numbers are interned in side tables
-- This reduces allocation pressure and improves cache locality in parse, lookup, and semantic analysis passes
-- Benchmark coverage in `server/benchmark_test.go` includes startup, analysis at multiple file sizes, definition/hover lookup, throughput-style repeated analysis, parser-only cost, and full-pipeline cost
-
-Current benchmark snapshot (`benchstat test_results_pointers.txt test_results_arena.txt`):
-
-```text
-goos: darwin
-goarch: arm64
-pkg: rahu/server
-cpu: Apple M2 Pro
-                            │ test_results_pointers.txt │        test_results_arena.txt         │
-                            │          sec/op           │    sec/op     vs base                 │
-ServerStartup-10                           16.84n ± ∞ ¹   16.67n ± ∞ ¹        ~ (p=0.400 n=3) ²
-AnalysisSmall-10                           84.09µ ± ∞ ¹   55.19µ ± ∞ ¹        ~ (p=0.100 n=3) ²
-AnalysisMedium-10                          183.5µ ± ∞ ¹   116.9µ ± ∞ ¹        ~ (p=0.100 n=3) ²
-AnalysisLarge-10                           2.151m ± ∞ ¹   1.849m ± ∞ ¹        ~ (p=0.100 n=3) ²
-AnalysisExtraLarge-10                      8.795m ± ∞ ¹   7.954m ± ∞ ¹        ~ (p=0.100 n=3) ²
-DefinitionLookup-10                       205.30n ± ∞ ¹   30.35n ± ∞ ¹        ~ (p=0.100 n=3) ²
-HoverLookup-10                            207.10n ± ∞ ¹   34.14n ± ∞ ¹        ~ (p=0.100 n=3) ²
-ThroughputAnalysisSmall-10                 86.34µ ± ∞ ¹   74.49µ ± ∞ ¹        ~ (p=0.100 n=3) ²
-ThroughputAnalysisMedium-10                187.5µ ± ∞ ¹   174.6µ ± ∞ ¹        ~ (p=0.100 n=3) ²
-ThroughputAnalysisLarge-10                 2.163m ± ∞ ¹   2.345m ± ∞ ¹        ~ (p=0.100 n=3) ²
-DefinitionLookupAll-10                    12.169µ ± ∞ ¹   1.362µ ± ∞ ¹        ~ (p=0.100 n=3) ²
-HoverLookupAll-10                         12.241µ ± ∞ ¹   1.416µ ± ∞ ¹        ~ (p=0.100 n=3) ²
-ColdStartAnalysis-10                       86.74µ ± ∞ ¹   86.25µ ± ∞ ¹        ~ (p=0.700 n=3) ²
-ParserOnly-10                              1.238m ± ∞ ¹   1.474m ± ∞ ¹        ~ (p=0.700 n=3) ²
-FullPipeline-10                            2.299m ± ∞ ¹   2.574m ± ∞ ¹        ~ (p=0.100 n=3) ²
-geomean                                    57.81µ         31.62µ        -45.31%
-
-¹ need >= 6 samples for confidence interval at level 0.95
-² need >= 4 samples to detect a difference at alpha level 0.05
-```
-
-Takeaway: the arena-backed AST is directionally faster overall, with a `-45.31%` geomean on this benchmark set and especially large wins in definition/hover lookup paths. These numbers are still preliminary because each case has only `n=3`, so they should be read as indicative rather than statistically conclusive.
+- The AST is arena-backed: nodes live in a contiguous slice and carry stable `NodeID`s, while names/strings/numbers are interned in side tables
+- Document analysis builds an indexed position map for fast symbol lookup at cursor positions
+- Cross-file references are served from a reference index instead of rescanning every document
+- Workspace analysis uses module snapshots, export hashing, and LRU caching to reduce unnecessary rebuilds and bound resident state
+- Benchmark coverage in `server/benchmark_test.go` includes startup, single-file analysis, definition/hover lookup, completion, workspace symbols, module rebuilds, and cache-pressure scenarios
 
 ## What's Missing
 
 ### Language features
 
 - Set literals
-- `try` / `except` / `finally`
 - `*args` / `**kwargs`
-- `with`, `lambda`, comprehensions, decorators
+- `with`, `lambda`, decorators
+- Dict/set/generator comprehensions
 - `async` / `await`, `yield`
 - Bitwise operators
 - String escape sequences
@@ -145,28 +125,25 @@ Takeaway: the arena-backed AST is directionally faster overall, with a `-45.31%`
 
 ### Typing and semantics
 
-- Return type inference
-- Dict and set typing
+- Deeper return type inference beyond explicit annotations and straightforward flows
+- More literal inference for dicts and sets
 - More mutation typing beyond `list.append(...)`
 - Maybe-undefined member diagnostics on unions
-- Annotation support
-- `typing`-aware behavior
-- Stdlib and external package resolution outside the workspace root
+- Richer `typing` module awareness beyond builtin generic forms like `list[int]` and `dict[str, int]`
+- More complete stdlib modeling and symbol metadata for external packages
 
 ### LSP features
 
-- Semantic tokens
-- Signature help
 - Code actions / formatting
-- Attribute/member references
-- Attribute/member rename
+- More context-aware completion ranking and filtering
+- Richer semantic token coverage and modifiers
 
 ### Performance and infrastructure
 
 - No incremental parsing
 - No AST reuse across edits
 - No structured logging
-- No external environment indexing yet
+- External module discovery is lazy rather than fully pre-indexed
 
 ### Testing depth
 
@@ -181,17 +158,13 @@ rahu/
 ├── cmd/lsp/           # Entry point — stdin/stdout -> server
 ├── jsonrpc/           # JSON-RPC 2.0 transport layer
 ├── lsp/               # LSP protocol types
-├── server/            # LSP server, document model, handlers
-│   └── locate/        # Go-to-definition lookup logic
+├── server/            # LSP server, indexing, handlers, caching
+│   └── locate/        # Cursor-to-symbol lookup logic
 ├── source/            # LineIndex (byte offset <-> line/column)
 ├── lexer/             # Python tokenizer
 ├── parser/            # Recursive descent + Pratt, AST
-│   └── ast/           # AST node definitions
-├── analyser/          # Scope builder, name resolver, class promotion
-│   ├── scopes.go      # Scope chain and symbol tables
-│   ├── resolver.go    # Name resolution
-│   ├── promoter.go    # Inheritance member promotion
-│   └── binder.go      # Attribute binding
+│   └── ast/           # AST node definitions and helpers
+├── analyser/          # Scope builder, resolver, binder, promoter, types
 ├── utils/             # Debug tools
 │   └── dump/          # CLI for dumping analysis output
 └── notes/             # Project notes and planning docs
@@ -203,10 +176,13 @@ At startup:
 
 ```
 initialize
-  -> index Python modules under workspace root
-  -> build semantic snapshots
+  -> record workspace root + client capabilities
+initialized
+  -> index Python modules under workspace root in background
+  -> build semantic snapshots in parallel
   -> extract exports + import dependencies
   -> build reverse dependency graph
+  -> re-analyze open documents against the completed workspace index
 ```
 
 On edit:
@@ -216,6 +192,7 @@ editor keystroke
   -> textDocument/didChange
   -> update Document text + line index
   -> rebuild changed module
+  -> skip dependent rebuilds when export signatures are unchanged
   -> refresh affected dependents
   -> publish diagnostics
 ```
@@ -231,6 +208,7 @@ source text
   -> bind attributes
   -> promote class members
   -> infer lightweight types
+  -> build lookup/reference indexes
   -> store snapshot / document analysis
 ```
 
@@ -238,7 +216,7 @@ Everything still runs on byte offsets internally. Line/column is only used for p
 
 ## Sample Output
 
-The debug dump below is older than the current implementation. It is still useful for showing the class/member model, but it does not reflect the newer workspace import support, references/rename/completion work, or the lightweight type system.
+The debug dump below is intentionally a low-level example of the analyser internals. It still shows the class/member model well, but it does not try to demonstrate newer editor-facing features like signature help, semantic tokens, external-module resolution, or cached workspace indexing.
 
 ```python
 class Animal:
