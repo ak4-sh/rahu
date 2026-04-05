@@ -24,11 +24,17 @@ func (p *Parser) parseStatement() a.NodeID {
 	case l.IF:
 		return p.parseIf()
 
-	case l.NAME, l.NUMBER, l.STRING, l.LPAR, l.LSQB, l.MINUS, l.PLUS, l.NOT, l.TRUE, l.FALSE, l.NONE:
+	case l.NAME, l.NUMBER, l.STRING, l.LPAR, l.LSQB, l.LBRACE, l.MINUS, l.PLUS, l.NOT, l.TRUE, l.FALSE, l.NONE:
 		return p.dispatchExprParse()
 
 	case l.DEF:
 		return p.parseFunc()
+
+	case l.IMPORT:
+		return p.parseImport()
+
+	case l.FROM:
+		return p.parseFromImport()
 
 	case l.BREAK:
 		start := p.current.Start
@@ -76,14 +82,14 @@ func (p *Parser) dispatchExprParse() a.NodeID {
 
 	if p.current.Type == l.EQUAL || p.current.Type == l.COMMA {
 		switch p.tree.Nodes[expr].Kind {
-		case a.NodeName, a.NodeAttribute, a.NodeTuple, a.NodeList:
+		case a.NodeName, a.NodeAttribute, a.NodeTuple, a.NodeList, a.NodeSubScript:
 			return p.parseAssignmentFromFirst(start, expr)
 		}
 	}
 
 	if isAugAssignOp(p.current.Type) {
 		switch p.tree.Nodes[expr].Kind {
-		case a.NodeName, a.NodeAttribute:
+		case a.NodeName, a.NodeAttribute, a.NodeSubScript:
 			return p.parseAugAssignFromFirst(start, expr)
 		}
 	}

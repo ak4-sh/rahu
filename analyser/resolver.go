@@ -1,6 +1,10 @@
 package analyser
 
-import "rahu/parser/ast"
+import (
+	"strings"
+
+	"rahu/parser/ast"
+)
 
 type NameContext int
 
@@ -28,7 +32,7 @@ type Resolver struct {
 	ResolvedAttr map[ast.NodeID]*Symbol
 	PendingAttrs []PendingAttr
 	selfName     string
-	ExprTypes    map[ast.NodeID]*Symbol
+	ExprTypes    map[ast.NodeID]*Type
 }
 
 type SemanticError struct {
@@ -60,7 +64,7 @@ func newResolver(tree *ast.AST, global *Scope) *Resolver {
 		PendingAttrs: make([]PendingAttr, 0, attrCap),
 		ResolvedAttr: make(map[ast.NodeID]*Symbol, attrCap),
 		selfName:     "",
-		ExprTypes:    make(map[ast.NodeID]*Symbol, exprTypeCap),
+		ExprTypes:    make(map[ast.NodeID]*Type, exprTypeCap),
 	}
 }
 
@@ -103,15 +107,28 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		}
 
 		r.visitExpr(value, Read)
-		class := r.ExprTypes[value]
+		valueType := r.ExprTypes[value]
 
 		for target := r.tree.Nodes[value].NextSibling; target != ast.NoNode; target = r.tree.Nodes[target].NextSibling {
 			r.visitExpr(target, Write)
 
-			if r.tree.Node(target).Kind == ast.NodeName && class != nil {
+			if r.tree.Node(target).Kind == ast.NodeName {
 				sym := r.Resolved[target]
 				if sym != nil {
-					sym.InstanceOf = class
+					if !IsUnknownType(valueType) {
+						if sym.Inferred != nil && !IsUnknownType(sym.Inferred) {
+							sym.Inferred = UnionType(sym.Inferred, valueType)
+						} else {
+							sym.Inferred = valueType
+						}
+						if valueType.Kind == TypeInstance && valueType.Symbol != nil {
+							sym.InstanceOf = valueType.Symbol
+						} else if valueType.Kind == TypeUnion {
+							sym.InstanceOf = nil
+						} else {
+							sym.InstanceOf = nil
+						}
+					}
 				}
 			}
 		}
@@ -298,6 +315,8 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 
 	case ast.NodeContinue:
 		r.checkLoopContext(r.tree.RangeOf(stmt), "continue")
+
+	case ast.NodeImport, ast.NodeFromImport:
 	}
 }
 
@@ -305,6 +324,20 @@ func (r *Resolver) checkLoopContext(pos ast.Range, keyword string) {
 	if r.loopDepth == 0 {
 		r.error(pos, keyword+" outside loop")
 	}
+}
+
+func (r *Resolver) setExprType(id ast.NodeID, t *Type) {
+	if id == ast.NoNode || IsUnknownType(t) {
+		return
+	}
+	r.ExprTypes[id] = t
+}
+
+func (r *Resolver) exprType(id ast.NodeID) *Type {
+	if id == ast.NoNode {
+		return nil
+	}
+	return r.ExprTypes[id]
 }
 
 func (r *Resolver) resolveName(id ast.NodeID, ctx NameContext) {
@@ -338,9 +371,30 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 	switch r.tree.Node(expr).Kind {
 	case ast.NodeName:
 		r.resolveName(expr, ctx)
+		if ctx == Read {
+			r.setExprType(expr, SymbolType(r.Resolved[expr]))
+		}
 		return
 
-	case ast.NodeNumber, ast.NodeString, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+	case ast.NodeNumber:
+		if lit, ok := r.tree.NumberText(expr); ok {
+			if strings.ContainsAny(lit, ".eE") {
+				r.setExprType(expr, BuiltinType(BuiltinSymbol("float")))
+			} else {
+				r.setExprType(expr, BuiltinType(BuiltinSymbol("int")))
+			}
+		}
+		return
+
+	case ast.NodeString:
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+		return
+
+	case ast.NodeBoolean:
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("bool")))
+		return
+
+	case ast.NodeNone, ast.NodeErrExp:
 		return
 
 	case ast.NodeBinOp:
@@ -379,13 +433,69 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		if r.tree.Node(funcID).Kind == ast.NodeName {
 			sym := r.Resolved[funcID]
 			if sym != nil && sym.Kind == SymClass {
-				r.ExprTypes[expr] = sym
+				r.setExprType(expr, InstanceType(sym))
+			} else if sym != nil && sym.Kind == SymType {
+				r.setExprType(expr, BuiltinType(sym))
+			}
+		} else if r.tree.Node(funcID).Kind == ast.NodeAttribute {
+			base := r.tree.ChildAt(funcID, 0)
+			attr := r.tree.ChildAt(funcID, 1)
+			attrName, _ := r.tree.NameText(attr)
+			if attrName == "append" {
+				baseType := r.exprType(base)
+				arg := r.tree.Node(funcID).NextSibling
+				argType := r.exprType(arg)
+				if baseType != nil && baseType.Kind == TypeList && !IsUnknownType(argType) {
+					baseType.Elem = JoinTypes(baseType.Elem, argType)
+					if r.tree.Node(base).Kind == ast.NodeName {
+						if baseSym := r.Resolved[base]; baseSym != nil {
+							baseSym.Inferred = baseType
+						}
+					}
+				}
 			}
 		}
 
 	case ast.NodeTuple, ast.NodeList:
+		itemTypes := make([]*Type, 0)
 		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
 			r.visitExpr(child, ctx)
+			itemTypes = append(itemTypes, r.exprType(child))
+		}
+		if r.tree.Node(expr).Kind == ast.NodeList {
+			elemType := UnknownType()
+			if len(itemTypes) > 0 {
+				elemType = JoinTypes(itemTypes...)
+			}
+			r.setExprType(expr, ListType(elemType))
+		} else {
+			r.setExprType(expr, TupleType(itemTypes...))
+		}
+
+	case ast.NodeDict:
+		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
+			r.visitExpr(child, Read)
+		}
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("dict")))
+
+	case ast.NodeKeywordArg:
+		r.visitExpr(r.tree.ChildAt(expr, 1), Read)
+
+	case ast.NodeSubScript:
+		base := r.tree.Nodes[expr].FirstChild
+		index := ast.NoNode
+		if base != ast.NoNode {
+			index = r.tree.Nodes[base].NextSibling
+		}
+		r.visitExpr(base, Read)
+		r.visitExpr(index, Read)
+		if resultType := SubscriptResultType(r.exprType(base)); !IsUnknownType(resultType) {
+			r.setExprType(expr, resultType)
+		}
+
+	case ast.NodeSlice:
+		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
+			r.visitExpr(child, Read)
 		}
 
 	case ast.NodeAttribute:

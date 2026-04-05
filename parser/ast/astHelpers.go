@@ -171,6 +171,38 @@ func (a *AST) ClassParts(id NodeID) (name, bases, body NodeID) {
 	return name, bases, body
 }
 
+// AliasParts returns the target and optional alias children of an alias node.
+func (a *AST) AliasParts(id NodeID) (target, alias NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeAlias {
+		return NoNode, NoNode
+	}
+
+	target = a.Nodes[id].FirstChild
+	if target != NoNode {
+		alias = a.Nodes[target].NextSibling
+	}
+
+	return target, alias
+}
+
+// FromImportParts returns the module path and imported aliases.
+func (a *AST) FromImportParts(id NodeID) (module NodeID, aliases []NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeFromImport {
+		return NoNode, nil
+	}
+
+	first := a.Nodes[id].FirstChild
+	if first != NoNode && a.Nodes[first].Kind != NodeAlias {
+		module = first
+		first = a.Nodes[first].NextSibling
+	}
+	for child := first; child != NoNode; child = a.Nodes[child].NextSibling {
+		aliases = append(aliases, child)
+	}
+
+	return module, aliases
+}
+
 // DocString fetches the docstring stored in a node's Data field.
 func (a *AST) DocString(id NodeID) (string, bool) {
 	if id == NoNode {

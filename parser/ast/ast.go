@@ -136,6 +136,12 @@ const (
 	NodeBaseList
 	NodeErrStmt
 	NodeParam
+	NodeImport
+	NodeFromImport
+	NodeAlias
+	NodeSlice
+	NodeKeywordArg
+	NodeDict
 )
 
 const NoNode NodeID = 0

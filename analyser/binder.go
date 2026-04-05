@@ -36,10 +36,19 @@ func (r *Resolver) BindMembers() {
 			continue
 		}
 
-		if baseSym.InstanceOf != nil {
-			class := baseSym.InstanceOf
+		if baseType := r.exprType(base); baseType != nil {
+			sym, ok := LookupMemberOnType(baseType, attrName)
+			if !ok {
+				r.error(r.tree.RangeOf(attrNameNode), "undefined attribute: "+attrName)
+				continue
+			}
 
-			sym, ok := class.Members.Lookup(attrName)
+			r.ResolvedAttr[attrNode] = sym
+			continue
+		}
+
+		if baseSym.InstanceOf != nil {
+			sym, ok := baseSym.InstanceOf.Members.Lookup(attrName)
 			if !ok {
 				r.error(r.tree.RangeOf(attrNameNode), "undefined attribute: "+attrName)
 				continue

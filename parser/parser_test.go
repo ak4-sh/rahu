@@ -256,6 +256,51 @@ func TestParseAssignShape(t *testing.T) {
 	}
 }
 
+func TestParseSubscriptAssignmentShape(t *testing.T) {
+	p, tree := parseSource(t, "a[0] = x\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+	assignKids := requireChildCount(t, tree, assign, 2)
+	if got := nameText(t, tree, assignKids[0]); got != "x" {
+		t.Fatalf("unexpected assign value: got %q", got)
+	}
+	requireKind(t, tree, assignKids[1], a.NodeSubScript)
+	targetKids := requireChildCount(t, tree, assignKids[1], 2)
+	if got := nameText(t, tree, targetKids[0]); got != "a" {
+		t.Fatalf("unexpected subscript target base: got %q", got)
+	}
+	if got := numberValue(t, tree, targetKids[1]); got != "0" {
+		t.Fatalf("unexpected subscript target index: got %q", got)
+	}
+}
+
+func TestParseSliceAssignmentShape(t *testing.T) {
+	p, tree := parseSource(t, "a[1:3] = x\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+	assignKids := requireChildCount(t, tree, assign, 2)
+	requireKind(t, tree, assignKids[1], a.NodeSubScript)
+	targetKids := requireChildCount(t, tree, assignKids[1], 2)
+	requireKind(t, tree, targetKids[1], a.NodeSlice)
+}
+
+func TestParseSubscriptAugAssignShape(t *testing.T) {
+	p, tree := parseSource(t, "a[0] += 1\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAugAssign)
+	kids := requireChildCount(t, tree, assign, 2)
+	requireKind(t, tree, kids[0], a.NodeSubScript)
+	if got := numberValue(t, tree, kids[1]); got != "1" {
+		t.Fatalf("unexpected aug assign value: got %q", got)
+	}
+}
+
 func TestParseCallShape(t *testing.T) {
 	p, tree := parseSource(t, "f(x, y)\n")
 	requireNoParseErrors(t, p)
@@ -275,6 +320,61 @@ func TestParseCallShape(t *testing.T) {
 	}
 	if got := nameText(t, tree, callKids[2]); got != "y" {
 		t.Fatalf("unexpected second arg: got %q", got)
+	}
+}
+
+func TestParseCallKeywordArgument(t *testing.T) {
+	p, tree := parseSource(t, "foo(x=myList[3])\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	call := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, call, a.NodeCall)
+	callKids := requireChildCount(t, tree, call, 2)
+	requireKind(t, tree, callKids[1], a.NodeKeywordArg)
+	kwKids := requireChildCount(t, tree, callKids[1], 2)
+	if got := nameText(t, tree, kwKids[0]); got != "x" {
+		t.Fatalf("unexpected keyword name: got %q", got)
+	}
+	requireKind(t, tree, kwKids[1], a.NodeSubScript)
+	subKids := requireChildCount(t, tree, kwKids[1], 2)
+	if got := nameText(t, tree, subKids[0]); got != "myList" {
+		t.Fatalf("unexpected keyword value base: got %q", got)
+	}
+	if got := numberValue(t, tree, subKids[1]); got != "3" {
+		t.Fatalf("unexpected keyword value index: got %q", got)
+	}
+}
+
+func TestParseCallMixedPositionalAndKeywordArgs(t *testing.T) {
+	p, tree := parseSource(t, "foo(a, x=1)\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	call := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, call, a.NodeCall)
+	callKids := requireChildCount(t, tree, call, 3)
+	if got := nameText(t, tree, callKids[1]); got != "a" {
+		t.Fatalf("unexpected positional arg: got %q", got)
+	}
+	requireKind(t, tree, callKids[2], a.NodeKeywordArg)
+}
+
+func TestParseCallKeywordArgErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing keyword value", src: "foo(x=)\n", want: "expected expression after '=' in keyword argument"},
+		{name: "positional after keyword", src: "foo(x=1, y)\n", want: "positional argument follows keyword argument"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
 	}
 }
 
@@ -310,5 +410,501 @@ func TestParseAttributeShape(t *testing.T) {
 	}
 	if got := nameText(t, tree, attrKids[1]); got != "b" {
 		t.Fatalf("unexpected attribute name: got %q", got)
+	}
+}
+
+func TestParseImportSimple(t *testing.T) {
+	p, tree := parseSource(t, "import pkg\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeImport)
+	aliases := requireChildCount(t, tree, stmt, 1)
+	requireKind(t, tree, aliases[0], a.NodeAlias)
+	target, alias := tree.AliasParts(aliases[0])
+	if got := nameText(t, tree, target); got != "pkg" {
+		t.Fatalf("unexpected import target: got %q", got)
+	}
+	if alias != a.NoNode {
+		t.Fatal("did not expect alias for simple import")
+	}
+}
+
+func TestParseImportDottedAndAlias(t *testing.T) {
+	p, tree := parseSource(t, "import pkg.mod as m\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeImport)
+	aliasNode := requireChildCount(t, tree, stmt, 1)[0]
+	target, alias := tree.AliasParts(aliasNode)
+	requireKind(t, tree, target, a.NodeAttribute)
+	targetKids := requireChildCount(t, tree, target, 2)
+	if got := nameText(t, tree, targetKids[0]); got != "pkg" {
+		t.Fatalf("unexpected import base: got %q", got)
+	}
+	if got := nameText(t, tree, targetKids[1]); got != "mod" {
+		t.Fatalf("unexpected import attr: got %q", got)
+	}
+	if got := nameText(t, tree, alias); got != "m" {
+		t.Fatalf("unexpected alias: got %q", got)
+	}
+}
+
+func TestParseImportMultiple(t *testing.T) {
+	p, tree := parseSource(t, "import a, b as c\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeImport)
+	aliases := requireChildCount(t, tree, stmt, 2)
+
+	firstTarget, firstAlias := tree.AliasParts(aliases[0])
+	if got := nameText(t, tree, firstTarget); got != "a" {
+		t.Fatalf("unexpected first target: got %q", got)
+	}
+	if firstAlias != a.NoNode {
+		t.Fatal("did not expect alias for first import")
+	}
+
+	secondTarget, secondAlias := tree.AliasParts(aliases[1])
+	if got := nameText(t, tree, secondTarget); got != "b" {
+		t.Fatalf("unexpected second target: got %q", got)
+	}
+	if got := nameText(t, tree, secondAlias); got != "c" {
+		t.Fatalf("unexpected second alias: got %q", got)
+	}
+}
+
+func TestParseFromImportSimple(t *testing.T) {
+	p, tree := parseSource(t, "from pkg import name\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeFromImport)
+	parts := children(tree, stmt)
+	if got := nameText(t, tree, parts[0]); got != "pkg" {
+		t.Fatalf("unexpected module path: got %q", got)
+	}
+	requireKind(t, tree, parts[1], a.NodeAlias)
+	target, alias := tree.AliasParts(parts[1])
+	if got := nameText(t, tree, target); got != "name" {
+		t.Fatalf("unexpected imported name: got %q", got)
+	}
+	if alias != a.NoNode {
+		t.Fatal("did not expect alias for simple from-import")
+	}
+}
+
+func TestParseFromImportDottedModuleAndAlias(t *testing.T) {
+	p, tree := parseSource(t, "from pkg.mod import name as alias\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeFromImport)
+	parts := children(tree, stmt)
+	requireKind(t, tree, parts[0], a.NodeAttribute)
+	moduleKids := requireChildCount(t, tree, parts[0], 2)
+	if got := nameText(t, tree, moduleKids[0]); got != "pkg" {
+		t.Fatalf("unexpected module base: got %q", got)
+	}
+	if got := nameText(t, tree, moduleKids[1]); got != "mod" {
+		t.Fatalf("unexpected module attr: got %q", got)
+	}
+	target, alias := tree.AliasParts(parts[1])
+	if got := nameText(t, tree, target); got != "name" {
+		t.Fatalf("unexpected imported target: got %q", got)
+	}
+	if got := nameText(t, tree, alias); got != "alias" {
+		t.Fatalf("unexpected imported alias: got %q", got)
+	}
+}
+
+func TestParseFromImportMultiple(t *testing.T) {
+	p, tree := parseSource(t, "from pkg import x, y as z\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeFromImport)
+	parts := children(tree, stmt)
+	if len(parts) != 3 {
+		t.Fatalf("unexpected child count: got %d want 3", len(parts))
+	}
+	firstTarget, firstAlias := tree.AliasParts(parts[1])
+	if got := nameText(t, tree, firstTarget); got != "x" {
+		t.Fatalf("unexpected first imported target: got %q", got)
+	}
+	if firstAlias != a.NoNode {
+		t.Fatal("did not expect alias for first imported name")
+	}
+	secondTarget, secondAlias := tree.AliasParts(parts[2])
+	if got := nameText(t, tree, secondTarget); got != "y" {
+		t.Fatalf("unexpected second imported target: got %q", got)
+	}
+	if got := nameText(t, tree, secondAlias); got != "z" {
+		t.Fatalf("unexpected second imported alias: got %q", got)
+	}
+}
+
+func TestParseRelativeFromImportForms(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		wantDepth uint32
+		wantMod   string
+	}{
+		{name: "dot import", src: "from . import x\n", wantDepth: 1, wantMod: ""},
+		{name: "dot module import", src: "from .mod import x\n", wantDepth: 1, wantMod: "mod"},
+		{name: "parent module import", src: "from ..pkg import x\n", wantDepth: 2, wantMod: "pkg"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+			stmt := moduleStmt(t, tree, 0)
+			requireKind(t, tree, stmt, a.NodeFromImport)
+			if got := tree.Nodes[stmt].Data; got != tt.wantDepth {
+				t.Fatalf("unexpected relative depth: got %d want %d", got, tt.wantDepth)
+			}
+			module, aliases := tree.FromImportParts(stmt)
+			if tt.wantMod == "" {
+				if module != a.NoNode {
+					t.Fatalf("expected no module node, got %s", tree.Nodes[module].Kind)
+				}
+			} else {
+				if got, ok := tree.NameText(module); !ok || got != tt.wantMod {
+					t.Fatalf("unexpected relative module: got %q want %q", got, tt.wantMod)
+				}
+			}
+			if len(aliases) != 1 {
+				t.Fatalf("unexpected alias count: got %d", len(aliases))
+			}
+		})
+	}
+}
+
+func TestParseImportErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing import target", src: "import\n", want: "expected import path"},
+		{name: "missing alias name", src: "import pkg as\n", want: "expected alias name after 'as'"},
+		{name: "missing import keyword", src: "from pkg\n", want: "expected 'import' after module path"},
+		{name: "missing imported name", src: "from pkg import\n", want: "expected imported name"},
+		{name: "missing imported alias name", src: "from pkg import x as\n", want: "expected alias name after 'as'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
+	}
+}
+
+func TestParseSubscriptShape(t *testing.T) {
+	p, tree := parseSource(t, "a[0]\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, exprStmt, a.NodeExprStmt)
+	sub := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, sub, a.NodeSubScript)
+	subKids := requireChildCount(t, tree, sub, 2)
+	if got := nameText(t, tree, subKids[0]); got != "a" {
+		t.Fatalf("unexpected subscript base: got %q", got)
+	}
+	if got := numberValue(t, tree, subKids[1]); got != "0" {
+		t.Fatalf("unexpected subscript index: got %q", got)
+	}
+}
+
+func TestParseCallArgumentSubscript(t *testing.T) {
+	p, tree := parseSource(t, "Foo(bar[0])\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, exprStmt, a.NodeExprStmt)
+	call := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, call, a.NodeCall)
+	callKids := requireChildCount(t, tree, call, 2)
+	if got := nameText(t, tree, callKids[0]); got != "Foo" {
+		t.Fatalf("unexpected callee: got %q", got)
+	}
+	requireKind(t, tree, callKids[1], a.NodeSubScript)
+	argKids := requireChildCount(t, tree, callKids[1], 2)
+	if got := nameText(t, tree, argKids[0]); got != "bar" {
+		t.Fatalf("unexpected arg base: got %q", got)
+	}
+	if got := numberValue(t, tree, argKids[1]); got != "0" {
+		t.Fatalf("unexpected arg index: got %q", got)
+	}
+}
+
+func TestParseChainedSubscriptAttributeCall(t *testing.T) {
+	p, tree := parseSource(t, "foo.bar[0](x)\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, exprStmt, a.NodeExprStmt)
+	call := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, call, a.NodeCall)
+	callKids := requireChildCount(t, tree, call, 2)
+	requireKind(t, tree, callKids[0], a.NodeSubScript)
+	subKids := requireChildCount(t, tree, callKids[0], 2)
+	requireKind(t, tree, subKids[0], a.NodeAttribute)
+	attrKids := requireChildCount(t, tree, subKids[0], 2)
+	if got := nameText(t, tree, attrKids[0]); got != "foo" {
+		t.Fatalf("unexpected attr base: got %q", got)
+	}
+	if got := nameText(t, tree, attrKids[1]); got != "bar" {
+		t.Fatalf("unexpected attr name: got %q", got)
+	}
+	if got := numberValue(t, tree, subKids[1]); got != "0" {
+		t.Fatalf("unexpected chained subscript index: got %q", got)
+	}
+	if got := nameText(t, tree, callKids[1]); got != "x" {
+		t.Fatalf("unexpected call arg: got %q", got)
+	}
+}
+
+func TestParseSubscriptErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing subscript expr", src: "a[]\n", want: "expected expression in subscript"},
+		{name: "missing closing bracket", src: "a[0\n", want: "expected ']' after subscript"},
+		{name: "newline after open bracket", src: "a[\n", want: "expected expression in subscript"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
+	}
+}
+
+func TestParseEmptyDict(t *testing.T) {
+	p, tree := parseSource(t, "{}\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, exprStmt, a.NodeExprStmt)
+	dict := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, dict, a.NodeDict)
+	requireChildCount(t, tree, dict, 0)
+}
+
+func TestParseDictLiteralShape(t *testing.T) {
+	p, tree := parseSource(t, "{\"name\": base, \"root\": sq(16)}\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	dict := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, dict, a.NodeDict)
+	kids := requireChildCount(t, tree, dict, 4)
+	if got := stringValue(t, tree, kids[0]); got != "name" {
+		t.Fatalf("unexpected first key: got %q", got)
+	}
+	if got := nameText(t, tree, kids[1]); got != "base" {
+		t.Fatalf("unexpected first value: got %q", got)
+	}
+	if got := stringValue(t, tree, kids[2]); got != "root" {
+		t.Fatalf("unexpected second key: got %q", got)
+	}
+	requireKind(t, tree, kids[3], a.NodeCall)
+}
+
+func TestParseDictLiteralTrailingComma(t *testing.T) {
+	p, tree := parseSource(t, "{\"a\": 1,}\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	dict := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, dict, a.NodeDict)
+	requireChildCount(t, tree, dict, 2)
+}
+
+func TestParseDictLiteralErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing colon", src: "{\"a\"}\n", want: "expected ':' after dict key"},
+		{name: "missing value", src: "{\"a\":}\n", want: "expected expression for dict value"},
+		{name: "missing close", src: "{\"a\": 1\n", want: "expected '}' after dict literal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
+	}
+}
+
+func TestParseReturnBareTupleValues(t *testing.T) {
+	p, tree := parseSource(t, "def f():\n    return a, b\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	requireKind(t, tree, fn, a.NodeFunctionDef)
+	_, _, body := tree.FunctionParts(fn)
+	ret := requireChildCount(t, tree, body, 1)[0]
+	requireKind(t, tree, ret, a.NodeReturn)
+	tuple := requireChildCount(t, tree, ret, 1)[0]
+	requireKind(t, tree, tuple, a.NodeTuple)
+	tupleKids := requireChildCount(t, tree, tuple, 2)
+	if got := nameText(t, tree, tupleKids[0]); got != "a" {
+		t.Fatalf("unexpected first return tuple item: got %q", got)
+	}
+	if got := nameText(t, tree, tupleKids[1]); got != "b" {
+		t.Fatalf("unexpected second return tuple item: got %q", got)
+	}
+}
+
+func TestParseReturnBareTupleTrailingComma(t *testing.T) {
+	p, tree := parseSource(t, "def f():\n    return a,\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, body := tree.FunctionParts(fn)
+	ret := requireChildCount(t, tree, body, 1)[0]
+	tuple := requireChildCount(t, tree, ret, 1)[0]
+	requireKind(t, tree, tuple, a.NodeTuple)
+	tupleKids := requireChildCount(t, tree, tuple, 1)
+	if got := nameText(t, tree, tupleKids[0]); got != "a" {
+		t.Fatalf("unexpected single return tuple item: got %q", got)
+	}
+}
+
+func TestParseReturnParenthesizedTupleRegression(t *testing.T) {
+	p, tree := parseSource(t, "def f():\n    return (a, b)\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, body := tree.FunctionParts(fn)
+	ret := requireChildCount(t, tree, body, 1)[0]
+	tuple := requireChildCount(t, tree, ret, 1)[0]
+	requireKind(t, tree, tuple, a.NodeTuple)
+	requireChildCount(t, tree, tuple, 2)
+}
+
+func TestParseSliceRange(t *testing.T) {
+	p, tree := parseSource(t, "a[1:3]\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	sub := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, sub, a.NodeSubScript)
+	subKids := requireChildCount(t, tree, sub, 2)
+	if got := nameText(t, tree, subKids[0]); got != "a" {
+		t.Fatalf("unexpected slice base: got %q", got)
+	}
+	requireKind(t, tree, subKids[1], a.NodeSlice)
+	sliceKids := requireChildCount(t, tree, subKids[1], 2)
+	if got := numberValue(t, tree, sliceKids[0]); got != "1" {
+		t.Fatalf("unexpected slice start: got %q", got)
+	}
+	if got := numberValue(t, tree, sliceKids[1]); got != "3" {
+		t.Fatalf("unexpected slice end: got %q", got)
+	}
+}
+
+func TestParseSliceMissingStart(t *testing.T) {
+	p, tree := parseSource(t, "a[:3]\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	sub := requireChildCount(t, tree, exprStmt, 1)[0]
+	subKids := requireChildCount(t, tree, sub, 2)
+	requireKind(t, tree, subKids[1], a.NodeSlice)
+	sliceKids := requireChildCount(t, tree, subKids[1], 1)
+	if got := numberValue(t, tree, sliceKids[0]); got != "3" {
+		t.Fatalf("unexpected slice end: got %q", got)
+	}
+}
+
+func TestParseSliceMissingEnd(t *testing.T) {
+	p, tree := parseSource(t, "a[1:]\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	sub := requireChildCount(t, tree, exprStmt, 1)[0]
+	subKids := requireChildCount(t, tree, sub, 2)
+	requireKind(t, tree, subKids[1], a.NodeSlice)
+	sliceKids := requireChildCount(t, tree, subKids[1], 1)
+	if got := numberValue(t, tree, sliceKids[0]); got != "1" {
+		t.Fatalf("unexpected slice start: got %q", got)
+	}
+}
+
+func TestParseSliceFull(t *testing.T) {
+	p, tree := parseSource(t, "a[:]\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	sub := requireChildCount(t, tree, exprStmt, 1)[0]
+	subKids := requireChildCount(t, tree, sub, 2)
+	requireKind(t, tree, subKids[1], a.NodeSlice)
+	requireChildCount(t, tree, subKids[1], 0)
+}
+
+func TestParseCallArgumentSlice(t *testing.T) {
+	p, tree := parseSource(t, "Foo(bar[1:3])\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	call := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, call, a.NodeCall)
+	callKids := requireChildCount(t, tree, call, 2)
+	requireKind(t, tree, callKids[1], a.NodeSubScript)
+	subKids := requireChildCount(t, tree, callKids[1], 2)
+	if got := nameText(t, tree, subKids[0]); got != "bar" {
+		t.Fatalf("unexpected slice arg base: got %q", got)
+	}
+	requireKind(t, tree, subKids[1], a.NodeSlice)
+}
+
+func TestParseSliceChainedPostfix(t *testing.T) {
+	p, tree := parseSource(t, "foo.bar[1:3](x)\n")
+	requireNoParseErrors(t, p)
+
+	exprStmt := moduleStmt(t, tree, 0)
+	call := requireChildCount(t, tree, exprStmt, 1)[0]
+	requireKind(t, tree, call, a.NodeCall)
+	callKids := requireChildCount(t, tree, call, 2)
+	requireKind(t, tree, callKids[0], a.NodeSubScript)
+	subKids := requireChildCount(t, tree, callKids[0], 2)
+	requireKind(t, tree, subKids[0], a.NodeAttribute)
+	requireKind(t, tree, subKids[1], a.NodeSlice)
+	if got := nameText(t, tree, callKids[1]); got != "x" {
+		t.Fatalf("unexpected chained call arg: got %q", got)
+	}
+}
+
+func TestParseSliceErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing end expression", src: "a[1:\n", want: "expected expression after ':' in slice"},
+		{name: "missing both with newline", src: "a[:\n", want: "expected expression after ':' in slice"},
+		{name: "step slice unsupported", src: "a[1:2:3]\n", want: "slice step not supported"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
 	}
 }
