@@ -36,6 +36,13 @@ type WorkDoneProgressBegin struct {
 	Percentage  *int   `json:"percentage,omitempty"`
 }
 
+type WorkDoneProgressReport struct {
+	Kind        string  `json:"kind"` // Always "report"
+	Message     string  `json:"message,omitempty"`
+	Percentage  *uint32 `json:"percentage,omitempty"`
+	Cancellable bool    `json:"cancellable,omitempty"`
+}
+
 type WorkDoneProgressEnd struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message,omitempty"`

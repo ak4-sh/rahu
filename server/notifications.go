@@ -40,14 +40,31 @@ func (s *Server) endWorkspaceIndexingProgress() {
 	if s.conn == nil {
 		return
 	}
-	s.mu.RLock()
-	count := len(s.moduleSnapshotsByName)
-	s.mu.RUnlock()
+	s.snapshotsMu.RLock()
+	s.snapshotsMu.RUnlock()
+	s.indexMu.RLock()
+	count := len(s.modulesByName)
+	s.indexMu.RUnlock()
 	_ = s.conn.Notify("$/progress", lsp.ProgressParams{
 		Token: indexingProgressToken(),
 		Value: lsp.WorkDoneProgressEnd{
 			Kind:    "end",
 			Message: fmt.Sprintf("Finished indexing %d Python files", count),
+		},
+	})
+}
+
+func (s *Server) reportIndexingProgress(current, total int) {
+	if s.conn == nil || total == 0 {
+		return
+	}
+	percentage := uint32((current * 100) / total)
+	_ = s.conn.Notify("$/progress", lsp.ProgressParams{
+		Token: indexingProgressToken(),
+		Value: lsp.WorkDoneProgressReport{
+			Kind:       "report",
+			Message:    fmt.Sprintf("Indexed %d/%d files", current, total),
+			Percentage: &percentage,
 		},
 	})
 }

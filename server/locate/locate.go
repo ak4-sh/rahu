@@ -25,7 +25,18 @@ const (
 	locateAttrOnly
 )
 
+// LocateAtPos finds the node at pos using linear tree traversal.
+// Prefer LocateAtPosIndexed when a PositionIndex is available.
 func LocateAtPos(tree *ast.AST, pos int) Result {
+	return locateAtPos(tree, pos, locateAny)
+}
+
+// LocateAtPosIndexed finds the node at pos using the pre-built index for O(log n) lookup.
+// Falls back to linear traversal if index is nil.
+func LocateAtPosIndexed(tree *ast.AST, pos int, index *PositionIndex) Result {
+	if index != nil {
+		return index.Lookup(pos)
+	}
 	return locateAtPos(tree, pos, locateAny)
 }
 

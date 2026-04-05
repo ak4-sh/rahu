@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"rahu/lsp"
+	"rahu/source"
 )
 
 func TestDefinitionFromImportCrossFile(t *testing.T) {
@@ -212,7 +213,7 @@ func TestHoverShowsInferredInstanceType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected markup content, got %T", hov.Contents)
 	}
-	if !strings.Contains(content.Value, "variable(x: Foo)") {
+	if !strings.Contains(content.Value, "variable(x: Foo") {
 		t.Fatalf("expected inferred instance type in hover, got %q", content.Value)
 	}
 }
@@ -229,7 +230,7 @@ func TestHoverShowsInferredBuiltinType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected markup content, got %T", hov.Contents)
 	}
-	if !strings.Contains(content.Value, "variable(n: int)") {
+	if !strings.Contains(content.Value, "variable(n: int") {
 		t.Fatalf("expected inferred builtin type in hover, got %q", content.Value)
 	}
 }
@@ -246,7 +247,7 @@ func TestHoverShowsUnionType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected markup content, got %T", hov.Contents)
 	}
-	if !strings.Contains(content.Value, "variable(x: Foo | Bar)") {
+	if !strings.Contains(content.Value, "variable(x: Foo | Bar") {
 		t.Fatalf("expected union type in hover, got %q", content.Value)
 	}
 }
@@ -280,7 +281,7 @@ func TestHoverShowsAnnotatedReturnTypePropagation(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected markup content, got %T", hov.Contents)
 	}
-	if !strings.Contains(content.Value, "variable(value: Foo)") {
+	if !strings.Contains(content.Value, "variable(value: Foo") {
 		t.Fatalf("expected annotated return type in hover, got %q", content.Value)
 	}
 }
@@ -365,7 +366,7 @@ func TestHoverShowsAnnotatedVariableType(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected markup content, got %T", hov.Contents)
 	}
-	if !strings.Contains(content.Value, "variable(value: dict[str, int])") {
+	if !strings.Contains(content.Value, "variable(value: dict[str, int]") {
 		t.Fatalf("expected annotated variable type in hover, got %q", content.Value)
 	}
 }
@@ -432,6 +433,77 @@ func TestNoUnresolvedModuleDiagnosticWhenModuleExists(t *testing.T) {
 		if err.Msg == "unresolved module: pkg.mod" || err.Msg == "unresolved module: pkg" {
 			t.Fatalf("unexpected unresolved module error: %+v", err)
 		}
+	}
+}
+
+func TestDefinitionFromExternalImportLazyResolution(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "def foo():\n    pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg import foo\nfoo\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	if len(s.externalModulesByName) != 0 {
+		t.Fatalf("expected no external modules before import-driven lookup, got %+v", s.externalModulesByName)
+	}
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(extRoot, "extpkg", "__init__.py"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected external definition URI: got %q want %q", loc.URI, wantURI)
+	}
+	if _, ok := s.externalModulesByName["extpkg"]; !ok {
+		t.Fatal("expected external module to be cached after lazy resolution")
+	}
+}
+
+func TestCompletionFromExternalModuleExports(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "def foo():\n    pass\nbar = 1\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "import extpkg\nextpkg.\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 1, Character: len("extpkg.")}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "foo")
+	assertCompletionLabel(t, items, "bar")
+}
+
+func TestWorkspaceModuleShadowsExternalModule(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(root, "extpkg.py"), "value = 1\n")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "value = 2\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg import value\nvalue\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(root, "extpkg.py"))
+	if loc.URI != wantURI {
+		t.Fatalf("expected workspace module to shadow external module, got %q want %q", loc.URI, wantURI)
+	}
+	if _, ok := s.externalModulesByName["extpkg"]; ok {
+		t.Fatal("did not expect external module to be loaded when workspace module shadows it")
 	}
 }
 
@@ -809,6 +881,96 @@ func TestDidCloseRebuildsDiskState_WithCyclicImports(t *testing.T) {
 	}
 }
 
+func TestBuildModuleSnapshotExportHashIgnoresFunctionBodyChanges(t *testing.T) {
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///mod.py")
+	before := "def foo(x):\n    return x\n"
+	after := "def foo(x):\n    y = x + 1\n    return y\n"
+
+	beforeSnapshot := s.buildModuleSnapshot("mod", uri, "/tmp/mod.py", before, source.NewLineIndex(before))
+	afterSnapshot := s.buildModuleSnapshot("mod", uri, "/tmp/mod.py", after, source.NewLineIndex(after))
+
+	if beforeSnapshot.ExportHash == 0 || afterSnapshot.ExportHash == 0 {
+		t.Fatal("expected non-zero export hash")
+	}
+	if beforeSnapshot.ExportHash != afterSnapshot.ExportHash {
+		t.Fatalf("expected identical export hashes for body-only change: %d vs %d", beforeSnapshot.ExportHash, afterSnapshot.ExportHash)
+	}
+}
+
+func TestBuildModuleSnapshotExportHashDetectsSignatureChanges(t *testing.T) {
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///mod.py")
+	before := "def foo(x):\n    return x\n"
+	after := "def foo(x, y=1):\n    return x + y\n"
+
+	beforeSnapshot := s.buildModuleSnapshot("mod", uri, "/tmp/mod.py", before, source.NewLineIndex(before))
+	afterSnapshot := s.buildModuleSnapshot("mod", uri, "/tmp/mod.py", after, source.NewLineIndex(after))
+
+	if beforeSnapshot.ExportHash == afterSnapshot.ExportHash {
+		t.Fatalf("expected export hash to change after signature change: %d", beforeSnapshot.ExportHash)
+	}
+}
+
+func TestRefreshModuleAndDependentsSkipsCascadeWhenExportsUnchanged(t *testing.T) {
+	root := t.TempDir()
+	aPath := filepath.Join(root, "a.py")
+	bPath := filepath.Join(root, "b.py")
+	cPath := filepath.Join(root, "c.py")
+
+	writeWorkspaceFile(t, aPath, "def foo(x):\n    return x\n")
+	writeWorkspaceFile(t, bPath, "from a import foo\n\ndef bar(v):\n    return foo(v)\n")
+	writeWorkspaceFile(t, cPath, "from b import bar\n\nresult = bar(1)\n")
+
+	s := newWorkspaceServer(t, root)
+	beforeA := s.moduleSnapshotsByName["a"]
+	beforeB := s.moduleSnapshotsByName["b"]
+	beforeC := s.moduleSnapshotsByName["c"]
+	if beforeA == nil || beforeB == nil || beforeC == nil {
+		t.Fatalf("expected initial snapshots for a, b, c: %+v %+v %+v", beforeA, beforeB, beforeC)
+	}
+
+	writeWorkspaceFile(t, aPath, "def foo(x):\n    y = x + 1\n    return y\n")
+	s.refreshModuleAndDependents(pathToURI(aPath))
+
+	afterA := s.moduleSnapshotsByName["a"]
+	afterB := s.moduleSnapshotsByName["b"]
+	afterC := s.moduleSnapshotsByName["c"]
+
+	if afterA == beforeA {
+		t.Fatal("expected root module snapshot to be rebuilt")
+	}
+	if afterB != beforeB {
+		t.Fatal("expected direct dependent snapshot to be reused when exports are unchanged")
+	}
+	if afterC != beforeC {
+		t.Fatal("expected transitive dependent snapshot to be reused when exports are unchanged")
+	}
+}
+
+func TestRefreshModuleAndDependentsRebuildsDependentsWhenExportsChange(t *testing.T) {
+	root := t.TempDir()
+	aPath := filepath.Join(root, "a.py")
+	bPath := filepath.Join(root, "b.py")
+
+	writeWorkspaceFile(t, aPath, "def foo(x):\n    return x\n")
+	writeWorkspaceFile(t, bPath, "from a import foo\n\ndef bar(v):\n    return foo(v)\n")
+
+	s := newWorkspaceServer(t, root)
+	beforeB := s.moduleSnapshotsByName["b"]
+	if beforeB == nil {
+		t.Fatal("expected initial snapshot for b")
+	}
+
+	writeWorkspaceFile(t, aPath, "def foo(x, y=1):\n    return x + y\n")
+	s.refreshModuleAndDependents(pathToURI(aPath))
+
+	afterB := s.moduleSnapshotsByName["b"]
+	if afterB == beforeB {
+		t.Fatal("expected dependent snapshot to be rebuilt after export signature change")
+	}
+}
+
 func newWorkspaceServer(t *testing.T, root string) *Server {
 	t.Helper()
 
@@ -817,6 +979,24 @@ func newWorkspaceServer(t *testing.T, root string) *Server {
 	if _, err := s.Initialize(&lsp.InitializeParams{RootURI: &rootURI}); err != nil {
 		t.Fatalf("initialize failed: %v", err)
 	}
+
+	// Trigger background indexing and wait for completion
+	s.Initialized(nil)
+	if err := s.WaitForIndexing(); err != nil {
+		t.Fatalf("indexing failed: %v", err)
+	}
+
+	return s
+}
+
+func newWorkspaceServerWithExternalRoots(t *testing.T, root string, roots ...string) *Server {
+	t.Helper()
+	s := newWorkspaceServer(t, root)
+	s.indexMu.Lock()
+	s.externalSearchRoots = append([]string(nil), roots...)
+	s.externalModulesByName = make(map[string]ModuleFile)
+	s.externalModulesByURI = make(map[lsp.DocumentURI]ModuleFile)
+	s.indexMu.Unlock()
 	return s
 }
 

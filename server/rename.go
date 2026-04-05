@@ -10,6 +10,14 @@ import (
 	ast "rahu/parser/ast"
 )
 
+type renameTarget struct {
+	nodeID ast.NodeID
+	name   string
+	sym    *a.Symbol
+	span   ast.Range
+	isAttr bool
+}
+
 func validIdentifier(name string) bool {
 	if name == "" {
 		return false
@@ -28,23 +36,53 @@ func validIdentifier(name string) bool {
 	return true
 }
 
-func renameTargetAt(doc *Document, pos lsp.Position) (ast.NodeID, string, *a.Symbol, *jsonrpc.Error) {
+func renameSpanAndName(tree *ast.AST, nodeID ast.NodeID, isAttr bool) (ast.Range, string, bool) {
+	if tree == nil || nodeID == ast.NoNode {
+		return ast.Range{}, "", false
+	}
+	if !isAttr {
+		name, ok := tree.NameText(nodeID)
+		if !ok {
+			return ast.Range{}, "", false
+		}
+		return tree.RangeOf(nodeID), name, true
+	}
+	node := tree.Node(nodeID)
+	base := node.FirstChild
+	if base == ast.NoNode {
+		return ast.Range{}, "", false
+	}
+	attrName := tree.Node(base).NextSibling
+	if attrName == ast.NoNode {
+		return ast.Range{}, "", false
+	}
+	name, ok := tree.NameText(attrName)
+	if !ok {
+		return ast.Range{}, "", false
+	}
+	return tree.RangeOf(attrName), name, true
+}
+
+func renameTargetAt(doc *Document, pos lsp.Position) (*renameTarget, *jsonrpc.Error) {
 	if doc == nil || doc.Tree == nil || doc.LineIndex == nil {
-		return ast.NoNode, "", nil, jsonrpc.InvalidParamsError(nil)
+		return nil, jsonrpc.InvalidParamsError(nil)
 	}
 	offset := doc.LineIndex.PositionToOffset(pos.Line, pos.Character)
 	sym, nodeID, isAttr := symbolAtOffset(doc, offset)
-	if isAttr || sym == nil || nodeID == ast.NoNode {
-		return ast.NoNode, "", nil, jsonrpc.InvalidParamsError(nil)
+	if sym == nil || nodeID == ast.NoNode {
+		return nil, jsonrpc.InvalidParamsError(nil)
 	}
 	if sym.Kind == a.SymBuiltin || sym.Kind == a.SymImport || sym.URI == "" || sym.Span.IsEmpty() {
-		return ast.NoNode, "", nil, jsonrpc.InvalidParamsError(nil)
+		return nil, jsonrpc.InvalidParamsError(nil)
 	}
-	oldName, ok := doc.Tree.NameText(nodeID)
+	if isAttr && sym.Kind != a.SymAttr {
+		return nil, jsonrpc.InvalidParamsError(nil)
+	}
+	span, oldName, ok := renameSpanAndName(doc.Tree, nodeID, isAttr)
 	if !ok || !validIdentifier(oldName) {
-		return ast.NoNode, "", nil, jsonrpc.InvalidParamsError(nil)
+		return nil, jsonrpc.InvalidParamsError(nil)
 	}
-	return nodeID, oldName, sym, nil
+	return &renameTarget{nodeID: nodeID, name: oldName, sym: sym, span: span, isAttr: isAttr}, nil
 }
 
 func (s *Server) sourceTextForURI(uri lsp.DocumentURI) (string, bool) {
@@ -84,7 +122,7 @@ func (s *Server) Rename(p *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.Error
 	}
 
 	doc := s.Get(p.TextDocument.URI)
-	_, oldName, _, targetErr := renameTargetAt(doc, p.Position)
+	target, targetErr := renameTargetAt(doc, p.Position)
 	if targetErr != nil {
 		return nil, targetErr
 	}
@@ -101,7 +139,7 @@ func (s *Server) Rename(p *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.Error
 	changes := make(map[lsp.DocumentURI][]lsp.TextEdit)
 	for _, ref := range refs {
 		text, ok := s.textAtLocation(ref)
-		if !ok || text != oldName {
+		if !ok || text != target.name {
 			continue
 		}
 		changes[ref.URI] = append(changes[ref.URI], lsp.TextEdit{
@@ -119,12 +157,12 @@ func (s *Server) Rename(p *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.Error
 
 func (s *Server) PrepareRename(p *lsp.PrepareRenameParams) (*lsp.PrepareRenameResult, *jsonrpc.Error) {
 	doc := s.Get(p.TextDocument.URI)
-	nodeID, oldName, _, targetErr := renameTargetAt(doc, p.Position)
+	target, targetErr := renameTargetAt(doc, p.Position)
 	if targetErr != nil {
 		return nil, targetErr
 	}
 	return &lsp.PrepareRenameResult{
-		Range:       ToRange(doc.LineIndex, doc.Tree.RangeOf(nodeID)),
-		Placeholder: oldName,
+		Range:       ToRange(doc.LineIndex, target.span),
+		Placeholder: target.name,
 	}, nil
 }

@@ -38,6 +38,8 @@ type ServerCapabilities struct {
 	TextDocumentSync        TextDocumentSyncKind `json:"textDocumentSync"`
 	HoverProvider           bool                 `json:"hoverProvider"`
 	CompletionProvider      map[string]any       `json:"completionProvider,omitempty"`
+	SignatureHelpProvider   any                  `json:"signatureHelpProvider,omitempty"`
+	SemanticTokensProvider  any                  `json:"semanticTokensProvider,omitempty"`
 	DefinitionProvider      bool                 `json:"definitionProvider"`
 	ReferencesProvider      bool                 `json:"referencesProvider,omitempty"`
 	RenameProvider          any                  `json:"renameProvider,omitempty"`

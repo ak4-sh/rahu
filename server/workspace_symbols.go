@@ -40,20 +40,30 @@ func matchesWorkspaceSymbol(query, name string) bool {
 }
 
 func (s *Server) WorkspaceSymbol(p *lsp.WorkspaceSymbolParams) ([]lsp.SymbolInformation, *jsonrpc.Error) {
+	// Wait for indexing before searching workspace symbols
+	if err := s.WaitForIndexing(); err != nil {
+		return []lsp.SymbolInformation{}, nil
+	}
+
 	query := ""
 	if p != nil {
 		query = p.Query
 	}
 
-	s.mu.RLock()
-	snapshots := make([]*ModuleSnapshot, 0, len(s.moduleSnapshotsByName))
-	for _, snapshot := range s.moduleSnapshotsByName {
-		snapshots = append(snapshots, snapshot)
+	s.indexMu.RLock()
+	mods := make([]ModuleFile, 0, len(s.modulesByName))
+	for _, mod := range s.modulesByName {
+		mods = append(mods, mod)
 	}
-	s.mu.RUnlock()
+	s.indexMu.RUnlock()
 
-	results := make([]lsp.SymbolInformation, 0)
-	for _, snapshot := range snapshots {
+	// Estimate capacity: ~5 exports per module on average
+	results := make([]lsp.SymbolInformation, 0, len(mods)*5)
+	for _, mod := range mods {
+		snapshot, ok := s.analyzeModuleFile(mod)
+		if !ok {
+			continue
+		}
 		if snapshot == nil || snapshot.Exports == nil {
 			continue
 		}

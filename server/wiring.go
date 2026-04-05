@@ -60,6 +60,16 @@ func Register(s *Server) {
 	)
 
 	jsonrpc.RegisterRequest(
+		"textDocument/signatureHelp",
+		jsonrpc.AdaptRequest(s.SignatureHelp),
+	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/semanticTokens/full",
+		jsonrpc.AdaptRequest(s.SemanticTokensFull),
+	)
+
+	jsonrpc.RegisterRequest(
 		"textDocument/rename",
 		jsonrpc.AdaptRequest(s.Rename),
 	)

@@ -45,16 +45,25 @@ func TestPrepareRenameImportedAlias(t *testing.T) {
 	}
 }
 
-func TestPrepareRenameRejectsAttributeTarget(t *testing.T) {
+func TestPrepareRenameDirectAttribute(t *testing.T) {
 	code := "class Foo:\n    def __init__(self):\n        self.value = 1\n\nf = Foo()\nf.value\n"
 	s := New(nil)
 	uri := lsp.DocumentURI("file:///test.py")
 	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
 	s.analyze(s.Get(uri))
 
-	_, err := s.PrepareRename(prepareRenameParams(uri, code, 5, 2))
-	if err == nil {
-		t.Fatal("expected prepareRename on attribute to fail")
+	res, err := s.PrepareRename(prepareRenameParams(uri, code, 5, 2))
+	if err != nil {
+		t.Fatalf("unexpected prepareRename error: %v", err)
+	}
+	if res.Placeholder != "value" {
+		t.Fatalf("unexpected placeholder: %+v", res)
+	}
+	if res.Range.Start.Line != 5 || res.Range.Start.Character != 2 {
+		t.Fatalf("unexpected range start: %+v", res.Range)
+	}
+	if res.Range.End.Line != 5 || res.Range.End.Character != 7 {
+		t.Fatalf("unexpected range end: %+v", res.Range)
 	}
 }
 

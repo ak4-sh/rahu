@@ -66,7 +66,8 @@ func classChildren(doc *Document, body ast.NodeID) []lsp.DocumentSymbol {
 	if body == ast.NoNode {
 		return nil
 	}
-	children := make([]lsp.DocumentSymbol, 0)
+	// Small initial capacity for method count
+	children := make([]lsp.DocumentSymbol, 0, 8)
 	for stmt := doc.Tree.Node(body).FirstChild; stmt != ast.NoNode; stmt = doc.Tree.Node(stmt).NextSibling {
 		if doc.Tree.Node(stmt).Kind != ast.NodeFunctionDef {
 			continue
@@ -98,7 +99,12 @@ func buildDocumentSymbols(doc *Document) []lsp.DocumentSymbol {
 		return nil
 	}
 
-	result := make([]lsp.DocumentSymbol, 0)
+	// Estimate capacity based on definitions count
+	capacity := 16
+	if doc.Defs != nil {
+		capacity = len(doc.Defs)
+	}
+	result := make([]lsp.DocumentSymbol, 0, capacity)
 	for stmt := doc.Tree.Node(doc.Tree.Root).FirstChild; stmt != ast.NoNode; stmt = doc.Tree.Node(stmt).NextSibling {
 		switch doc.Tree.Node(stmt).Kind {
 		case ast.NodeClassDef:
