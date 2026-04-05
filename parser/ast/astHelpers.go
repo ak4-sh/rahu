@@ -125,10 +125,73 @@ func (a *AST) NumberText(id NodeID) (string, bool) {
 	return a.Numbers[idx], true
 }
 
+// ParamParts returns the typed children of a parameter node.
+func (a *AST) ParamParts(id NodeID) (name, annotation, defaultValue NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeParam {
+		return NoNode, NoNode, NoNode
+	}
+
+	name = a.Nodes[id].FirstChild
+	if name == NoNode {
+		return NoNode, NoNode, NoNode
+	}
+
+	second := a.Nodes[name].NextSibling
+	if second == NoNode {
+		return name, NoNode, NoNode
+	}
+
+	flags := a.Nodes[id].Data
+	hasAnnotation := flags&1 != 0
+	hasDefault := flags&2 != 0
+	if hasAnnotation && !hasDefault {
+		return name, second, NoNode
+	}
+	if !hasAnnotation && hasDefault {
+		return name, NoNode, second
+	}
+
+	third := a.Nodes[second].NextSibling
+	if third != NoNode {
+		return name, second, third
+	}
+
+	if a.Nodes[second].Kind == NodeErrExp {
+		return name, second, NoNode
+	}
+
+	return name, NoNode, second
+}
+
+// AnnAssignParts returns the typed children of an annotated assignment node.
+func (a *AST) AnnAssignParts(id NodeID) (target, annotation, value NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeAnnAssign {
+		return NoNode, NoNode, NoNode
+	}
+
+	target = a.Nodes[id].FirstChild
+	if target == NoNode {
+		return NoNode, NoNode, NoNode
+	}
+	annotation = a.Nodes[target].NextSibling
+	if annotation == NoNode {
+		return target, NoNode, NoNode
+	}
+	value = a.Nodes[annotation].NextSibling
+	return target, annotation, value
+}
+
 // FunctionParts returns the typed children of a function node.
 func (a *AST) FunctionParts(id NodeID) (name, args, body NodeID) {
+	name, args, _, body = a.FunctionPartsWithReturn(id)
+	return name, args, body
+}
+
+// FunctionPartsWithReturn returns the typed children of a function node,
+// including the optional return annotation expression.
+func (a *AST) FunctionPartsWithReturn(id NodeID) (name, args, returnAnnotation, body NodeID) {
 	if id == NoNode || a.Nodes[id].Kind != NodeFunctionDef {
-		return NoNode, NoNode, NoNode
+		return NoNode, NoNode, NoNode, NoNode
 	}
 
 	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
@@ -142,10 +205,12 @@ func (a *AST) FunctionParts(id NodeID) (name, args, body NodeID) {
 			args = child
 		case NodeBlock:
 			body = child
+		default:
+			returnAnnotation = child
 		}
 	}
 
-	return name, args, body
+	return name, args, returnAnnotation, body
 }
 
 // ClassParts returns the typed children of a class node.
