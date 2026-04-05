@@ -4,53 +4,55 @@ import "rahu/parser/ast"
 
 func (r *Resolver) BindMembers() {
 	for _, p := range r.PendingAttrs {
-		a := p.Node
-		if a == nil {
+		attrNode := p.Node
+		base := r.tree.Nodes[attrNode].FirstChild
+		attrNameNode := ast.NoNode
+		if base != ast.NoNode {
+			attrNameNode = r.tree.Nodes[base].NextSibling
+		}
+		if base == ast.NoNode || attrNameNode == ast.NoNode {
 			continue
 		}
 
-		base, ok := a.Value.(*ast.Name)
-		if !ok {
-			continue
-		}
-
-		baseSym := r.Resolved[base.ID]
+		baseName, _ := r.tree.NameText(base)
+		baseSym := r.Resolved[base]
 		if baseSym == nil {
 			continue
 		}
 
+		attrName, _ := r.tree.NameText(attrNameNode)
+
 		if p.Class != nil && p.SelfName != "" &&
-			base.Text == p.SelfName &&
+			baseName == p.SelfName &&
 			baseSym.Kind == SymParameter {
 
-			sym, ok := p.Class.Members.Lookup(a.Attr.Text)
+			sym, ok := p.Class.Members.Lookup(attrName)
 			if !ok {
-				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.Text)
+				r.error(r.tree.RangeOf(attrNameNode), "undefined attribute: "+attrName)
 				continue
 			}
 
-			r.ResolvedAttr[a.ID] = sym
+			r.ResolvedAttr[attrNode] = sym
 			continue
 		}
 
-		// --- case 2: instance.attr outside class ---
 		if baseSym.InstanceOf != nil {
 			class := baseSym.InstanceOf
 
-			sym, ok := class.Members.Lookup(a.Attr.Text)
+			sym, ok := class.Members.Lookup(attrName)
 			if !ok {
-				r.error(a.Attr.Pos, "undefined attribute: "+a.Attr.Text)
+				r.error(r.tree.RangeOf(attrNameNode), "undefined attribute: "+attrName)
 				continue
 			}
 
-			r.ResolvedAttr[a.ID] = sym
+			r.ResolvedAttr[attrNode] = sym
 			continue
 		}
 	}
 }
 
 func ResolveWithAttrs(
-	m *ast.Module,
+	tree *ast.AST,
 	global *Scope,
 ) (
 	[]SemanticError,
@@ -58,8 +60,8 @@ func ResolveWithAttrs(
 	map[ast.NodeID]*Symbol,
 	[]PendingAttr,
 ) {
-	r := newResolver(global)
-	r.visitModule(m)
+	r := newResolver(tree, global)
+	r.visitModule()
 	PromoteClassMembers(global)
 	r.BindMembers()
 	return r.errors, r.Resolved, r.ResolvedAttr, r.PendingAttrs

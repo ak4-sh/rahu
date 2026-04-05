@@ -1,85 +1,73 @@
 package parser
 
 import (
-	"rahu/lexer"
+	l "rahu/lexer"
 	a "rahu/parser/ast"
 )
 
-func (p *Parser) parseCall(funcExpr a.Expression) a.Expression {
-	var startPos int
-	if name, ok := funcExpr.(*a.Name); ok {
-		startPos = name.Pos.Start
-	} else {
-		startPos = funcExpr.Position().Start
+func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
+	if funcExpr == a.NoNode {
+		return funcExpr
 	}
+	startPos := p.tree.Nodes[funcExpr].Start
+	callID := p.tree.NewNode(a.NodeCall, startPos, startPos)
+	p.tree.AddChild(callID, funcExpr)
 
 	p.advance()
-	args := []a.Expression{}
 
-	if p.current.Type != lexer.RPAR {
+	if p.current.Type != l.RPAR {
 		first := p.parseExpression(LOWEST)
-		if first == nil {
-			p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
-			if p.current.Type == lexer.RPAR {
+		if first == a.NoNode {
+			p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
+			end := p.current.End
+			if p.current.Type == l.RPAR {
+				end = p.current.Start
 				p.advance()
 			}
-			return &a.Call{
-				Func: funcExpr,
-				Args: args,
-				Pos: a.Range{
-					Start: startPos,
-					End:   p.currentRange().End,
-				},
-			}
+			p.tree.Nodes[callID].End = end
+			return callID
 		}
-		args = append(args, first)
 
-		for p.current.Type == lexer.COMMA {
-			p.advance() // consume ','
+		p.tree.AddChild(callID, first)
+		p.tree.Nodes[callID].End = p.tree.Nodes[first].End
 
-			// trailing comma: foo(a, b,)
-			if p.current.Type == lexer.RPAR {
+		for p.current.Type == l.COMMA {
+			p.advance()
+
+			if p.current.Type == l.RPAR {
 				break
 			}
-
 			arg := p.parseExpression(LOWEST)
-			if arg == nil {
-				p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
-				if p.current.Type == lexer.RPAR {
+
+			if arg == a.NoNode {
+				p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
+				end := p.current.End
+				if p.current.Type == l.RPAR {
+					end = p.current.Start
 					p.advance()
 				}
-				return &a.Call{
-					Func: funcExpr,
-					Args: args,
-					Pos: a.Range{
-						Start: startPos,
-						End:   p.currentRange().End,
-					},
-				}
+				p.tree.Nodes[callID].End = end
+				return callID
 			}
-			args = append(args, arg)
+			p.tree.AddChild(callID, arg)
+			p.tree.Nodes[callID].End = p.tree.Nodes[arg].End
 		}
-	}
+		if p.current.Type != l.RPAR {
+			p.errorCurrent("expected ')' after function arguments")
+			p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
+			endPos := p.current.End
+			if p.current.Type == l.RPAR {
+				endPos = p.current.Start
+				p.advance()
+			}
 
-	if p.current.Type != lexer.RPAR {
-		p.errorCurrent("expected ')' after function arguments")
-		p.syncTo(lexer.RPAR, lexer.NEWLINE, lexer.EOF)
-		if p.current.Type == lexer.RPAR {
-			p.advance()
-		}
-		endPos := p.currentRange().End
-		return &a.Call{
-			Func: funcExpr,
-			Args: args,
-			Pos:  a.Range{Start: startPos, End: endPos},
+			p.tree.Nodes[callID].End = endPos
+			return callID
 		}
 	}
 	endPos := p.current.Start
 	p.advance()
 
-	return &a.Call{
-		Func: funcExpr,
-		Args: args,
-		Pos:  a.Range{Start: startPos, End: int(endPos)},
-	}
+	p.tree.Nodes[callID].End = endPos
+	return callID
 }

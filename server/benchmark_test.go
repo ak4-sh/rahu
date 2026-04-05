@@ -151,6 +151,8 @@ func TestNameAtPos(t *testing.T) {
 		{"name in tuple", "x = 1\ny = (x, 2)", 2, 6, "x"},
 		{"name in boolean operation", "x = True\ny = False\nz = x and y", 3, 5, "x"},
 		{"name in function default argument", "default_val = 10\ndef foo(x=default_val):\n    pass", 2, 14, "default_val"},
+		{"name in partial function default argument", "def foo(x=default_val)", 1, 11, "default_val"},
+		{"name in partial class base", "class Foo(Bar)", 1, 11, "Bar"},
 		{"position outside any name", "x = 1", 1, 10, ""},
 		{"empty module", "", 1, 1, ""},
 		{"name at boundary", "xyz = 1", 1, 3, "xyz"},
@@ -159,33 +161,35 @@ func TestNameAtPos(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := parser.New(tt.code)
-			module := p.Parse()
+			tree := p.Parse()
 			li := source.NewLineIndex(tt.code)
 
 			offset := li.PositionToOffset(tt.line-1, tt.col-1)
 
-			name := l.NameAtPos(module, offset)
+			name := l.NameAtPos(tree, offset)
 
 			if tt.expectedName == "" {
-				if name != nil {
-					t.Errorf("expected nil, got %q", name.Text)
+				if name != ast.NoNode {
+					got, _ := tree.NameText(name)
+					t.Errorf("expected nil, got %q", got)
 				}
 				return
 			}
 
-			if name == nil {
+			if name == ast.NoNode {
 				t.Fatalf("expected %q, got nil", tt.expectedName)
 			}
 
-			if name.Text != tt.expectedName {
-				t.Errorf("expected %q, got %q", tt.expectedName, name.Text)
+			got, _ := tree.NameText(name)
+			if got != tt.expectedName {
+				t.Errorf("expected %q, got %q", tt.expectedName, got)
 			}
 		})
 	}
 }
 
 func TestNameAtPos_NilModule(t *testing.T) {
-	if l.NameAtPos(nil, 0) != nil {
+	if l.NameAtPos(nil, 0) != ast.NoNode {
 		t.Error("expected nil for nil module")
 	}
 }
@@ -197,7 +201,7 @@ func TestContains(t *testing.T) {
 	start := li.PositionToOffset(0, 0)
 	end := li.PositionToOffset(0, 5)
 
-	rng := ast.Range{Start: start, End: end}
+	rng := ast.Range{Start: uint32(start), End: uint32(end)}
 
 	tests := []struct {
 		name     string
@@ -245,16 +249,16 @@ func TestDefinition(t *testing.T) {
 
 			if !tt.expectNilDoc {
 				p := parser.New(tt.code)
-				module := p.Parse()
-				global, _ := analyser.BuildScopes(module)
-				resolver, _ := analyser.Resolve(module, global)
+				tree := p.Parse()
+				global, _ := analyser.BuildScopes(tree)
+				resolver, _ := analyser.Resolve(tree, global)
 
 				s.docs[uri] = &Document{
 					URI:       uri,
 					Version:   1,
 					Text:      tt.code,
 					LineIndex: source.NewLineIndex(tt.code),
-					AST:       module,
+					Tree:      tree,
 					Symbols:   resolver.Resolved,
 				}
 			}
@@ -302,16 +306,16 @@ y = x
 	uri := lsp.DocumentURI("file:///test.py")
 
 	p := parser.New(code)
-	module := p.Parse()
-	global, _ := analyser.BuildScopes(module)
-	resolver, _ := analyser.Resolve(module, global)
+	tree := p.Parse()
+	global, _ := analyser.BuildScopes(tree)
+	resolver, _ := analyser.Resolve(tree, global)
 
 	s.docs[uri] = &Document{
 		URI:       uri,
 		Version:   1,
 		Text:      code,
 		LineIndex: source.NewLineIndex(code),
-		AST:       module,
+		Tree:      tree,
 		Symbols:   resolver.Resolved,
 	}
 
@@ -414,12 +418,12 @@ func BenchmarkDefinitionLookup(b *testing.B) {
 	doc := s.Get(uri)
 	s.analyze(doc)
 
-	module := doc.AST
+	tree := doc.Tree
 
 	b.ResetTimer()
 	for b.Loop() {
-		name := l.NameAtPos(module, 500)
-		if name != nil {
+		name := l.NameAtPos(tree, 500)
+		if name != ast.NoNode {
 			_ = name
 		}
 	}
@@ -437,9 +441,9 @@ func BenchmarkHoverLookup(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		offset := 500
-		name := l.NameAtPos(doc.AST, offset)
-		if name != nil {
-			sym := doc.Symbols[name.ID]
+		name := l.NameAtPos(doc.Tree, offset)
+		if name != ast.NoNode {
+			sym := doc.Symbols[name]
 			if sym != nil {
 				_ = sym
 			}
@@ -492,15 +496,15 @@ func BenchmarkDefinitionLookupAll(b *testing.B) {
 	doc := s.Get(uri)
 	s.analyze(doc)
 
-	module := doc.AST
+	tree := doc.Tree
 
 	positions := []int{100, 250, 500, 750, 1000, 1500, 2000, 2500, 3000}
 
 	b.ResetTimer()
 	for b.Loop() {
 		for _, pos := range positions {
-			name := l.NameAtPos(module, pos)
-			if name != nil {
+			name := l.NameAtPos(tree, pos)
+			if name != ast.NoNode {
 				_ = name
 			}
 		}
@@ -521,9 +525,9 @@ func BenchmarkHoverLookupAll(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		for _, offset := range offsets {
-			name := l.NameAtPos(doc.AST, offset)
-			if name != nil {
-				sym := doc.Symbols[name.ID]
+			name := l.NameAtPos(doc.Tree, offset)
+			if name != ast.NoNode {
+				sym := doc.Symbols[name]
 				if sym != nil {
 					_ = sym
 				}
@@ -561,11 +565,11 @@ func BenchmarkFullPipeline(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		p := parser.New(input)
-		module := p.Parse()
+		tree := p.Parse()
 
-		global, _ := analyser.BuildScopes(module)
+		global, _ := analyser.BuildScopes(tree)
 		analyser.PromoteClassMembers(global)
-		resolver, _ := analyser.Resolve(module, global)
+		resolver, _ := analyser.Resolve(tree, global)
 
 		_ = resolver
 		_ = global

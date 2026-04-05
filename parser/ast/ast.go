@@ -1,21 +1,91 @@
 package ast
 
-import "rahu/lexer"
+import (
+	"strings"
+)
 
-type Node any
+//go:generate stringer -type=NodeKind
 
-type NodeID uint64
+type (
+	Range struct {
+		Start uint32
+		End   uint32
+	}
 
-type Operator int
+	NodeID   uint32
+	NodeKind uint8
 
-type Range struct {
-	Start int
-	End   int
-}
+	Node struct {
+		Kind  NodeKind
+		Data  uint32
+		Start uint32
+		End   uint32
 
-func (r Range) IsEmpty() bool {
-	return r.Start == 0 && r.End == 0
-}
+		FirstChild  NodeID
+		LastChild   NodeID
+		NextSibling NodeID
+	}
+	AST struct {
+		Root  NodeID
+		Nodes []Node
+
+		Names     []string
+		Strings   []string
+		Numbers   []string
+		nameIndex map[string]uint32
+	}
+	Operator        uint8
+	CompareOp       uint8
+	BooleanOperator uint8
+	BooleanVal      uint8
+	AugAssignOp     uint8
+)
+
+const (
+	And BooleanOperator = iota
+	Or
+)
+
+const (
+	TRUE BooleanVal = iota
+	FALSE
+)
+
+const (
+	Eq    CompareOp = iota // ==
+	NotEq                  // !=
+	Lt                     // <
+	LtE                    // <=
+	Gt                     // >
+	GtE                    // >=
+)
+
+const (
+	AugInvalid AugAssignOp = iota
+	AugAdd
+	AugSub
+	AugMul
+	AugDiv
+	AugFloorDiv
+	AugPow
+	AugAnd
+	AugLShift
+	AugRShift
+	AugMod
+	AugOr
+	AugXor
+	AugMatMul
+)
+
+type UnaryOperator uint8
+
+const (
+	UAdd      UnaryOperator = iota // +x
+	USub                           // -x
+	Not                            // not x
+	Increment                      // x++ / ++x
+	Decrement                      // x-- / --x
+)
 
 const (
 	Add Operator = iota
@@ -27,256 +97,180 @@ const (
 	Pow
 )
 
-type Statement interface {
-	Node
-	statementNode()
-}
-
-type Expression interface {
-	Node
-	expressionNode()
-	Position() Range
-}
-
-type Number struct {
-	Value string
-	Pos   Range
-}
-
-func (n *Number) expressionNode() {}
-func (n *Number) Position() Range { return n.Pos }
-
-type Name struct {
-	Text string
-	Pos  Range
-	ID   NodeID
-}
-
-func (n *Name) expressionNode() {}
-func (n *Name) Position() Range { return n.Pos }
-
-type BinOp struct {
-	Left  Expression
-	Op    Operator
-	Right Expression
-	Pos   Range
-}
-
-func (b *BinOp) expressionNode() {}
-func (b *BinOp) Position() Range { return b.Pos }
-
-type Assign struct {
-	Targets []Expression
-	Value   Expression
-	Pos     Range
-}
-
-func (a *Assign) statementNode() {}
-
-type AugAssign struct {
-	Target Expression
-	Op     lexer.TokenType
-	Value  Expression
-	Pos    Range
-}
-
-func (a *AugAssign) statementNode() {}
-
-type Module struct {
-	Body []Statement
-}
-
-type FuncArg struct {
-	Name    *Name
-	Default Expression
-	Pos     Range
-}
-
-type FunctionDef struct {
-	Name      *Name
-	NamePos   Range
-	Args      []FuncArg
-	Body      []Statement
-	Pos       Range
-	DocString string
-}
-
-func (f *FunctionDef) statementNode() {}
-
-type Return struct {
-	Value Expression
-	Pos   Range
-}
-
-func (r *Return) statementNode() {}
-
-type If struct {
-	Test   Expression
-	Body   []Statement
-	Orelse []Statement
-	Pos    Range
-}
-
-func (i *If) statementNode() {}
-
-type Tuple struct {
-	Elts []Expression
-	Pos  Range
-}
-
-func (t *Tuple) expressionNode() {}
-func (t *Tuple) Position() Range { return t.Pos }
-
-type For struct {
-	Target Expression
-	Iter   Expression
-	Body   []Statement
-	Orelse []Statement
-	Pos    Range
-}
-
-func (f *For) statementNode() {}
-
-type WhileLoop struct {
-	Test Expression
-	Body []Statement
-	Pos  Range
-}
-
-func (w *WhileLoop) statementNode() {}
-
-type Call struct {
-	Func Expression
-	Args []Expression
-	Pos  Range
-}
-
-func (c *Call) expressionNode() {}
-func (c *Call) Position() Range { return c.Pos }
-
-type Compare struct {
-	Left  Expression
-	Ops   []CompareOp
-	Right []Expression
-	Pos   Range
-}
-
-func (c *Compare) expressionNode() {}
-func (c *Compare) Position() Range { return c.Pos }
-
-type CompareOp int
-
 const (
-	Eq    CompareOp = iota // ==
-	NotEq                  // !=
-	Lt                     // <
-	LtE                    // <=
-	Gt                     // >
-	GtE                    // >=
+	// NodeModule
+	// Children:
+	//   0..n -> top-level statements
+	// Data:
+	//   unused
+	NodeModule NodeKind = iota
+	NodeAssign
+	NodeAugAssign
+	NodeName
+	NodeNumber
+	NodeString
+	NodeBinOp
+	NodeUnaryOp
+	NodeCall
+	NodeAttribute
+	NodeCompare
+	NodeCompareOp
+	NodeBooleanOp
+	NodeBoolean
+	NodeTuple
+	NodeNone
+	NodeList
+	NodeIf
+	NodeFor
+	NodeWhile
+	NodeReturn
+	NodeBreak
+	NodeContinue
+	NodeFunctionDef
+	NodeClassDef
+	NodeExprStmt
+	NodeBlock
+	NodeArgs
+	NodeErrExp
+	NodeSubScript
+	NodeBaseList
+	NodeErrStmt
+	NodeParam
 )
 
-type UnaryOperator int
+const NoNode NodeID = 0
 
-const (
-	UAdd      UnaryOperator = iota // +x
-	USub                           // -x
-	Not                            // not x
-	Increment                      // x++ / ++x
-	Decrement                      // x-- / --x
-)
-
-type UnaryOp struct {
-	Op      UnaryOperator
-	Operand Expression
-	Pos     Range
+func Valid(id NodeID) bool {
+	return id != NoNode
 }
 
-func (u *UnaryOp) expressionNode() {}
-func (u *UnaryOp) Position() Range { return u.Pos }
+func New(numTokens int) *AST {
+	if numTokens < 8 {
+		numTokens = 8
+	}
 
-type String struct {
-	Value string
-	Pos   Range
+	nameCap := min(numTokens/4, 400)
+	stringCap := min(numTokens/8, 200)
+	numberCap := min(numTokens/8, 200)
+	nodeCap := min(numTokens*2, 800)
+
+	a := AST{
+		Nodes:     make([]Node, 1, nodeCap),
+		Names:     make([]string, 0, nameCap),
+		Strings:   make([]string, 0, stringCap),
+		Numbers:   make([]string, 0, numberCap),
+		nameIndex: map[string]uint32{},
+	}
+	a.Names = append(a.Names, "")
+	a.Names = append(a.Names, "None")
+	a.Numbers = append(a.Numbers, "")
+	a.Strings = append(a.Strings, "")
+	a.nameIndex[""] = 0
+	a.nameIndex["None"] = 1
+
+	return &a
 }
 
-func (s *String) expressionNode() {}
-func (s *String) Position() Range { return s.Pos }
-
-type ExprStmt struct {
-	Value Expression
-	Pos   Range
+func (n Node) Range() (uint32, uint32) {
+	return n.Start, n.End
 }
 
-func (e *ExprStmt) statementNode() {}
-
-type Boolean struct {
-	Value bool
-	Pos   Range
+func (r *Range) IsEmpty() bool {
+	return r.Start == r.End
 }
 
-func (b *Boolean) expressionNode() {}
-func (b *Boolean) Position() Range { return b.Pos }
+func (a *AST) NewNode(kind NodeKind, start, end uint32) NodeID {
+	id := NodeID(len(a.Nodes))
 
-type BooleanOperator int
+	a.Nodes = append(a.Nodes, Node{
+		Kind:        kind,
+		Start:       start,
+		End:         end,
+		FirstChild:  NoNode,
+		NextSibling: NoNode,
+		LastChild:   NoNode,
+	})
 
-const (
-	And BooleanOperator = iota
-	Or
-)
-
-type BooleanOp struct {
-	Operator BooleanOperator
-	Values   []Expression
-	Pos      Range
+	return id
 }
 
-func (bo *BooleanOp) expressionNode() {}
-func (bo *BooleanOp) Position() Range { return bo.Pos }
+func (a *AST) Reset() {
+	a.Root = NoNode
+	a.Nodes = a.Nodes[:1]
 
-type List struct {
-	Elts []Expression
-	Pos  Range
+	a.Names = a.Names[:0]
+	a.Strings = a.Strings[:0]
+	a.Numbers = a.Numbers[:0]
+
+	a.Names = append(a.Names, "", "None")
+	a.Strings = append(a.Strings, "")
+	a.Numbers = append(a.Numbers, "")
+	a.nameIndex = map[string]uint32{
+		"":     0,
+		"None": 1,
+	}
 }
 
-func (l *List) expressionNode() {}
-func (l *List) Position() Range { return l.Pos }
-
-type Break struct {
-	Pos Range
+func (a *AST) Node(id NodeID) Node {
+	return a.Nodes[id]
 }
 
-func (b *Break) statementNode() {}
+// AddChild attaches child as the last child of parent.
+//
+// Children are stored as a singly linked sibling list.
+// FirstChild points to the first child, LastChild to the last child,
+// and each child links to the next through NextSibling.
+func (a *AST) AddChild(parent, child NodeID) {
+	if parent == NoNode || child == NoNode {
+		return
+	}
 
-type Continue struct {
-	Pos Range
+	p := &a.Nodes[parent]
+	a.Nodes[child].NextSibling = NoNode
+
+	if p.FirstChild == NoNode {
+		p.FirstChild = child
+		p.LastChild = child
+		return
+	}
+
+	a.Nodes[p.LastChild].NextSibling = child
+	p.LastChild = child
 }
 
-func (c *Continue) statementNode() {}
+func (a *AST) internName(name string) uint32 {
+	if idx, ok := a.nameIndex[name]; ok {
+		return idx
+	}
 
-type KeywordArg struct {
-	Name  *Name
-	Value Expression
-	Pos   Range
+	name = strings.Clone(name) // detach from lexer input
+	idx := uint32(len(a.Names))
+	a.Names = append(a.Names, name)
+	a.nameIndex[name] = idx
+	return idx
 }
 
-type ClassDef struct {
-	Pos        Range
-	Name       *Name
-	Bases      []Expression
-	Keywords   []KeywordArg
-	Body       []Statement
-	Decorators []Expression
-	DocString  string
+func (a *AST) NewNameNode(start, end uint32, name string) NodeID {
+	id := a.NewNode(NodeName, start, end)
+	a.Nodes[id].Data = a.internName(name)
+	return id
 }
 
-func (c *ClassDef) statementNode() {}
-
-type Attribute struct {
-	ID    NodeID
-	Pos   Range
-	Value Expression
-	Attr  *Name
+func (a *AST) NewStringNode(start, end uint32, s string) NodeID {
+	id := a.NewNode(NodeString, start, end)
+	idx := uint32(len(a.Strings))
+	a.Strings = append(a.Strings, s)
+	a.Nodes[id].Data = idx
+	return id
 }
 
-func (a *Attribute) expressionNode() {}
-func (a *Attribute) Position() Range { return a.Pos }
+func (a *AST) LastChild(id NodeID) NodeID {
+	if id == NoNode {
+		return NoNode
+	}
+	return a.Nodes[id].LastChild
+}
+
+// NodeAssign invariant
+// Child0 -> value
+// Child 1 ... n -> targets

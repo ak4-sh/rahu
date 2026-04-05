@@ -23,10 +23,10 @@ import (
 
 const (
 	reset  = "\033[0m"
-	blue   = "\033[34m" // node types
-	cyan   = "\033[36m" // fields
-	green  = "\033[32m" // literals
-	yellow = "\033[33m" // operators / keywords
+	blue   = "\033[34m"
+	cyan   = "\033[36m"
+	green  = "\033[32m"
+	yellow = "\033[33m"
 )
 
 type PrintOptions struct {
@@ -56,181 +56,259 @@ func keyword(opt PrintOptions, s string) string {
 	return c(opt, yellow) + s + c(opt, reset)
 }
 
-func PrintAST(w io.Writer, node any) {
+func PrintAST(w io.Writer, tree *ast.AST) {
 	useColor := false
 	if f, ok := w.(*os.File); ok {
 		useColor = term.IsTerminal(int(f.Fd()))
 	}
 
-	opts := PrintOptions{UseColor: useColor}
-
-	printAST(w, node, 0, opts)
+	printNode(w, tree, tree.Root, 0, PrintOptions{UseColor: useColor})
 }
 
-func printAST(w io.Writer, node any, indent int, opts PrintOptions) {
+func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts PrintOptions) {
+	if tree == nil || id == ast.NoNode {
+		return
+	}
+
 	prefix := strings.Repeat(" ", indent)
+	node := tree.Node(id)
 
-	switch n := node.(type) {
-
-	case *ast.Module:
+	switch node.Kind {
+	case ast.NodeModule:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Module:"))
-		for _, stmt := range n.Body {
-			printAST(w, stmt, indent+2, opts)
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
 		}
 
-	case *ast.Assign:
+	case ast.NodeAssign:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Assign:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Targets:"))
-		for _, t := range n.Targets {
-			printAST(w, t, indent+4, opts)
+		kids := tree.Children(id)
+		for _, target := range kids[1:] {
+			printNode(w, tree, target, indent+4, opts)
 		}
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Value:"))
-		printAST(w, n.Value, indent+4, opts)
+		if len(kids) > 0 {
+			printNode(w, tree, kids[0], indent+4, opts)
+		}
 
-	case *ast.BinOp:
+	case ast.NodeAugAssign:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "AugAssign:"))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Target:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Op:"))
+		fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, augAssignString(ast.AugAssignOp(node.Data))))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Value:"))
+		printNode(w, tree, tree.ChildAt(id, 1), indent+4, opts)
+
+	case ast.NodeBinOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "BinOp:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Left:"))
-		printAST(w, n.Left, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Op:"))
-		printAST(w, n.Op, indent+4, opts)
+		fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, operatorString(ast.Operator(node.Data))))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Right:"))
-		printAST(w, n.Right, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 1), indent+4, opts)
 
-	case *ast.Name:
-		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+n.Text+")"))
+	case ast.NodeUnaryOp:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "UnaryOp:"))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Op:"))
+		fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, unaryOpString(ast.UnaryOperator(node.Data))))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Operand:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
 
-	case *ast.Number:
-		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Number("+n.Value+")"))
+	case ast.NodeName:
+		name, _ := tree.NameText(id)
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Name("+name+")"))
 
-	case ast.Operator:
-		fmt.Fprintf(w, "%s%s\n", prefix, keyword(opts, operatorString(n)))
+	case ast.NodeNumber:
+		value, _ := tree.NumberText(id)
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Number("+value+")"))
 
-	case *ast.String:
-		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, `String("`+n.Value+`")`))
+	case ast.NodeString:
+		value, _ := tree.StringText(id)
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, `String("`+value+`")`))
 
-	case *ast.Boolean:
-		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, fmt.Sprintf("Boolean(%t)", n.Value)))
+	case ast.NodeBoolean:
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Boolean("+boolString(ast.BooleanVal(node.Data))+")"))
 
-	case *ast.Call:
+	case ast.NodeNone:
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "None"))
+
+	case ast.NodeCall:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Call:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Func:"))
-		printAST(w, n.Func, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Args:"))
-		for _, a := range n.Args {
-			printAST(w, a, indent+4, opts)
+		for _, arg := range tree.Children(id)[1:] {
+			printNode(w, tree, arg, indent+4, opts)
 		}
 
-	case *ast.ExprStmt:
+	case ast.NodeAttribute:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Attribute:"))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Value:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Attr:"))
+		printNode(w, tree, tree.ChildAt(id, 1), indent+4, opts)
+
+	case ast.NodeExprStmt:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "ExprStmt:"))
-		printAST(w, n.Value, indent+2, opts)
+		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
 
-	case ast.FuncArg:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FuncArg("+n.Name.Text+")"))
-		if n.Default != nil {
+	case ast.NodeParam:
+		nameID := tree.ChildAt(id, 0)
+		name, _ := tree.NameText(nameID)
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Param("+name+")"))
+		if def := tree.ChildAt(id, 1); def != ast.NoNode {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Default:"))
-			printAST(w, n.Default, indent+4, opts)
+			printNode(w, tree, def, indent+4, opts)
 		}
 
-	case *ast.FunctionDef:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+n.Name.Text+"):"))
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Args:"))
-		for _, a := range n.Args {
-			printAST(w, a, indent+4, opts)
+	case ast.NodeFunctionDef:
+		nameID, args, body := tree.FunctionParts(id)
+		name, _ := tree.NameText(nameID)
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+name+"):"))
+		if doc, ok := tree.DocString(id); ok {
+			fmt.Fprintf(w, "%s  %s %s\n", prefix, field(opts, "Doc:"), literal(opts, doc))
 		}
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
-		for _, s := range n.Body {
-			printAST(w, s, indent+4, opts)
-		}
-
-	case *ast.Return:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Return:"))
-		printAST(w, n.Value, indent+2, opts)
-
-	case *ast.If:
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "If:"))
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Test:"))
-		printAST(w, n.Test, indent+4, opts)
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
-		for _, s := range n.Body {
-			printAST(w, s, indent+4, opts)
-		}
-		if len(n.Orelse) > 0 {
-			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Else:"))
-			for _, s := range n.Orelse {
-				printAST(w, s, indent+4, opts)
+		if args != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Args:"))
+			for _, arg := range tree.Children(args) {
+				printNode(w, tree, arg, indent+4, opts)
 			}
 		}
+		if body != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
+			printNode(w, tree, body, indent+4, opts)
+		}
 
-	case *ast.WhileLoop:
+	case ast.NodeReturn:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Return:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
+
+	case ast.NodeIf:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "If:"))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Test:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
+		printNode(w, tree, tree.ChildAt(id, 1), indent+4, opts)
+		if elseID := tree.ChildAt(id, 2); elseID != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Else:"))
+			printNode(w, tree, elseID, indent+4, opts)
+		}
+
+	case ast.NodeWhile:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "While:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Test:"))
-		printAST(w, n.Test, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
-		for _, s := range n.Body {
-			printAST(w, s, indent+4, opts)
-		}
+		printNode(w, tree, tree.ChildAt(id, 1), indent+4, opts)
 
-	case *ast.For:
+	case ast.NodeFor:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "For:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Target:"))
-		printAST(w, n.Target, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 0), indent+4, opts)
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Iter:"))
-		printAST(w, n.Iter, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 1), indent+4, opts)
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
-		for _, s := range n.Body {
-			printAST(w, s, indent+4, opts)
+		printNode(w, tree, tree.ChildAt(id, 2), indent+4, opts)
+		if elseID := tree.ChildAt(id, 3); elseID != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Else:"))
+			printNode(w, tree, elseID, indent+4, opts)
 		}
 
-	case *ast.List:
+	case ast.NodeList:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "List:"))
-		for _, e := range n.Elts {
-			printAST(w, e, indent+2, opts)
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
 		}
 
-	case *ast.Tuple:
+	case ast.NodeTuple:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Tuple:"))
-		for _, e := range n.Elts {
-			printAST(w, e, indent+2, opts)
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
 		}
 
-	case *ast.BooleanOp:
+	case ast.NodeBooleanOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "BooleanOp:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Operator:"))
-		switch n.Operator {
-		case ast.And:
-			fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, "And"))
-		case ast.Or:
-			fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, "Or"))
-		}
+		fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, booleanOpString(ast.BooleanOperator(node.Data))))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Values:"))
-		for _, v := range n.Values {
-			printAST(w, v, indent+4, opts)
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+4, opts)
 		}
 
-	case ast.CompareOp:
-		fmt.Fprintf(w, "%s%s\n", prefix, keyword(opts, "CompareOp("+compareOpString(n)+")"))
-
-	case *ast.Compare:
+	case ast.NodeCompare:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Compare:"))
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Left:"))
-		printAST(w, n.Left, indent+4, opts)
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Ops:"))
-		for _, op := range n.Ops {
-			printAST(w, op, indent+4, opts)
+		kids := tree.Children(id)
+		if len(kids) == 0 {
+			return
 		}
-		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Right:"))
-		for _, r := range n.Right {
-			printAST(w, r, indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Left:"))
+		printNode(w, tree, kids[0], indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Ops:"))
+		for _, op := range kids[1:] {
+			fmt.Fprintf(w, "%s    %s\n", prefix, keyword(opts, compareOpString(ast.CompareOp(tree.Node(op).Data))))
+			printNode(w, tree, tree.ChildAt(op, 0), indent+6, opts)
 		}
 
-	case *ast.Break:
+	case ast.NodeBlock:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Block:"))
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
+		}
+
+	case ast.NodeArgs:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Args:"))
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
+		}
+
+	case ast.NodeBaseList:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Bases:"))
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
+		}
+
+	case ast.NodeClassDef:
+		nameID, bases, body := tree.ClassParts(id)
+		name, _ := tree.NameText(nameID)
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "ClassDef("+name+"):"))
+		if doc, ok := tree.DocString(id); ok {
+			fmt.Fprintf(w, "%s  %s %s\n", prefix, field(opts, "Doc:"), literal(opts, doc))
+		}
+		if bases != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Bases:"))
+			printNode(w, tree, bases, indent+4, opts)
+		}
+		if body != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
+			printNode(w, tree, body, indent+4, opts)
+		}
+
+	case ast.NodeBreak:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Break"))
 
-	case *ast.Continue:
+	case ast.NodeContinue:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Continue"))
 
+	case ast.NodeErrExp:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "ErrExp"))
+
+	case ast.NodeErrStmt:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "ErrStmt"))
+
+	case ast.NodeSubScript:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "SubScript:"))
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
+		}
+
+	case ast.NodeCompareOp:
+		fmt.Fprintf(w, "%s%s\n", prefix, keyword(opts, "CompareOp("+compareOpString(ast.CompareOp(node.Data))+")"))
+
 	default:
-		fmt.Fprintf(w, "%sUnknown(%T)\n", prefix, node)
+		fmt.Fprintf(w, "%sUnknown(%s)\n", prefix, node.Kind)
 	}
 }
 
@@ -248,6 +326,8 @@ func operatorString(op ast.Operator) string {
 		return "//"
 	case ast.Mod:
 		return "%"
+	case ast.Pow:
+		return "**"
 	default:
 		return "<?>"
 	}
@@ -267,6 +347,78 @@ func compareOpString(op ast.CompareOp) string {
 		return ">"
 	case ast.GtE:
 		return ">="
+	default:
+		return "<?>"
+	}
+}
+
+func booleanOpString(op ast.BooleanOperator) string {
+	switch op {
+	case ast.And:
+		return "And"
+	case ast.Or:
+		return "Or"
+	default:
+		return "<?>"
+	}
+}
+
+func boolString(v ast.BooleanVal) string {
+	switch v {
+	case ast.TRUE:
+		return "true"
+	case ast.FALSE:
+		return "false"
+	default:
+		return "<?>"
+	}
+}
+
+func unaryOpString(op ast.UnaryOperator) string {
+	switch op {
+	case ast.UAdd:
+		return "+"
+	case ast.USub:
+		return "-"
+	case ast.Not:
+		return "not"
+	case ast.Increment:
+		return "++"
+	case ast.Decrement:
+		return "--"
+	default:
+		return "<?>"
+	}
+}
+
+func augAssignString(op ast.AugAssignOp) string {
+	switch op {
+	case ast.AugAdd:
+		return "+="
+	case ast.AugSub:
+		return "-="
+	case ast.AugMul:
+		return "*="
+	case ast.AugDiv:
+		return "/="
+	case ast.AugFloorDiv:
+		return "//="
+	case ast.AugPow:
+		return "**="
+	case ast.AugAnd:
+		return "&="
+	case ast.AugLShift:
+		return "<<="
+	case ast.AugRShift:
+		return ">>="
+	case ast.AugMod:
+		return "%="
+	case ast.AugOr:
+		return "|="
+	case ast.AugXor:
+		return "^="
+	case ast.AugMatMul:
+		return "@="
 	default:
 		return "<?>"
 	}

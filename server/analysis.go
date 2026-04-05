@@ -9,12 +9,12 @@ import (
 
 func (s *Server) analyze(doc *Document) {
 	p := parser.New(doc.Text)
-	module := p.Parse()
+	tree := p.Parse()
 
-	global, defs := analyser.BuildScopes(module)
-	resolver, semErrs := analyser.Resolve(module, global)
+	global, defs := analyser.BuildScopes(tree)
+	resolver, semErrs := analyser.Resolve(tree, global)
 
-	s.SetAnalysis(doc.URI, module, defs, resolver.Resolved, resolver.ResolvedAttr, semErrs)
+	s.SetAnalysis(doc.URI, tree, defs, resolver.Resolved, resolver.ResolvedAttr, semErrs)
 
 	diags := toDiagnostics(doc.LineIndex, p.Errors(), semErrs)
 	s.publishDiagnostics(doc.URI, diags)

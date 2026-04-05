@@ -43,8 +43,6 @@ func errLine(s string)  { fmt.Println(red + s + reset) }
 func okLine(s string)   { fmt.Println(green + s + reset) }
 func warnLine(s string) { fmt.Println(yellow + s + reset) }
 
-// ------------------------------------------------------
-
 func main() {
 	noColor := flag.Bool("no-color", false, "Disable colored output")
 	flag.Parse()
@@ -61,7 +59,7 @@ func main() {
 	fmt.Println()
 
 	p := parser.New(string(src))
-	module := p.Parse()
+	tree := p.Parse()
 
 	if errs := p.Errors(); len(errs) > 0 {
 		header("=== PARSER ERRORS ===")
@@ -71,7 +69,7 @@ func main() {
 		return
 	}
 
-	global, _ := analyser.BuildScopes(module)
+	global, _ := analyser.BuildScopes(tree)
 
 	header("=== SCOPES ===")
 	dumpScope(global, 0)
@@ -79,7 +77,7 @@ func main() {
 
 	analyser.PromoteClassMembers(global)
 
-	semErrors, resolved, resolvedAttrs, pendingAttrs := analyser.ResolveWithAttrs(module, global)
+	semErrors, resolved, resolvedAttrs, pendingAttrs := analyser.ResolveWithAttrs(tree, global)
 
 	header("=== RESOLVER STATS ===")
 	fmt.Printf("names=%d attrs=%d pending=%d semErrs=%d\n\n",
@@ -98,33 +96,33 @@ func main() {
 	}
 
 	header("=== RESOLVED NAMES ===")
-	nameByID := collectNameNodes(module)
+	nameByID := collectNameNodes(tree)
 
 	type nameEntry struct {
 		id   ast.NodeID
-		name *ast.Name
+		name nameInfo
 		sym  *analyser.Symbol
 	}
 
 	var names []nameEntry
 	for id, s := range resolved {
-		n := nameByID[id]
-		if n == nil {
+		n, ok := nameByID[id]
+		if !ok {
 			continue
 		}
 		names = append(names, nameEntry{id: id, name: n, sym: s})
 	}
 
 	sort.Slice(names, func(i, j int) bool {
-		return names[i].name.Pos.Start < names[j].name.Pos.Start
+		return names[i].name.Span.Start < names[j].name.Span.Start
 	})
 
 	for _, e := range names {
 		okLine(fmt.Sprintf(
 			"%s @ [%d,%d] -> %s (%s)",
 			e.name.Text,
-			e.name.Pos.Start,
-			e.name.Pos.End,
+			e.name.Span.Start,
+			e.name.Span.End,
 			e.sym.Name,
 			e.sym.Kind,
 		))
@@ -132,7 +130,7 @@ func main() {
 
 	fmt.Println()
 	header("=== ATTRIBUTE BINDINGS ===")
-	dumpAttrBindings(module, resolvedAttrs)
+	dumpAttrBindings(tree, resolvedAttrs)
 
 	fmt.Println()
 	header("=== INSTANCE ATTRIBUTES PER CLASS ===")
@@ -142,8 +140,6 @@ func main() {
 	header("=== PROMOTED CLASS MEMBERS ===")
 	dumpClassMembers(global)
 }
-
-// ------------------------------------------------------------
 
 func dumpScope(s *analyser.Scope, indent int) {
 	prefix := strings.Repeat("  ", indent)
@@ -197,244 +193,90 @@ func dumpClassAttrs(s *analyser.Scope) {
 	}
 }
 
-// ------------------------------------------------------------
-
-func dumpAttrBindings(module *ast.Module, attrs map[ast.NodeID]*analyser.Symbol) {
-	var walkExpr func(ast.Expression)
-
-	walkExpr = func(e ast.Expression) {
-		switch v := e.(type) {
-
-		case *ast.Attribute:
-
-			base := "<expr>"
-			if n, ok := v.Value.(*ast.Name); ok {
-				base = n.Text
-			}
-
-			sym := attrs[v.ID]
-
-			if sym == nil {
-				errLine(fmt.Sprintf(
-					"UNBOUND %s.%s at [%d,%d]",
-					base,
-					v.Attr.Text,
-					v.Attr.Pos.Start,
-					v.Attr.Pos.End,
-				))
-			} else {
-				okLine(fmt.Sprintf(
-					"BOUND   %s.%s -> %s (%s) at [%d,%d]",
-					base,
-					v.Attr.Text,
-					sym.Name,
-					sym.Kind,
-					v.Attr.Pos.Start,
-					v.Attr.Pos.End,
-				))
-			}
-
-			walkExpr(v.Value)
-
-		case *ast.BinOp:
-			walkExpr(v.Left)
-			walkExpr(v.Right)
-
-		case *ast.UnaryOp:
-			walkExpr(v.Operand)
-
-		case *ast.BooleanOp:
-			for _, x := range v.Values {
-				walkExpr(x)
-			}
-
-		case *ast.Compare:
-			walkExpr(v.Left)
-			for _, x := range v.Right {
-				walkExpr(x)
-			}
-
-		case *ast.Call:
-			walkExpr(v.Func)
-			for _, x := range v.Args {
-				walkExpr(x)
-			}
-
-		case *ast.Tuple:
-			for _, x := range v.Elts {
-				walkExpr(x)
-			}
-
-		case *ast.List:
-			for _, x := range v.Elts {
-				walkExpr(x)
-			}
+func dumpAttrBindings(tree *ast.AST, attrs map[ast.NodeID]*analyser.Symbol) {
+	walk(tree, tree.Root, func(id ast.NodeID) {
+		if tree.Node(id).Kind != ast.NodeAttribute {
+			return
 		}
-	}
 
-	var walkStmt func(ast.Statement)
-
-	walkStmt = func(st ast.Statement) {
-		switch s := st.(type) {
-
-		case *ast.Assign:
-			for _, t := range s.Targets {
-				walkExpr(t)
-			}
-			walkExpr(s.Value)
-
-		case *ast.ExprStmt:
-			walkExpr(s.Value)
-
-		case *ast.Return:
-			if s.Value != nil {
-				walkExpr(s.Value)
-			}
-
-		case *ast.FunctionDef:
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
-
-		case *ast.ClassDef:
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
+		baseID := tree.ChildAt(id, 0)
+		attrID := tree.ChildAt(id, 1)
+		if attrID == ast.NoNode {
+			return
 		}
-	}
 
-	for _, st := range module.Body {
-		walkStmt(st)
-	}
+		base := "<expr>"
+		if baseID != ast.NoNode && tree.Node(baseID).Kind == ast.NodeName {
+			base, _ = tree.NameText(baseID)
+		}
+
+		attrName, _ := tree.NameText(attrID)
+		attrSpan := tree.RangeOf(attrID)
+		sym := attrs[id]
+
+		if sym == nil {
+			errLine(fmt.Sprintf(
+				"UNBOUND %s.%s at [%d,%d]",
+				base,
+				attrName,
+				attrSpan.Start,
+				attrSpan.End,
+			))
+			return
+		}
+
+		okLine(fmt.Sprintf(
+			"BOUND   %s.%s -> %s (%s) at [%d,%d]",
+			base,
+			attrName,
+			sym.Name,
+			sym.Kind,
+			attrSpan.Start,
+			attrSpan.End,
+		))
+	})
 }
 
-func collectNameNodes(module *ast.Module) map[ast.NodeID]*ast.Name {
-	result := make(map[ast.NodeID]*ast.Name)
+type nameInfo struct {
+	Text string
+	Span ast.Range
+}
 
-	var walkExpr func(ast.Expression)
-	walkExpr = func(e ast.Expression) {
-		switch v := e.(type) {
-		case *ast.Name:
-			result[v.ID] = v
-		case *ast.Attribute:
-			if v.Attr != nil {
-				result[v.Attr.ID] = v.Attr
-			}
-			walkExpr(v.Value)
-		case *ast.BinOp:
-			walkExpr(v.Left)
-			walkExpr(v.Right)
-		case *ast.UnaryOp:
-			walkExpr(v.Operand)
-		case *ast.BooleanOp:
-			for _, x := range v.Values {
-				walkExpr(x)
-			}
-		case *ast.Compare:
-			walkExpr(v.Left)
-			for _, x := range v.Right {
-				walkExpr(x)
-			}
-		case *ast.Call:
-			walkExpr(v.Func)
-			for _, x := range v.Args {
-				walkExpr(x)
-			}
-		case *ast.Tuple:
-			for _, x := range v.Elts {
-				walkExpr(x)
-			}
-		case *ast.List:
-			for _, x := range v.Elts {
-				walkExpr(x)
-			}
+func collectNameNodes(tree *ast.AST) map[ast.NodeID]nameInfo {
+	result := make(map[ast.NodeID]nameInfo)
+
+	walk(tree, tree.Root, func(id ast.NodeID) {
+		if tree.Node(id).Kind != ast.NodeName {
+			return
 		}
-	}
 
-	var walkStmt func(ast.Statement)
-	walkStmt = func(st ast.Statement) {
-		switch s := st.(type) {
-		case *ast.Assign:
-			for _, t := range s.Targets {
-				walkExpr(t)
-			}
-			walkExpr(s.Value)
-		case *ast.AugAssign:
-			walkExpr(s.Target)
-			walkExpr(s.Value)
-		case *ast.ExprStmt:
-			walkExpr(s.Value)
-		case *ast.Return:
-			if s.Value != nil {
-				walkExpr(s.Value)
-			}
-		case *ast.FunctionDef:
-			if s.Name != nil {
-				result[s.Name.ID] = s.Name
-			}
-			for _, arg := range s.Args {
-				if arg.Name != nil {
-					result[arg.Name.ID] = arg.Name
-				}
-				if arg.Default != nil {
-					walkExpr(arg.Default)
-				}
-			}
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
-		case *ast.ClassDef:
-			if s.Name != nil {
-				result[s.Name.ID] = s.Name
-			}
-			for _, base := range s.Bases {
-				if base != nil {
-					walkExpr(base)
-				}
-			}
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
-		case *ast.If:
-			walkExpr(s.Test)
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
-			for _, b := range s.Orelse {
-				walkStmt(b)
-			}
-		case *ast.For:
-			walkExpr(s.Target)
-			walkExpr(s.Iter)
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
-			for _, b := range s.Orelse {
-				walkStmt(b)
-			}
-		case *ast.WhileLoop:
-			walkExpr(s.Test)
-			for _, b := range s.Body {
-				walkStmt(b)
-			}
+		text, _ := tree.NameText(id)
+		result[id] = nameInfo{
+			Text: text,
+			Span: tree.RangeOf(id),
 		}
-	}
-
-	for _, st := range module.Body {
-		walkStmt(st)
-	}
+	})
 
 	return result
+}
+
+func walk(tree *ast.AST, id ast.NodeID, visit func(ast.NodeID)) {
+	if tree == nil || id == ast.NoNode {
+		return
+	}
+
+	visit(id)
+	for _, child := range tree.Children(id) {
+		walk(tree, child, visit)
+	}
 }
 
 func dumpClassMembers(s *analyser.Scope) {
 	for _, sym := range s.Symbols {
 		if sym.Kind == analyser.SymClass {
-
 			fmt.Printf("%sClass %s%s\n", magenta, sym.Name, reset)
 
 			if sym.Members != nil {
-
 				var names []string
 				for n := range sym.Members.Symbols {
 					names = append(names, n)
@@ -451,7 +293,6 @@ func dumpClassMembers(s *analyser.Scope) {
 						m.Kind,
 					)
 				}
-
 			} else {
 				warnLine("  (no members)")
 			}

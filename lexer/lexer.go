@@ -47,25 +47,24 @@ func (t *Token) String() string {
 }
 
 type Lexer struct {
-	input         string
-	position      uint32
-	readPosition  uint32
-	ch            byte
-	indentStack   []uint32
-	atLineStart   bool
-	pendingTokens []Token
-	indentChar    byte
-	parenDepth    uint32
+	input          string
+	position       uint32
+	readPosition   uint32
+	ch             byte
+	indentStack    []uint32
+	atLineStart    bool
+	pendingDedents int
+	indentChar     byte
+	parenDepth     uint32
 }
 
 func New(input string) *Lexer {
 	l := &Lexer{
-		input:         input,
-		position:      0,
-		readPosition:  0,
-		indentStack:   []uint32{0},
-		pendingTokens: []Token{},
-		atLineStart:   true,
+		input:        input,
+		position:     0,
+		readPosition: 0,
+		indentStack:  []uint32{0},
+		atLineStart:  true,
 	}
 	l.readChar()
 	return l
@@ -184,24 +183,100 @@ func (l *Lexer) skipWhitespaceAndComments() {
 	}
 }
 
-func (l *Lexer) isMultiCharToken() (TokenType, uint32, bool) {
-	// Try 3-char token first (longest match)
-	if l.position+3 <= uint32(len(l.input)) {
-		token := l.input[l.position : l.position+3]
-		if tokType, ok := MultiCharOps[token]; ok {
-			return tokType, 3, true
+func (l *Lexer) multiCharToken() (TokenType, uint32, bool) {
+	next := l.peek()
+	next2 := l.peekAhead(1)
+
+	switch l.ch {
+	case '=':
+		if next == '=' {
+			return EQEQUAL, 2, true
+		}
+	case '!':
+		if next == '=' {
+			return NOTEQUAL, 2, true
+		}
+	case '<':
+		if next == '=' {
+			return LESSEQUAL, 2, true
+		}
+		if next == '<' {
+			if next2 == '=' {
+				return LEFTSHIFTEQUAL, 3, true
+			}
+			return LEFTSHIFT, 2, true
+		}
+	case '>':
+		if next == '=' {
+			return GREATEREQUAL, 2, true
+		}
+		if next == '>' {
+			if next2 == '=' {
+				return RIGHTSHIFTEQUAL, 3, true
+			}
+			return RIGHTSHIFT, 2, true
+		}
+	case '*':
+		if next == '*' {
+			if next2 == '=' {
+				return DOUBLESTAREQUAL, 3, true
+			}
+			return DOUBLESTAR, 2, true
+		}
+		if next == '=' {
+			return STAREQUAL, 2, true
+		}
+	case '/':
+		if next == '/' {
+			if next2 == '=' {
+				return DOUBLESLASHEQUAL, 3, true
+			}
+			return DOUBLESLASH, 2, true
+		}
+		if next == '=' {
+			return SLASHEQUAL, 2, true
+		}
+	case '+':
+		if next == '=' {
+			return PLUSEQUAL, 2, true
+		}
+	case '-':
+		if next == '=' {
+			return MINEQUAL, 2, true
+		}
+		if next == '>' {
+			return RARROW, 2, true
+		}
+	case '%':
+		if next == '=' {
+			return PERCENTEQUAL, 2, true
+		}
+	case '&':
+		if next == '=' {
+			return AMPEREQUAL, 2, true
+		}
+	case '|':
+		if next == '=' {
+			return VBAREQUAL, 2, true
+		}
+	case '@':
+		if next == '=' {
+			return ATEQUAL, 2, true
+		}
+	case ':':
+		if next == '=' {
+			return COLONEQUAL, 2, true
+		}
+	case '^':
+		if next == '=' {
+			return CIRCUMFLEXEQUAL, 2, true
+		}
+	case '.':
+		if next == '.' && next2 == '.' {
+			return ELLIPSIS, 3, true
 		}
 	}
 
-	// Try 2-char token
-	if l.position+2 <= uint32(len(l.input)) {
-		token := l.input[l.position : l.position+2]
-		if tokType, ok := MultiCharOps[token]; ok {
-			return tokType, 2, true
-		}
-	}
-
-	// No multi-char token found
 	return ILLEGAL, 0, false
 }
 
@@ -346,46 +421,44 @@ func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
 	}
 }
 
-func (l *Lexer) countLeadingSpaces() (uint32, error) {
-	var count uint32 = 0
+func (l *Lexer) consumeLeadingIndent() (uint32, byte, bool, error) {
+	var count uint32
 	seenSpace := false
 	seenTab := false
+	firstNonIndent := byte(0)
 
-loop:
 	for {
-		peekPos := l.position + count
-		if peekPos >= uint32(len(l.input)) {
-			break
-		}
-		curr := l.input[peekPos]
+		curr := l.ch
 
 		switch curr {
 		case ' ':
 			seenSpace = true
 			count++
+			l.readChar()
 		case '\t':
 			seenTab = true
 			count++
+			l.readChar()
 		default:
-			break loop
+			firstNonIndent = curr
+			goto done
 		}
 	}
 
-	// Check for mixing
+done:
+
 	if seenSpace && seenTab {
-		return 0, errors.New("mixed tabs and spaces in indentation")
+		return 0, firstNonIndent, false, errors.New("mixed tabs and spaces in indentation")
 	}
 
-	// Set or verify indentChar for the file
 	if count > 0 {
 		if seenSpace && l.indentChar == '\t' {
-			return 0, errors.New("inconsistent use of tabs and spaces")
+			return 0, firstNonIndent, false, errors.New("inconsistent use of tabs and spaces")
 		}
 		if seenTab && l.indentChar == ' ' {
-			return 0, errors.New("inconsistent use of tabs and spaces")
+			return 0, firstNonIndent, false, errors.New("inconsistent use of tabs and spaces")
 		}
 
-		// Set indent char if not yet determined
 		if l.indentChar == 0 {
 			if seenSpace {
 				l.indentChar = ' '
@@ -395,132 +468,86 @@ loop:
 		}
 	}
 
-	return count, nil
+	return count, firstNonIndent, count > 0, nil
 }
 
 func (l *Lexer) NextToken() Token {
-	if len(l.pendingTokens) > 0 {
-		tok := l.pendingTokens[0]
-		l.pendingTokens = l.pendingTokens[1:]
-		return tok
-	}
-
-	if l.atLineStart && l.parenDepth == 0 {
-		spaces, err := l.countLeadingSpaces()
-		if err != nil {
-			pos := l.position
-			return Token{
-				Type:  ILLEGAL,
-				Start: pos,
-				End:   pos,
-			}
+	for {
+		if l.pendingDedents > 0 {
+			l.pendingDedents--
+			return Token{Type: DEDENT, Start: l.position, End: l.position}
 		}
 
-		if l.ch != '\n' && l.ch != '#' {
-			current := l.indentStack[len(l.indentStack)-1]
+		if l.atLineStart && l.parenDepth == 0 {
 			pos := l.position
-
-			if spaces > current {
-				l.indentStack = append(l.indentStack, spaces)
-
-				tok := Token{
-					Type:  INDENT,
-					Start: pos,
-					End:   pos,
-				}
-
-				for range spaces {
-					l.readChar()
-				}
-
-				l.atLineStart = false
-				return tok
+			spaces, firstNonIndent, consumed, err := l.consumeLeadingIndent()
+			if err != nil {
+				return Token{Type: ILLEGAL, Start: pos, End: pos}
 			}
 
-			if spaces < current {
-				dedentCount := 0
-				for len(l.indentStack) > 1 &&
-					l.indentStack[len(l.indentStack)-1] > spaces {
-					l.indentStack = l.indentStack[:len(l.indentStack)-1]
-					dedentCount++
+			if firstNonIndent != '\n' && firstNonIndent != '#' && firstNonIndent != 0 {
+				current := l.indentStack[len(l.indentStack)-1]
+
+				if spaces > current {
+					l.indentStack = append(l.indentStack, spaces)
+					l.atLineStart = false
+					return Token{Type: INDENT, Start: pos, End: pos}
 				}
 
-				if l.indentStack[len(l.indentStack)-1] != spaces {
-					return Token{
-						Type:  ILLEGAL,
-						Start: pos,
-						End:   pos,
+				if spaces < current {
+					dedentCount := 0
+					for len(l.indentStack) > 1 && l.indentStack[len(l.indentStack)-1] > spaces {
+						l.indentStack = l.indentStack[:len(l.indentStack)-1]
+						dedentCount++
 					}
-				}
 
-				tok := Token{
-					Type:  DEDENT,
-					Start: pos,
-					End:   pos,
-				}
+					if l.indentStack[len(l.indentStack)-1] != spaces {
+						return Token{Type: ILLEGAL, Start: pos, End: pos}
+					}
 
-				for i := 1; i < dedentCount; i++ {
-					l.pendingTokens = append(l.pendingTokens, Token{
-						Type:  DEDENT,
-						Start: pos,
-						End:   pos,
-					})
-				}
-
-				for range spaces {
-					l.readChar()
+					if dedentCount > 1 {
+						l.pendingDedents = dedentCount - 1
+					}
+					l.atLineStart = false
+					return Token{Type: DEDENT, Start: pos, End: pos}
 				}
 
 				l.atLineStart = false
-				return tok
+			} else if consumed {
+				l.atLineStart = false
 			}
+		}
 
-			for range spaces {
-				l.readChar()
-			}
+		if l.atLineStart && l.parenDepth > 0 {
 			l.atLineStart = false
 		}
-	}
 
-	if l.atLineStart && l.parenDepth > 0 {
-		l.atLineStart = false
-	}
+		l.skipWhitespaceAndComments()
 
-	l.skipWhitespaceAndComments()
-
-	if l.ch == 0 {
-		if len(l.indentStack) > 1 {
-			l.indentStack = l.indentStack[:len(l.indentStack)-1]
-			return Token{
-				Type:  DEDENT,
-				Start: l.position,
-				End:   l.position,
+		if l.ch == 0 {
+			if len(l.indentStack) > 1 {
+				l.indentStack = l.indentStack[:len(l.indentStack)-1]
+				return Token{Type: DEDENT, Start: l.position, End: l.position}
 			}
+			pos := l.position
+			return Token{Type: EOF, Start: pos, End: pos}
 		}
-		pos := l.position
-		return Token{
-			Type:  EOF,
-			Start: pos,
-			End:   pos,
+
+		if l.ch == '\n' {
+			start := l.position
+			l.readChar()
+			if l.parenDepth > 0 {
+				l.atLineStart = false
+				continue
+			}
+			l.atLineStart = true
+			return Token{Type: NEWLINE, Start: start, End: l.position}
 		}
+
+		break
 	}
 
-	if l.ch == '\n' {
-		start := l.position
-		l.readChar()
-		if l.parenDepth > 0 {
-			l.atLineStart = false
-			return l.NextToken()
-		}
-		l.atLineStart = true
-		return Token{
-			Type:  NEWLINE,
-			Start: start,
-			End:   l.position,
-		}
-	}
-
-	if tokType, tokLen, ok := l.isMultiCharToken(); ok {
+	if tokType, tokLen, ok := l.multiCharToken(); ok {
 		start := l.position
 		literal := l.input[start : start+tokLen]
 		for range tokLen {

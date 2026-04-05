@@ -1,87 +1,82 @@
 package locate
 
-import (
-	"rahu/parser/ast"
-)
+import "rahu/parser/ast"
 
-func nameInExpr(expr ast.Expression, pos int) *ast.Name {
-	switch e := expr.(type) {
-	case *ast.Name:
-		if contains(e.Pos, pos) {
-			return e
-		}
-
-	case *ast.BinOp:
-		if name := nameInExpr(e.Left, pos); name != nil {
-			return name
-		}
-
-		return nameInExpr(e.Right, pos)
-
-	case *ast.Number, *ast.String, *ast.Boolean:
-		return nil
-
-	case *ast.Tuple:
-		for _, elt := range e.Elts {
-			if name := nameInExpr(elt, pos); name != nil {
-				return name
-			}
-		}
-		return nil
-
-	case *ast.Call:
-		if name := nameInExpr(e.Func, pos); name != nil {
-			return name
-		}
-
-		for _, arg := range e.Args {
-			if name := nameInExpr(arg, pos); name != nil {
-				return name
-			}
-		}
-		return nil
-
-	case *ast.Compare:
-		if name := nameInExpr(e.Left, pos); name != nil {
-			return name
-		}
-
-		for _, exprs := range e.Right {
-			if name := nameInExpr(exprs, pos); name != nil {
-				return name
-			}
-		}
-
-	case *ast.List:
-		for _, elt := range e.Elts {
-			if name := nameInExpr(elt, pos); name != nil {
-				return name
-			}
-		}
-		return nil
-
-		// TODO: boolean op support, list,
-	case *ast.BooleanOp:
-		for _, exp := range e.Values {
-			if name := nameInExpr(exp, pos); name != nil {
-				return name
-			}
-		}
-		return nil
-
-	case *ast.Attribute:
-		// check base first
-		if name := nameInExpr(e.Value, pos); name != nil {
-			return name
-		}
-
-		if contains(e.Attr.Pos, pos) {
-			return e.Attr
-		}
-
-		return nil
-	default:
-		return nil
+func nameInExpr(tree *ast.AST, expr ast.NodeID, pos int) ast.NodeID {
+	res := locateInExpr(tree, expr, pos, locateNameOnly)
+	if res.Kind == NameResult {
+		return res.Node
 	}
-	return nil
+
+	return ast.NoNode
+}
+
+func locateInExpr(tree *ast.AST, expr ast.NodeID, pos int, mode locateMode) Result {
+	if tree == nil || expr == ast.NoNode || !nodeContains(tree, expr, pos) {
+		return Result{}
+	}
+
+	switch tree.Nodes[expr].Kind {
+	case ast.NodeName:
+		if mode != locateAttrOnly {
+			return Result{Kind: NameResult, Node: expr}
+		}
+
+	case ast.NodeBinOp:
+		left := tree.Nodes[expr].FirstChild
+		right := ast.NoNode
+		if left != ast.NoNode {
+			right = tree.Nodes[left].NextSibling
+		}
+		if res := locateInExpr(tree, left, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		return locateInExpr(tree, right, pos, mode)
+
+	case ast.NodeNumber, ast.NodeString, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+		return Result{}
+
+	case ast.NodeTuple, ast.NodeList, ast.NodeBooleanOp, ast.NodeCall:
+		for child := tree.Nodes[expr].FirstChild; child != ast.NoNode; child = tree.Nodes[child].NextSibling {
+			if res := locateInExpr(tree, child, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodeCompare:
+		left := tree.Nodes[expr].FirstChild
+		if left == ast.NoNode {
+			return Result{}
+		}
+		if res := locateInExpr(tree, left, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		for cmp := tree.Nodes[left].NextSibling; cmp != ast.NoNode; cmp = tree.Nodes[cmp].NextSibling {
+			if res := locateInExpr(tree, tree.Nodes[cmp].FirstChild, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodeUnaryOp:
+		return locateInExpr(tree, tree.Nodes[expr].FirstChild, pos, mode)
+
+	case ast.NodeAttribute:
+		base := tree.Nodes[expr].FirstChild
+		attr := ast.NoNode
+		if base != ast.NoNode {
+			attr = tree.Nodes[base].NextSibling
+		}
+
+		if mode != locateNameOnly && nodeContains(tree, attr, pos) {
+			return Result{Kind: AttributeResult, Node: expr}
+		}
+		if res := locateInExpr(tree, base, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if mode != locateAttrOnly && nodeContains(tree, attr, pos) {
+			return Result{Kind: NameResult, Node: attr}
+		}
+	}
+
+	return Result{}
 }

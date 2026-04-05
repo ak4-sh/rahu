@@ -175,6 +175,8 @@ func NewBuiltinScope() *Scope {
 	return s
 }
 
+var builtinScope = NewBuiltinScope()
+
 func NewSymbol(name string, kind SymbolKind, span ast.Range) *Symbol {
 	return &Symbol{
 		Name: name,
