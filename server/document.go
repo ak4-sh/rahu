@@ -17,6 +17,7 @@ type Document struct {
 	LineIndex *source.LineIndex
 
 	Tree        *ast.AST
+	Global      *analyser.Scope
 	Symbols     map[ast.NodeID]*analyser.Symbol
 	SemErrs     []analyser.SemanticError
 	AttrSymbols map[ast.NodeID]*analyser.Symbol
@@ -44,6 +45,7 @@ func (s *Server) Get(uri lsp.DocumentURI) *Document {
 func (s *Server) SetAnalysis(
 	uri lsp.DocumentURI,
 	tree *ast.AST,
+	global *analyser.Scope,
 	defs map[ast.NodeID]*analyser.Symbol,
 	symbols map[ast.NodeID]*analyser.Symbol,
 	attrSymbols map[ast.NodeID]*analyser.Symbol,
@@ -58,6 +60,7 @@ func (s *Server) SetAnalysis(
 	}
 
 	doc.Tree = tree
+	doc.Global = global
 	doc.Symbols = symbols
 	doc.SemErrs = semErrs
 	doc.AttrSymbols = attrSymbols
@@ -187,20 +190,51 @@ func applyRangeEdit(old string, r lsp.Range, newText string) string {
 func (s *Server) Initialize(
 	p *lsp.InitializeParams,
 ) (*lsp.InitializeResult, *jsonrpc.Error) {
+	rootURI := lsp.DocumentURI("")
+	rootPath := ""
+	if p.RootURI != nil {
+		rootURI = *p.RootURI
+		if path, ok := uriToPath(rootURI); ok {
+			rootPath = path
+		}
+	}
+
 	s.mu.Lock()
 	s.capabilities = p.Capabilities
+	s.rootURI = rootURI
+	s.rootPath = rootPath
 	s.mu.Unlock()
+
+	s.buildModuleIndex()
+	s.buildWorkspaceSnapshots()
 
 	return &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
-			TextDocumentSync:   lsp.TDSKFull,
-			HoverProvider:      true,
-			DefinitionProvider: true,
+			TextDocumentSync:        lsp.TDSKFull,
+			HoverProvider:           true,
+			CompletionProvider:      map[string]any{"triggerCharacters": []string{"."}},
+			DefinitionProvider:      true,
+			ReferencesProvider:      true,
+			RenameProvider:          map[string]any{"prepareProvider": true},
+			DocumentSymbolProvider:  true,
+			WorkspaceSymbolProvider: true,
 		},
 	}, nil
 }
 
-func (s *Server) Initialized(_ *struct{}) {}
+func (s *Server) Initialized(_ *struct{}) {
+	s.mu.Lock()
+	if s.workspaceIndexedNotified {
+		s.mu.Unlock()
+		return
+	}
+	s.workspaceIndexedNotified = true
+	s.mu.Unlock()
+
+	s.createWorkspaceIndexingProgress()
+	s.beginWorkspaceIndexingProgress()
+	s.endWorkspaceIndexingProgress()
+}
 
 func (s *Server) Shutdown(_ *struct{}) (*struct{}, *jsonrpc.Error) {
 	return &struct{}{}, nil

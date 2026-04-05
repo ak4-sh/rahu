@@ -13,6 +13,7 @@ import (
 	"rahu/lsp"
 	"rahu/parser/ast"
 	l "rahu/server/locate"
+	"rahu/source"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
@@ -32,6 +33,72 @@ func classOwner(scope *a.Scope) *a.Symbol {
 	return nil
 }
 
+func (s *Server) hoverTarget(sym *a.Symbol, current *Document) (lsp.DocumentURI, *source.LineIndex) {
+	if current == nil {
+		return "", nil
+	}
+	if sym == nil || sym.URI == "" || sym.URI == current.URI {
+		return current.URI, current.LineIndex
+	}
+	if li := s.lineIndexForURI(sym.URI); li != nil {
+		return sym.URI, li
+	}
+	return sym.URI, nil
+}
+
+func formatHoverType(t *a.Type) string {
+	if a.IsUnknownType(t) {
+		return ""
+	}
+	switch t.Kind {
+	case a.TypeInstance:
+		if t.Symbol != nil {
+			return t.Symbol.Name
+		}
+	case a.TypeBuiltin:
+		if t.Symbol != nil {
+			return t.Symbol.Name
+		}
+	case a.TypeModule:
+		if t.Symbol != nil {
+			return "module " + t.Symbol.Name
+		}
+	case a.TypeClass:
+		if t.Symbol != nil {
+			return t.Symbol.Name
+		}
+	case a.TypeList:
+		if elem := formatHoverType(t.Elem); elem != "" {
+			return "list[" + elem + "]"
+		}
+		return "list"
+	case a.TypeTuple:
+		if len(t.Items) == 0 {
+			return "tuple"
+		}
+		parts := make([]string, 0, len(t.Items))
+		for _, item := range t.Items {
+			formatted := formatHoverType(item)
+			if formatted == "" {
+				formatted = "unknown"
+			}
+			parts = append(parts, formatted)
+		}
+		return "tuple[" + strings.Join(parts, ", ") + "]"
+	case a.TypeUnion:
+		parts := make([]string, 0, len(t.Union))
+		for _, arm := range t.Union {
+			formatted := formatHoverType(arm)
+			if formatted == "" {
+				continue
+			}
+			parts = append(parts, formatted)
+		}
+		return strings.Join(parts, " | ")
+	}
+	return ""
+}
+
 func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 	var kind string
 	switch sym.Kind {
@@ -43,6 +110,8 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		kind = "function"
 	case a.SymClass:
 		kind = "class"
+	case a.SymModule:
+		kind = "module"
 	case a.SymBuiltin:
 		kind = "builtin"
 	case a.SymType:
@@ -54,10 +123,18 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 	}
 
 	var builder strings.Builder
+	typeText := ""
+	if sym.Kind == a.SymVariable || sym.Kind == a.SymParameter || sym.Kind == a.SymAttr || sym.Kind == a.SymField {
+		typeText = formatHoverType(a.SymbolType(sym))
+	}
 	builder.WriteString("```python\n")
 	builder.WriteString(kind)
 	builder.WriteString("(")
 	builder.WriteString(sym.Name)
+	if typeText != "" {
+		builder.WriteString(": ")
+		builder.WriteString(typeText)
+	}
 	builder.WriteString(")\n```")
 
 	if sym.Kind == a.SymClass && sym.DocString != "" {
@@ -101,21 +178,26 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 
 	}
 
-	if sym.Kind == a.SymVariable && sym.InstanceOf != nil {
+	if (sym.Kind == a.SymVariable || sym.Kind == a.SymParameter || sym.Kind == a.SymAttr || sym.Kind == a.SymField) && typeText != "" {
 		builder.Reset()
 		builder.WriteString("```\n")
 		builder.WriteString(kind)
 		builder.WriteString("(")
 		builder.WriteString(sym.Name)
+		builder.WriteString(": ")
+		builder.WriteString(typeText)
 		builder.WriteString(")\n```")
 	}
 
-	filename := filenameFromURI(doc.URI)
-	line, _ := doc.LineIndex.OffsetToPosition(int(sym.Span.Start))
+	targetURI, targetLineIndex := s.hoverTarget(sym, doc)
+	filename := filenameFromURI(targetURI)
 	builder.WriteString("\n\n")
 	builder.WriteString(filename)
-	builder.WriteString(":")
-	builder.WriteString(strconv.Itoa(line + 1))
+	if targetLineIndex != nil {
+		line, _ := targetLineIndex.OffsetToPosition(int(sym.Span.Start))
+		builder.WriteString(":")
+		builder.WriteString(strconv.Itoa(line + 1))
+	}
 
 	return &lsp.Hover{
 		Contents: lsp.MarkupContent{
@@ -146,10 +228,57 @@ func symbolAtOffset(doc *Document, offset int) (*a.Symbol, ast.NodeID, bool) {
 		return sym, res.Node, true
 	case l.NameResult:
 		sym := doc.Symbols[res.Node]
+		if sym == nil {
+			sym = doc.Defs[res.Node]
+		}
 		return sym, res.Node, false
 	default:
 		return nil, ast.NoNode, false
 	}
+}
+
+func (s *Server) importModuleSymbolAtOffset(doc *Document, offset int) *a.Symbol {
+	if doc == nil || doc.Tree == nil {
+		return nil
+	}
+	for stmt := doc.Tree.Node(doc.Tree.Root).FirstChild; stmt != ast.NoNode; stmt = doc.Tree.Node(stmt).NextSibling {
+		if !l.Contains(doc.Tree.RangeOf(stmt), offset) {
+			continue
+		}
+		switch doc.Tree.Node(stmt).Kind {
+		case ast.NodeImport:
+			for alias := doc.Tree.Node(stmt).FirstChild; alias != ast.NoNode; alias = doc.Tree.Node(alias).NextSibling {
+				target, _ := doc.Tree.AliasParts(alias)
+				if target == ast.NoNode || !l.Contains(doc.Tree.RangeOf(target), offset) {
+					continue
+				}
+				moduleName, ok := moduleNameFromExpr(doc.Tree, target)
+				if !ok {
+					continue
+				}
+				snapshot, ok := s.analyzeModuleByName(moduleName)
+				if !ok {
+					continue
+				}
+				return &a.Symbol{Name: moduleName, Kind: a.SymModule, URI: snapshot.URI, Span: moduleDefSpan(snapshot)}
+			}
+		case ast.NodeFromImport:
+			module, _ := doc.Tree.FromImportParts(stmt)
+			if module == ast.NoNode || !l.Contains(doc.Tree.RangeOf(module), offset) {
+				continue
+			}
+			moduleName, ok := s.resolveImportModuleName(doc.URI, doc.Tree, module, doc.Tree.Node(stmt).Data)
+			if !ok {
+				continue
+			}
+			snapshot, ok := s.analyzeModuleByName(moduleName)
+			if !ok {
+				continue
+			}
+			return &a.Symbol{Name: moduleName, Kind: a.SymModule, URI: snapshot.URI, Span: moduleDefSpan(snapshot)}
+		}
+	}
+	return nil
 }
 
 func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
@@ -166,8 +295,22 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 	if sym, _, _ := symbolAtOffset(doc, offset); sym != nil {
 		hov := s.hoverForSymbol(doc, sym)
 		if hov != nil {
-			hovPos := ToRange(doc.LineIndex, sym.Span)
-			hov.Range = &hovPos
+			_, targetLineIndex := s.hoverTarget(sym, doc)
+			if targetLineIndex != nil && !sym.Span.IsEmpty() {
+				hovPos := ToRange(targetLineIndex, sym.Span)
+				hov.Range = &hovPos
+			}
+		}
+		return hov, nil
+	}
+	if sym := s.importModuleSymbolAtOffset(doc, offset); sym != nil {
+		hov := s.hoverForSymbol(doc, sym)
+		if hov != nil {
+			_, targetLineIndex := s.hoverTarget(sym, doc)
+			if targetLineIndex != nil && !sym.Span.IsEmpty() {
+				hovPos := ToRange(targetLineIndex, sym.Span)
+				hov.Range = &hovPos
+			}
 		}
 		return hov, nil
 	}
@@ -194,7 +337,11 @@ func (s *Server) DidChange(p *lsp.DidChangeTextDocumentParams) {
 }
 
 func (s *Server) DidClose(p *lsp.DidCloseTextDocumentParams) {
+	_, indexed := s.LookupModuleByURI(p.TextDocument.URI)
 	s.Close(p.TextDocument.URI)
+	if indexed {
+		s.refreshModuleAndDependents(p.TextDocument.URI)
+	}
 }
 
 // Diagnostic is a stub handler for textDocument/diagnostic (pull model).
@@ -243,16 +390,34 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 	)
 
 	if sym, _, _ := symbolAtOffset(doc, offset); sym != nil {
+		uri := doc.URI
+		if sym.URI != "" {
+			uri = sym.URI
+		}
+		li := s.lineIndexForURI(uri)
+		if li == nil {
+			return nil, jsonrpc.InvalidParamsError(nil)
+		}
+
 		if sym.Kind != a.SymBuiltin &&
 			sym.Kind != a.SymConstant &&
 			sym.Kind != a.SymType &&
 			!sym.Span.IsEmpty() {
 
 			return &lsp.Location{
-				URI:   doc.URI,
-				Range: ToRange(doc.LineIndex, sym.Span),
+				URI:   uri,
+				Range: ToRange(li, sym.Span),
 			}, nil
 		}
+	}
+
+	if sym := s.importModuleSymbolAtOffset(doc, offset); sym != nil {
+		uri := sym.URI
+		li := s.lineIndexForURI(uri)
+		if li == nil || sym.Span.IsEmpty() {
+			return nil, jsonrpc.InvalidParamsError(nil)
+		}
+		return &lsp.Location{URI: uri, Range: ToRange(li, sym.Span)}, nil
 	}
 
 	return nil, jsonrpc.InvalidParamsError(nil)

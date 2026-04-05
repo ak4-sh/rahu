@@ -8,16 +8,14 @@ import (
 )
 
 func (s *Server) analyze(doc *Document) {
-	p := parser.New(doc.Text)
-	tree := p.Parse()
+	if _, ok := s.LookupModuleByURI(doc.URI); ok {
+		s.refreshModuleAndDependents(doc.URI)
+		return
+	}
 
-	global, defs := analyser.BuildScopes(tree)
-	resolver, semErrs := analyser.Resolve(tree, global)
-
-	s.SetAnalysis(doc.URI, tree, defs, resolver.Resolved, resolver.ResolvedAttr, semErrs)
-
-	diags := toDiagnostics(doc.LineIndex, p.Errors(), semErrs)
-	s.publishDiagnostics(doc.URI, diags)
+	snapshot := s.buildModuleSnapshot("", doc.URI, "", doc.Text, doc.LineIndex)
+	s.SetAnalysis(doc.URI, snapshot.Tree, snapshot.Global, snapshot.Defs, snapshot.Symbols, snapshot.AttrSymbols, snapshot.SemErrs)
+	s.publishDiagnostics(doc.URI, toDiagnostics(doc.LineIndex, snapshot.ParseErrs, snapshot.SemErrs))
 }
 
 func toDiagnostics(

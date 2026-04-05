@@ -1,5 +1,46 @@
 package lsp
 
+type MessageType int
+
+const (
+	MessageTypeError   MessageType = 1
+	MessageTypeWarning MessageType = 2
+	MessageTypeInfo    MessageType = 3
+	MessageTypeLog     MessageType = 4
+)
+
+type ShowMessageParams struct {
+	Type    MessageType `json:"type"`
+	Message string      `json:"message"`
+}
+
+type MessageActionItem struct {
+	Title string `json:"title"`
+}
+
+type ShowMessageRequestParams struct {
+	Type    MessageType         `json:"type"`
+	Message string              `json:"message"`
+	Actions []MessageActionItem `json:"actions,omitempty"`
+}
+
+type WorkDoneProgressCreateParams struct {
+	Token ProgressToken `json:"token"`
+}
+
+type WorkDoneProgressBegin struct {
+	Kind        string `json:"kind"`
+	Title       string `json:"title"`
+	Message     string `json:"message,omitempty"`
+	Cancellable bool   `json:"cancellable,omitempty"`
+	Percentage  *int   `json:"percentage,omitempty"`
+}
+
+type WorkDoneProgressEnd struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message,omitempty"`
+}
+
 type ProgressToken any
 
 type ProgressParams struct {

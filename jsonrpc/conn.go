@@ -6,6 +6,7 @@ import (
 	j "encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type outbound struct {
@@ -13,19 +14,22 @@ type outbound struct {
 }
 
 type Conn struct {
-	r         *bufio.Reader
-	w         *bufio.Writer
-	closeFn   func() error
-	incoming  chan Message
-	outgoing  chan outbound
-	errors    chan error
-	once      sync.Once
-	closeOnce sync.Once
-	ctx       context.Context
-	cancel    context.CancelFunc
-	writeDone chan struct{}
-	closing   sync.Once
-	closed    chan struct{}
+	r             *bufio.Reader
+	w             *bufio.Writer
+	closeFn       func() error
+	incoming      chan Message
+	outgoing      chan outbound
+	errors        chan error
+	once          sync.Once
+	closeOnce     sync.Once
+	ctx           context.Context
+	cancel        context.CancelFunc
+	writeDone     chan struct{}
+	closing       sync.Once
+	closed        chan struct{}
+	nextRequestID atomic.Uint64
+	pendingMu     sync.Mutex
+	pending       map[string]chan *Response
 }
 
 func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *Conn {
@@ -44,6 +48,7 @@ func NewConn(reader *bufio.Reader, writer *bufio.Writer, closeFn func() error) *
 		cancel:    cancel,
 		writeDone: make(chan struct{}),
 		closed:    make(chan struct{}),
+		pending:   make(map[string]chan *Response),
 	}
 }
 
@@ -147,6 +152,71 @@ func (c *Conn) Notify(method string, params any) error {
 	}
 
 	return c.enqueueBytes(b)
+}
+
+func pendingKey(id j.RawMessage) string {
+	return string(id)
+}
+
+func (c *Conn) Request(ctx context.Context, method string, params any) (*Response, error) {
+	idNum := c.nextRequestID.Add(1)
+	id := j.RawMessage([]byte(fmt.Sprintf("%d", idNum)))
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      idNum,
+		"method":  method,
+		"params":  params,
+	}
+	b, err := j.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+
+	respCh := make(chan *Response, 1)
+	key := pendingKey(id)
+	c.pendingMu.Lock()
+	c.pending[key] = respCh
+	c.pendingMu.Unlock()
+
+	cleanup := func() {
+		c.pendingMu.Lock()
+		delete(c.pending, key)
+		c.pendingMu.Unlock()
+	}
+
+	if err := c.enqueueBytes(b); err != nil {
+		cleanup()
+		return nil, err
+	}
+
+	select {
+	case resp := <-respCh:
+		cleanup()
+		return resp, nil
+	case <-ctx.Done():
+		cleanup()
+		return nil, ctx.Err()
+	case <-c.closed:
+		cleanup()
+		return nil, fmt.Errorf("connection closed")
+	}
+}
+
+func (c *Conn) deliverResponse(resp *Response) {
+	if resp == nil {
+		return
+	}
+	key := pendingKey(resp.ID)
+	c.pendingMu.Lock()
+	respCh, ok := c.pending[key]
+	c.pendingMu.Unlock()
+	if !ok {
+		return
+	}
+	select {
+	case respCh <- resp:
+	default:
+	}
 }
 
 func (c *Conn) SendResponse(resp *Response) error {

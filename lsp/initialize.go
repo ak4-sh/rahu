@@ -35,8 +35,12 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync   TextDocumentSyncKind `json:"textDocumentSync"`
-	HoverProvider      bool                 `json:"hoverProvider"`
-	CompletionProvider map[string]any       `json:"completionProvider,omitempty"`
-	DefinitionProvider bool                 `json:"definitionProvider"`
+	TextDocumentSync        TextDocumentSyncKind `json:"textDocumentSync"`
+	HoverProvider           bool                 `json:"hoverProvider"`
+	CompletionProvider      map[string]any       `json:"completionProvider,omitempty"`
+	DefinitionProvider      bool                 `json:"definitionProvider"`
+	ReferencesProvider      bool                 `json:"referencesProvider,omitempty"`
+	RenameProvider          any                  `json:"renameProvider,omitempty"`
+	DocumentSymbolProvider  bool                 `json:"documentSymbolProvider,omitempty"`
+	WorkspaceSymbolProvider bool                 `json:"workspaceSymbolProvider,omitempty"`
 }

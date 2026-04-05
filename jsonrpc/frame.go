@@ -55,29 +55,35 @@ func readBody(r *bufio.Reader) (Message, error) {
 	var peek struct {
 		ID     j.RawMessage `json:"id"`
 		Method string       `json:"method"`
+		Result j.RawMessage `json:"result"`
+		Error  j.RawMessage `json:"error"`
 	}
 
 	if err := j.Unmarshal(buf, &peek); err != nil {
 		return nil, ParseError()
 	}
 
-	if len(peek.ID) > 0 && string(peek.ID) != "null" {
-		if peek.Method == "" {
-			return nil, InvalidRequestError()
-		}
-		var req Request
-		if err := j.Unmarshal(buf, &req); err != nil {
-			return nil, ParseError()
-		}
-		return &req, nil
-	}
-
 	if peek.Method != "" {
+		if len(peek.ID) > 0 && string(peek.ID) != "null" {
+			var req Request
+			if err := j.Unmarshal(buf, &req); err != nil {
+				return nil, ParseError()
+			}
+			return &req, nil
+		}
 		var notif Notification
 		if err := j.Unmarshal(buf, &notif); err != nil {
 			return nil, ParseError()
 		}
 		return &notif, nil
+	}
+
+	if len(peek.ID) > 0 && string(peek.ID) != "null" && (len(peek.Result) > 0 || len(peek.Error) > 0) {
+		var resp Response
+		if err := j.Unmarshal(buf, &resp); err != nil {
+			return nil, ParseError()
+		}
+		return &resp, nil
 	}
 
 	return nil, InvalidRequestError()
