@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -9,8 +11,8 @@ import (
 
 	a "rahu/analyser"
 	"rahu/lsp"
+	"rahu/parser/ast"
 	l "rahu/server/locate"
-	u "rahu/utils"
 )
 
 func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
@@ -108,8 +110,8 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		builder.WriteString(")\n```")
 	}
 
-	filename := u.FilenameFromURI(doc.URI)
-	line, _ := doc.LineIndex.OffsetToPosition(sym.Span.Start)
+	filename := filenameFromURI(doc.URI)
+	line, _ := doc.LineIndex.OffsetToPosition(int(sym.Span.Start))
 	builder.WriteString("\n\n")
 	builder.WriteString(filename)
 	builder.WriteString(":")
@@ -120,6 +122,33 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 			Kind:  "markdown",
 			Value: builder.String(),
 		},
+	}
+}
+
+func filenameFromURI(uri lsp.DocumentURI) string {
+	u, err := url.Parse(string(uri))
+	if err != nil {
+		return string(uri)
+	}
+
+	return filepath.Base(u.Path)
+}
+
+func symbolAtOffset(doc *Document, offset int) (*a.Symbol, ast.NodeID, bool) {
+	if doc == nil || doc.Tree == nil {
+		return nil, ast.NoNode, false
+	}
+
+	res := l.LocateAtPos(doc.Tree, offset)
+	switch res.Kind {
+	case l.AttributeResult:
+		sym := doc.AttrSymbols[res.Node]
+		return sym, res.Node, true
+	case l.NameResult:
+		sym := doc.Symbols[res.Node]
+		return sym, res.Node, false
+	default:
+		return nil, ast.NoNode, false
 	}
 }
 
@@ -134,26 +163,13 @@ func (s *Server) Hover(p *lsp.HoverParams) (*lsp.Hover, *jsonrpc.Error) {
 		p.Position.Character,
 	)
 
-	if name := l.NameAtPos(doc.AST, offset); name != nil {
-		if sym, ok := doc.Symbols[name.ID]; ok && sym != nil {
-			hov := s.hoverForSymbol(doc, sym)
-			if hov != nil {
-				hovPos := ToRange(doc.LineIndex, sym.Span)
-				hov.Range = &hovPos
-			}
-			return hov, nil
+	if sym, _, _ := symbolAtOffset(doc, offset); sym != nil {
+		hov := s.hoverForSymbol(doc, sym)
+		if hov != nil {
+			hovPos := ToRange(doc.LineIndex, sym.Span)
+			hov.Range = &hovPos
 		}
-	}
-
-	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
-		if sym, ok := doc.AttrSymbols[attr.ID]; ok && sym != nil {
-			hov := s.hoverForSymbol(doc, sym)
-			if hov != nil {
-				hovPos := ToRange(doc.LineIndex, sym.Span)
-				hov.Range = &hovPos
-			}
-			return hov, nil
-		}
+		return hov, nil
 	}
 	return nil, jsonrpc.InvalidParamsError(nil)
 }
@@ -226,29 +242,16 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		p.Position.Character,
 	)
 
-	// Attribute definitions first (obj.x)
-	if attr := l.AttributeAtPos(doc.AST, offset); attr != nil {
-		if sym, ok := doc.AttrSymbols[attr.ID]; ok && sym != nil && !sym.Span.IsEmpty() {
+	if sym, _, _ := symbolAtOffset(doc, offset); sym != nil {
+		if sym.Kind != a.SymBuiltin &&
+			sym.Kind != a.SymConstant &&
+			sym.Kind != a.SymType &&
+			!sym.Span.IsEmpty() {
+
 			return &lsp.Location{
 				URI:   doc.URI,
 				Range: ToRange(doc.LineIndex, sym.Span),
 			}, nil
-		}
-	}
-
-	// Regular names
-	if name := l.NameAtPos(doc.AST, offset); name != nil {
-		if sym, ok := doc.Symbols[name.ID]; ok && sym != nil {
-			if sym.Kind != a.SymBuiltin &&
-				sym.Kind != a.SymConstant &&
-				sym.Kind != a.SymType &&
-				!sym.Span.IsEmpty() {
-
-				return &lsp.Location{
-					URI:   doc.URI,
-					Range: ToRange(doc.LineIndex, sym.Span),
-				}, nil
-			}
 		}
 	}
 

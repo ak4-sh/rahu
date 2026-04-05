@@ -7,8 +7,8 @@ import (
 )
 
 func ToRange(li *source.LineIndex, r ast.Range) lsp.Range {
-	sl, sc := li.OffsetToPosition(r.Start)
-	el, ec := li.OffsetToPosition(r.End)
+	sl, sc := li.OffsetToPosition(int(r.Start))
+	el, ec := li.OffsetToPosition(int(r.End))
 
 	return lsp.Range{
 		Start: lsp.Position{
@@ -27,7 +27,7 @@ func FromRange(li *source.LineIndex, r lsp.Range) ast.Range {
 	end := li.PositionToOffset(r.End.Line, r.End.Character)
 
 	return ast.Range{
-		Start: start,
-		End:   end,
+		Start: uint32(start),
+		End:   uint32(end),
 	}
 }

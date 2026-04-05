@@ -16,7 +16,7 @@ type Document struct {
 	Text      string
 	LineIndex *source.LineIndex
 
-	AST         *ast.Module
+	Tree        *ast.AST
 	Symbols     map[ast.NodeID]*analyser.Symbol
 	SemErrs     []analyser.SemanticError
 	AttrSymbols map[ast.NodeID]*analyser.Symbol
@@ -43,7 +43,7 @@ func (s *Server) Get(uri lsp.DocumentURI) *Document {
 
 func (s *Server) SetAnalysis(
 	uri lsp.DocumentURI,
-	mod *ast.Module,
+	tree *ast.AST,
 	defs map[ast.NodeID]*analyser.Symbol,
 	symbols map[ast.NodeID]*analyser.Symbol,
 	attrSymbols map[ast.NodeID]*analyser.Symbol,
@@ -57,7 +57,7 @@ func (s *Server) SetAnalysis(
 		return
 	}
 
-	doc.AST = mod
+	doc.Tree = tree
 	doc.Symbols = symbols
 	doc.SemErrs = semErrs
 	doc.AttrSymbols = attrSymbols
