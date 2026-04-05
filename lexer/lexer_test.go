@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -103,4 +104,63 @@ func TestEOFFlushesDedent(t *testing.T) {
 			)
 		}
 	}
+}
+
+func benchmarkLexAll(b *testing.B, input string) {
+	b.Helper()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		l := New(input)
+		for {
+			if tok := l.NextToken(); tok.Type == EOF {
+				break
+			}
+		}
+	}
+}
+
+func benchmarkPythonLines(n int) string {
+	var sb strings.Builder
+	for i := range n {
+		sb.WriteString("x")
+		sb.WriteString(" = ")
+		sb.WriteString("123\n")
+		if i%25 == 0 {
+			sb.WriteString("if x:\n    y = x\n")
+		}
+	}
+	return sb.String()
+}
+
+func BenchmarkLexerSmall(b *testing.B) {
+	benchmarkLexAll(b, benchmarkPythonLines(50))
+}
+
+func BenchmarkLexerMedium(b *testing.B) {
+	benchmarkLexAll(b, benchmarkPythonLines(250))
+}
+
+func BenchmarkLexerLarge(b *testing.B) {
+	benchmarkLexAll(b, benchmarkPythonLines(1500))
+}
+
+func BenchmarkLexerOperatorHeavy(b *testing.B) {
+	benchmarkLexAll(b, strings.Repeat("a <<= 1\nb >>= 2\nc **= 3\nd //= 4\ne := f == g != h <= i >= j\n", 300))
+}
+
+func BenchmarkLexerIndentHeavy(b *testing.B) {
+	var sb strings.Builder
+	for range 300 {
+		sb.WriteString("if cond:\n")
+		sb.WriteString("    if nested:\n")
+		sb.WriteString("        value = item\n")
+		sb.WriteString("    else:\n")
+		sb.WriteString("        value = other\n")
+	}
+	benchmarkLexAll(b, sb.String())
+}
+
+func BenchmarkLexerStringHeavy(b *testing.B) {
+	benchmarkLexAll(b, strings.Repeat("msg = \"hello world\"\nlong = '''abc\ndef\nghi'''\n", 300))
 }
