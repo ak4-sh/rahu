@@ -14,9 +14,10 @@ const (
 )
 
 type PendingAttr struct {
-	Node     ast.NodeID
-	Class    *Symbol
-	SelfName string
+	Node      ast.NodeID
+	Class     *Symbol
+	SelfName  string
+	ValueType *Type // inferred type from assignment RHS (nil if not an assignment target)
 }
 
 type Resolver struct {
@@ -112,7 +113,8 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		for target := r.tree.Nodes[value].NextSibling; target != ast.NoNode; target = r.tree.Nodes[target].NextSibling {
 			r.visitExpr(target, Write)
 
-			if r.tree.Node(target).Kind == ast.NodeName {
+			targetKind := r.tree.Node(target).Kind
+			if targetKind == ast.NodeName {
 				sym := r.Resolved[target]
 				if sym != nil {
 					if !IsUnknownType(valueType) {
@@ -130,7 +132,37 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 						}
 					}
 				}
+			} else if targetKind == ast.NodeAttribute && !IsUnknownType(valueType) {
+				// Attribute was just added to PendingAttrs by visitExpr
+				r.PendingAttrs[len(r.PendingAttrs)-1].ValueType = valueType
 			}
+		}
+
+	case ast.NodeAnnAssign:
+		target, annotation, value := r.tree.AnnAssignParts(stmt)
+		annotType := r.resolveAnnotation(annotation)
+		if value != ast.NoNode {
+			r.visitExpr(value, Read)
+			valueType := r.ExprTypes[value]
+			if IsUnknownType(annotType) && !IsUnknownType(valueType) {
+				annotType = valueType
+			}
+		}
+		r.visitExpr(target, Write)
+		targetKind := r.tree.Node(target).Kind
+		if targetKind == ast.NodeName {
+			sym := r.Resolved[target]
+			if sym != nil && !IsUnknownType(annotType) {
+				sym.Inferred = annotType
+				if annotType.Kind == TypeInstance && annotType.Symbol != nil {
+					sym.InstanceOf = annotType.Symbol
+				} else {
+					sym.InstanceOf = nil
+				}
+			}
+		} else if targetKind == ast.NodeAttribute && !IsUnknownType(annotType) {
+			// Attribute was just added to PendingAttrs by visitExpr
+			r.PendingAttrs[len(r.PendingAttrs)-1].ValueType = annotType
 		}
 
 	case ast.NodeClassDef:
@@ -196,15 +228,8 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		r.selfName = prevSelf
 
 	case ast.NodeFunctionDef:
-		nameID, args, body := r.tree.FunctionParts(stmt)
+		nameID, args, returnAnnotation, body := r.tree.FunctionPartsWithReturn(stmt)
 		nameText, _ := r.tree.NameText(nameID)
-
-		for arg := r.tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = r.tree.Nodes[arg].NextSibling {
-			paramName := r.tree.Nodes[arg].FirstChild
-			if def := r.tree.Nodes[paramName].NextSibling; def != ast.NoNode {
-				r.visitExpr(def, Read)
-			}
-		}
 
 		fnSym := r.current.Symbols[nameText]
 		if doc, ok := r.tree.DocString(stmt); ok && fnSym != nil {
@@ -216,12 +241,30 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			return
 		}
 
+		if args != ast.NoNode {
+			for arg := r.tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = r.tree.Nodes[arg].NextSibling {
+				paramName, annotation, def := r.tree.ParamParts(arg)
+				paramNameText, _ := r.tree.NameText(paramName)
+				if annotation != ast.NoNode {
+					if paramSym := fnSym.Inner.Symbols[paramNameText]; paramSym != nil {
+						paramSym.Inferred = r.resolveAnnotation(annotation)
+					}
+				}
+				if def != ast.NoNode {
+					r.visitExpr(def, Read)
+				}
+			}
+		}
+		if returnAnnotation != ast.NoNode {
+			fnSym.Returns = r.resolveAnnotation(returnAnnotation)
+		}
+
 		prevScope := r.current
 		prevInFn := r.inFunction
 		prevSelf := r.selfName
 
 		if r.inClass && args != ast.NoNode && r.tree.Nodes[args].FirstChild != ast.NoNode {
-			selfParam := r.tree.Nodes[r.tree.Nodes[args].FirstChild].FirstChild
+			selfParam, _, _ := r.tree.ParamParts(r.tree.Nodes[args].FirstChild)
 			r.selfName, _ = r.tree.NameText(selfParam)
 		} else {
 			r.selfName = ""
@@ -340,6 +383,70 @@ func (r *Resolver) exprType(id ast.NodeID) *Type {
 	return r.ExprTypes[id]
 }
 
+func (r *Resolver) resolveAnnotation(expr ast.NodeID) *Type {
+	if expr == ast.NoNode {
+		return nil
+	}
+
+	r.visitExpr(expr, Read)
+
+	switch r.tree.Node(expr).Kind {
+	case ast.NodeName:
+		sym := r.Resolved[expr]
+		if sym == nil {
+			return nil
+		}
+		if sym.Kind == SymClass {
+			return InstanceType(sym)
+		}
+		return SymbolType(sym)
+	case ast.NodeSubScript:
+		return r.resolveSubscriptAnnotation(expr)
+	case ast.NodeTuple:
+		items := make([]*Type, 0, r.tree.ChildCount(expr))
+		for child := r.tree.Node(expr).FirstChild; child != ast.NoNode; child = r.tree.Node(child).NextSibling {
+			items = append(items, r.resolveAnnotation(child))
+		}
+		return TupleType(items...)
+	default:
+		return nil
+	}
+}
+
+func (r *Resolver) resolveSubscriptAnnotation(expr ast.NodeID) *Type {
+	base := r.tree.ChildAt(expr, 0)
+	index := r.tree.ChildAt(expr, 1)
+	if base == ast.NoNode || index == ast.NoNode || r.tree.Node(base).Kind != ast.NodeName {
+		return nil
+	}
+
+	baseName, _ := r.tree.NameText(base)
+	switch baseName {
+	case "list":
+		return ListType(r.resolveAnnotation(index))
+	case "tuple":
+		if r.tree.Node(index).Kind == ast.NodeTuple {
+			items := make([]*Type, 0, r.tree.ChildCount(index))
+			for child := r.tree.Node(index).FirstChild; child != ast.NoNode; child = r.tree.Node(child).NextSibling {
+				items = append(items, r.resolveAnnotation(child))
+			}
+			return TupleType(items...)
+		}
+		return TupleType(r.resolveAnnotation(index))
+	case "dict":
+		if r.tree.Node(index).Kind != ast.NodeTuple || r.tree.ChildCount(index) != 2 {
+			return nil
+		}
+		key := r.tree.ChildAt(index, 0)
+		value := r.tree.ChildAt(index, 1)
+		return DictType(r.resolveAnnotation(key), r.resolveAnnotation(value))
+	case "set":
+		return SetType(r.resolveAnnotation(index))
+	default:
+		return nil
+	}
+}
+
 func (r *Resolver) resolveName(id ast.NodeID, ctx NameContext) {
 	name, _ := r.tree.NameText(id)
 	span := r.tree.RangeOf(id)
@@ -434,6 +541,8 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 			sym := r.Resolved[funcID]
 			if sym != nil && sym.Kind == SymClass {
 				r.setExprType(expr, InstanceType(sym))
+			} else if sym != nil && sym.Kind == SymFunction && !IsUnknownType(sym.Returns) {
+				r.setExprType(expr, sym.Returns)
 			} else if sym != nil && sym.Kind == SymType {
 				r.setExprType(expr, BuiltinType(sym))
 			}
