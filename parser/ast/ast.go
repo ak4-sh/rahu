@@ -142,6 +142,7 @@ const (
 	NodeSlice
 	NodeKeywordArg
 	NodeDict
+	NodeAnnAssign
 )
 
 const NoNode NodeID = 0
@@ -280,3 +281,8 @@ func (a *AST) LastChild(id NodeID) NodeID {
 // NodeAssign invariant
 // Child0 -> value
 // Child 1 ... n -> targets
+
+// NodeAnnAssign invariant
+// Child0 -> target
+// Child1 -> annotation
+// Child2 -> value (optional)

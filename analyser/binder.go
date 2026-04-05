@@ -2,6 +2,23 @@ package analyser
 
 import "rahu/parser/ast"
 
+// applyInferredType applies the inferred type from an assignment to a symbol
+func applyInferredType(sym *Symbol, valueType *Type) {
+	if sym == nil || valueType == nil {
+		return
+	}
+	if sym.Inferred != nil && !IsUnknownType(sym.Inferred) {
+		sym.Inferred = UnionType(sym.Inferred, valueType)
+	} else {
+		sym.Inferred = valueType
+	}
+	if valueType.Kind == TypeInstance && valueType.Symbol != nil {
+		sym.InstanceOf = valueType.Symbol
+	} else {
+		sym.InstanceOf = nil
+	}
+}
+
 func (r *Resolver) BindMembers() {
 	for _, p := range r.PendingAttrs {
 		attrNode := p.Node
@@ -33,6 +50,7 @@ func (r *Resolver) BindMembers() {
 			}
 
 			r.ResolvedAttr[attrNode] = sym
+			applyInferredType(sym, p.ValueType)
 			continue
 		}
 
@@ -44,6 +62,7 @@ func (r *Resolver) BindMembers() {
 			}
 
 			r.ResolvedAttr[attrNode] = sym
+			applyInferredType(sym, p.ValueType)
 			continue
 		}
 
@@ -55,6 +74,7 @@ func (r *Resolver) BindMembers() {
 			}
 
 			r.ResolvedAttr[attrNode] = sym
+			applyInferredType(sym, p.ValueType)
 			continue
 		}
 	}

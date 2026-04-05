@@ -231,6 +231,48 @@ func TestCompletionChainedAssignmentInstanceMembers(t *testing.T) {
 	assertCompletionLabel(t, items, "method")
 }
 
+func TestCompletionAnnotatedParameterMembers(t *testing.T) {
+	code := "class Foo:\n    def value(self):\n        pass\n\ndef f(x: Foo):\n    x.\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}, Position: lsp.Position{Line: 5, Character: 6}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "value")
+}
+
+func TestCompletionAnnotatedReturnMembers(t *testing.T) {
+	code := "class Foo:\n    def value(self):\n        pass\n\ndef make() -> Foo:\n    return Foo()\n\nitem = make()\nitem.\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}, Position: lsp.Position{Line: 8, Character: 5}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "value")
+}
+
+func TestCompletionAnnotatedVariableMembers(t *testing.T) {
+	code := "class Foo:\n    def value(self):\n        pass\n\nitem: Foo = Foo()\nitem.\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}, Position: lsp.Position{Line: 5, Character: 5}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "value")
+}
+
 func TestCompletionUnionInstanceMembers(t *testing.T) {
 	code := "class Foo:\n    def foo(self):\n        pass\n\nclass Bar:\n    def bar(self):\n        pass\n\nx = Foo()\nx = Bar()\nx.\n"
 	s := New(nil)

@@ -41,6 +41,8 @@ const (
 	TypeUnion
 	TypeList
 	TypeTuple
+	TypeDict
+	TypeSet
 )
 
 type Type struct {
@@ -49,6 +51,7 @@ type Type struct {
 	Union  []*Type
 	Elem   *Type
 	Items  []*Type
+	Key    *Type
 }
 
 type Symbol struct {
@@ -62,6 +65,7 @@ type Symbol struct {
 	Bases      []*Symbol
 	InstanceOf *Symbol
 	Inferred   *Type
+	Returns    *Type
 	DocString  string
 	Def        ast.NodeID
 	ID         SymbolID
@@ -253,6 +257,23 @@ func TupleType(items ...*Type) *Type {
 	return &Type{Kind: TypeTuple, Items: items}
 }
 
+func DictType(key, value *Type) *Type {
+	if key == nil {
+		key = UnknownType()
+	}
+	if value == nil {
+		value = UnknownType()
+	}
+	return &Type{Kind: TypeDict, Key: key, Elem: value}
+}
+
+func SetType(elem *Type) *Type {
+	if elem == nil {
+		elem = UnknownType()
+	}
+	return &Type{Kind: TypeSet, Elem: elem}
+}
+
 func SameType(a, b *Type) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -277,6 +298,10 @@ func SameType(a, b *Type) bool {
 			}
 		}
 		return true
+	case TypeDict:
+		return SameType(a.Key, b.Key) && SameType(a.Elem, b.Elem)
+	case TypeSet:
+		return SameType(a.Elem, b.Elem)
 	case TypeUnion:
 		if len(a.Union) != len(b.Union) {
 			return false
@@ -387,6 +412,18 @@ func MemberScopeForType(t *Type) *Scope {
 		}
 		return nil
 	}
+	if t.Kind == TypeSet {
+		if setSym := BuiltinSymbol("set"); setSym != nil {
+			return setSym.Members
+		}
+		return nil
+	}
+	if t.Kind == TypeDict {
+		if dictSym := BuiltinSymbol("dict"); dictSym != nil {
+			return dictSym.Members
+		}
+		return nil
+	}
 	if t.Symbol == nil {
 		return nil
 	}
@@ -442,6 +479,8 @@ func SubscriptResultType(t *Type) *Type {
 	}
 	switch t.Kind {
 	case TypeList:
+		return t.Elem
+	case TypeDict:
 		return t.Elem
 	case TypeTuple:
 		if len(t.Items) == 0 {

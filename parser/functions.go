@@ -55,6 +55,20 @@ func (p *Parser) parseFunc() a.NodeID {
 			p.tree.AddChild(param, paramName)
 			p.advance()
 
+			if p.current.Type == l.COLON {
+				p.advance()
+
+				annotation := p.parseExpression(LOWEST)
+				if annotation == a.NoNode {
+					p.errorCurrent("expected type annotation after ':'")
+					annotation = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+				}
+
+				p.tree.AddChild(param, annotation)
+				p.tree.Nodes[param].Data |= 1
+				p.tree.Nodes[param].End = p.tree.Nodes[annotation].End
+			}
+
 			if p.current.Type == l.EQUAL {
 				seenDefault = true
 				p.advance()
@@ -66,6 +80,7 @@ func (p *Parser) parseFunc() a.NodeID {
 				}
 
 				p.tree.AddChild(param, defaultExpr)
+				p.tree.Nodes[param].Data |= 2
 				p.tree.Nodes[param].End = p.tree.Nodes[defaultExpr].End
 			} else if seenDefault {
 				p.errorCurrent("non-default argument follows default argument")
@@ -104,6 +119,17 @@ func (p *Parser) parseFunc() a.NodeID {
 		}
 	}
 	p.advance()
+
+	returnAnnotation := a.NoNode
+	if p.current.Type == l.RARROW {
+		p.advance()
+
+		returnAnnotation = p.parseExpression(LOWEST)
+		if returnAnnotation == a.NoNode {
+			p.errorCurrent("expected return type after '->'")
+			returnAnnotation = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+		}
+	}
 
 	if p.current.Type != l.COLON {
 		p.errorCurrent("expected ':' after function signature")
@@ -191,6 +217,9 @@ func (p *Parser) parseFunc() a.NodeID {
 	p.tree.AddChild(ret, name)
 	if args != a.NoNode {
 		p.tree.AddChild(ret, args)
+	}
+	if returnAnnotation != a.NoNode {
+		p.tree.AddChild(ret, returnAnnotation)
 	}
 	if docString != "" {
 		idx := uint32(len(p.tree.Strings))

@@ -80,6 +80,13 @@ func (p *Parser) dispatchExprParse() a.NodeID {
 
 	start := p.tree.Nodes[expr].Start
 
+	if p.current.Type == l.COLON {
+		switch p.tree.Nodes[expr].Kind {
+		case a.NodeName:
+			return p.parseAnnotatedAssignment(start, expr)
+		}
+	}
+
 	if p.current.Type == l.EQUAL || p.current.Type == l.COMMA {
 		switch p.tree.Nodes[expr].Kind {
 		case a.NodeName, a.NodeAttribute, a.NodeTuple, a.NodeList, a.NodeSubScript:
@@ -112,6 +119,48 @@ func (p *Parser) dispatchExprParse() a.NodeID {
 	exprID := p.tree.NewNode(a.NodeExprStmt, exprNode.Start, exprNode.End)
 	p.tree.AddChild(exprID, expr)
 	return exprID
+}
+
+func (p *Parser) parseAnnotatedAssignment(start uint32, target a.NodeID) a.NodeID {
+	p.advance()
+
+	annotation := p.parseExpression(LOWEST)
+	if annotation == a.NoNode {
+		p.errorCurrent("expected type annotation after ':'")
+		annotation = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+	}
+
+	value := a.NoNode
+	end := p.tree.Nodes[annotation].End
+	if p.current.Type == l.EQUAL {
+		p.advance()
+		value = p.parseExpression(LOWEST)
+		if value == a.NoNode {
+			p.errorCurrent("expected expression after '='")
+			value = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+		}
+		end = p.tree.Nodes[value].End
+	}
+
+	if p.current.Type == l.NEWLINE {
+		end = p.current.Start
+		p.advance()
+	} else if p.current.Type != l.EOF {
+		p.error(a.Range{Start: p.current.Start, End: p.current.End}, "expected newline after annotated assignment")
+		p.syncTo(l.NEWLINE, l.EOF)
+		if p.current.Type == l.NEWLINE {
+			end = p.current.Start
+			p.advance()
+		}
+	}
+
+	ret := p.tree.NewNode(a.NodeAnnAssign, start, end)
+	p.tree.AddChild(ret, target)
+	p.tree.AddChild(ret, annotation)
+	if value != a.NoNode {
+		p.tree.AddChild(ret, value)
+	}
+	return ret
 }
 
 func isAugAssignOp(t l.TokenType) bool {

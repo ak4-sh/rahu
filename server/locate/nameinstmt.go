@@ -33,6 +33,18 @@ func locateInStmt(tree *ast.AST, stmt ast.NodeID, pos int, mode locateMode) Resu
 			return locateInExpr(tree, tree.Nodes[stmt].FirstChild, pos, mode)
 		}
 
+	case ast.NodeAnnAssign:
+		target, annotation, value := tree.AnnAssignParts(stmt)
+		if res := locateInExpr(tree, target, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if res := locateInExpr(tree, annotation, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if value != ast.NoNode {
+			return locateInExpr(tree, value, pos, mode)
+		}
+
 	case ast.NodeClassDef:
 		nameID, bases, body := tree.ClassParts(stmt)
 		if mode != locateAttrOnly && nodeContains(tree, nameID, pos) {
@@ -63,18 +75,22 @@ func locateInStmt(tree *ast.AST, stmt ast.NodeID, pos int, mode locateMode) Resu
 		}
 
 	case ast.NodeFunctionDef:
-		nameID, args, body := tree.FunctionParts(stmt)
+		nameID, args, returnAnnotation, body := tree.FunctionPartsWithReturn(stmt)
 		if mode != locateAttrOnly && nodeContains(tree, nameID, pos) {
 			return Result{Kind: NameResult, Node: nameID}
 		}
-		for arg := tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = tree.Nodes[arg].NextSibling {
-			paramName := tree.Nodes[arg].FirstChild
-			defaultExpr := ast.NoNode
-			if paramName != ast.NoNode {
-				defaultExpr = tree.Nodes[paramName].NextSibling
-			}
-			if res := locateInExpr(tree, defaultExpr, pos, mode); res.Kind != NoResult {
-				return res
+		if res := locateInExpr(tree, returnAnnotation, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if args != ast.NoNode {
+			for arg := tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = tree.Nodes[arg].NextSibling {
+				_, annotation, defaultExpr := tree.ParamParts(arg)
+				if res := locateInExpr(tree, annotation, pos, mode); res.Kind != NoResult {
+					return res
+				}
+				if res := locateInExpr(tree, defaultExpr, pos, mode); res.Kind != NoResult {
+					return res
+				}
 			}
 		}
 		for inner := tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = tree.Nodes[inner].NextSibling {

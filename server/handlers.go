@@ -85,6 +85,21 @@ func formatHoverType(t *a.Type) string {
 			parts = append(parts, formatted)
 		}
 		return "tuple[" + strings.Join(parts, ", ") + "]"
+	case a.TypeDict:
+		key := formatHoverType(t.Key)
+		if key == "" {
+			key = "unknown"
+		}
+		value := formatHoverType(t.Elem)
+		if value == "" {
+			value = "unknown"
+		}
+		return "dict[" + key + ", " + value + "]"
+	case a.TypeSet:
+		if elem := formatHoverType(t.Elem); elem != "" {
+			return "set[" + elem + "]"
+		}
+		return "set"
 	case a.TypeUnion:
 		parts := make([]string, 0, len(t.Union))
 		for _, arm := range t.Union {

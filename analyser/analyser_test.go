@@ -148,6 +148,225 @@ func TestResolveConstructorCallAssignsInferredInstanceType(t *testing.T) {
 	}
 }
 
+func TestResolveParameterAnnotationAssignsType(t *testing.T) {
+	src := "class Foo:\n    def method(self):\n        pass\n\ndef f(x: Foo):\n    x\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	if fnSym == nil || fnSym.Inner == nil {
+		t.Fatal("missing function symbol f")
+	}
+	xSym := fnSym.Inner.Symbols["x"]
+	if xSym == nil || xSym.Inferred == nil || xSym.Inferred.Kind != TypeInstance || xSym.Inferred.Symbol == nil || xSym.Inferred.Symbol.Name != "Foo" {
+		t.Fatalf("expected annotated Foo type on x, got %+v", xSym)
+	}
+}
+
+func TestResolveReturnAnnotationSetsCallExprType(t *testing.T) {
+	src := "class Foo:\n    def method(self):\n        pass\n\ndef make() -> Foo:\n    return Foo()\n\nx = make()\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	makeSym := global.Symbols["make"]
+	if makeSym == nil || makeSym.Returns == nil || makeSym.Returns.Kind != TypeInstance || makeSym.Returns.Symbol == nil || makeSym.Returns.Symbol.Name != "Foo" {
+		t.Fatalf("expected annotated Foo return type on make, got %+v", makeSym)
+	}
+	xSym := defs[mustNameNode(t, tree, "x")]
+	if xSym == nil || xSym.Inferred == nil || xSym.Inferred.Kind != TypeInstance || xSym.Inferred.Symbol == nil || xSym.Inferred.Symbol.Name != "Foo" {
+		t.Fatalf("expected propagated Foo type on x, got %+v", xSym)
+	}
+	if resolver.ExprTypes[findCallNode(t, tree)].Kind != TypeInstance || resolver.ExprTypes[findCallNode(t, tree)].Symbol == nil || resolver.ExprTypes[findCallNode(t, tree)].Symbol.Name != "Foo" {
+		t.Fatalf("expected call expr type Foo, got %+v", resolver.ExprTypes[findCallNode(t, tree)])
+	}
+}
+
+func TestResolveListAnnotationAssignsElementType(t *testing.T) {
+	src := "def f(items: list[int]):\n    items\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	itemsSym := fnSym.Inner.Symbols["items"]
+	if itemsSym == nil || itemsSym.Inferred == nil || itemsSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected list type on items, got %+v", itemsSym)
+	}
+	if itemsSym.Inferred.Elem == nil || itemsSym.Inferred.Elem.Kind != TypeBuiltin || itemsSym.Inferred.Elem.Symbol == nil || itemsSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected list[int], got %+v", itemsSym.Inferred)
+	}
+}
+
+func TestResolveTupleAnnotationAssignsItems(t *testing.T) {
+	src := "def f(pair: tuple[str, int]):\n    pair\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	pairSym := fnSym.Inner.Symbols["pair"]
+	if pairSym == nil || pairSym.Inferred == nil || pairSym.Inferred.Kind != TypeTuple {
+		t.Fatalf("expected tuple type on pair, got %+v", pairSym)
+	}
+	if len(pairSym.Inferred.Items) != 2 {
+		t.Fatalf("expected 2 tuple items, got %+v", pairSym.Inferred)
+	}
+	if pairSym.Inferred.Items[0] == nil || pairSym.Inferred.Items[0].Kind != TypeBuiltin || pairSym.Inferred.Items[0].Symbol == nil || pairSym.Inferred.Items[0].Symbol.Name != "str" {
+		t.Fatalf("expected first tuple item str, got %+v", pairSym.Inferred.Items[0])
+	}
+	if pairSym.Inferred.Items[1] == nil || pairSym.Inferred.Items[1].Kind != TypeBuiltin || pairSym.Inferred.Items[1].Symbol == nil || pairSym.Inferred.Items[1].Symbol.Name != "int" {
+		t.Fatalf("expected second tuple item int, got %+v", pairSym.Inferred.Items[1])
+	}
+}
+
+func TestResolveNestedListAnnotationAssignsNestedType(t *testing.T) {
+	src := "def f(matrix: list[list[int]]):\n    matrix\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	matrixSym := fnSym.Inner.Symbols["matrix"]
+	if matrixSym == nil || matrixSym.Inferred == nil || matrixSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected outer list type on matrix, got %+v", matrixSym)
+	}
+	inner := matrixSym.Inferred.Elem
+	if inner == nil || inner.Kind != TypeList {
+		t.Fatalf("expected nested list type, got %+v", inner)
+	}
+	if inner.Elem == nil || inner.Elem.Kind != TypeBuiltin || inner.Elem.Symbol == nil || inner.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected nested list[int], got %+v", inner)
+	}
+}
+
+func TestResolveDictAnnotationAssignsKeyValueTypes(t *testing.T) {
+	src := "def f(mapping: dict[str, int]):\n    mapping\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	mappingSym := fnSym.Inner.Symbols["mapping"]
+	if mappingSym == nil || mappingSym.Inferred == nil || mappingSym.Inferred.Kind != TypeDict {
+		t.Fatalf("expected dict type on mapping, got %+v", mappingSym)
+	}
+	if mappingSym.Inferred.Key == nil || mappingSym.Inferred.Key.Kind != TypeBuiltin || mappingSym.Inferred.Key.Symbol == nil || mappingSym.Inferred.Key.Symbol.Name != "str" {
+		t.Fatalf("expected dict key type str, got %+v", mappingSym.Inferred.Key)
+	}
+	if mappingSym.Inferred.Elem == nil || mappingSym.Inferred.Elem.Kind != TypeBuiltin || mappingSym.Inferred.Elem.Symbol == nil || mappingSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected dict value type int, got %+v", mappingSym.Inferred.Elem)
+	}
+}
+
+func TestResolveSetAnnotationAssignsElementType(t *testing.T) {
+	src := "def f(items: set[int]):\n    items\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	itemsSym := fnSym.Inner.Symbols["items"]
+	if itemsSym == nil || itemsSym.Inferred == nil || itemsSym.Inferred.Kind != TypeSet {
+		t.Fatalf("expected set type on items, got %+v", itemsSym)
+	}
+	if itemsSym.Inferred.Elem == nil || itemsSym.Inferred.Elem.Kind != TypeBuiltin || itemsSym.Inferred.Elem.Symbol == nil || itemsSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected set[int], got %+v", itemsSym.Inferred)
+	}
+}
+
+func TestResolveNestedDictAnnotationAssignsNestedTypes(t *testing.T) {
+	src := "def f(nested: dict[str, list[int]]):\n    nested\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnSym := global.Symbols["f"]
+	nestedSym := fnSym.Inner.Symbols["nested"]
+	if nestedSym == nil || nestedSym.Inferred == nil || nestedSym.Inferred.Kind != TypeDict {
+		t.Fatalf("expected dict type on nested, got %+v", nestedSym)
+	}
+	if nestedSym.Inferred.Key == nil || nestedSym.Inferred.Key.Kind != TypeBuiltin || nestedSym.Inferred.Key.Symbol == nil || nestedSym.Inferred.Key.Symbol.Name != "str" {
+		t.Fatalf("expected dict key type str, got %+v", nestedSym.Inferred.Key)
+	}
+	if nestedSym.Inferred.Elem == nil || nestedSym.Inferred.Elem.Kind != TypeList {
+		t.Fatalf("expected dict value list type, got %+v", nestedSym.Inferred.Elem)
+	}
+	if nestedSym.Inferred.Elem.Elem == nil || nestedSym.Inferred.Elem.Elem.Kind != TypeBuiltin || nestedSym.Inferred.Elem.Elem.Symbol == nil || nestedSym.Inferred.Elem.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected dict value list[int], got %+v", nestedSym.Inferred.Elem)
+	}
+}
+
+func TestResolveAnnotatedVariableAssignsBuiltinType(t *testing.T) {
+	src := "x: int = 1\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	xSym := defs[mustNameNode(t, tree, "x")]
+	if xSym == nil || xSym.Inferred == nil || xSym.Inferred.Kind != TypeBuiltin || xSym.Inferred.Symbol == nil || xSym.Inferred.Symbol.Name != "int" {
+		t.Fatalf("expected annotated int type on x, got %+v", xSym)
+	}
+}
+
+func TestResolveAnnotatedVariableWithoutValueAssignsType(t *testing.T) {
+	src := "x: set[int]\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	xSym := defs[mustNameNode(t, tree, "x")]
+	if xSym == nil || xSym.Inferred == nil || xSym.Inferred.Kind != TypeSet || xSym.Inferred.Elem == nil || xSym.Inferred.Elem.Symbol == nil || xSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected annotated set[int] type on x, got %+v", xSym)
+	}
+}
+
+func TestResolveAnnotatedVariablePrefersAnnotationOverEmptyLiteral(t *testing.T) {
+	src := "items: list[int] = []\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree)
+	_, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	itemsSym := defs[mustNameNode(t, tree, "items")]
+	if itemsSym == nil || itemsSym.Inferred == nil || itemsSym.Inferred.Kind != TypeList || itemsSym.Inferred.Elem == nil || itemsSym.Inferred.Elem.Symbol == nil || itemsSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected annotated list[int] type on items, got %+v", itemsSym)
+	}
+}
+
 func TestResolvePropagatesInstanceTypeAcrossAssignment(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\nx = Foo()\ny = x\n"
 	tree := parser.New(src).Parse()

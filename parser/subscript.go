@@ -36,6 +36,25 @@ func (p *Parser) parseSubscript(left a.NodeID) a.NodeID {
 		return ret
 	}
 
+	if p.current.Type == l.COMMA {
+		tuple := p.tree.NewNode(a.NodeTuple, p.tree.Nodes[index].Start, p.tree.Nodes[index].End)
+		p.tree.AddChild(tuple, index)
+		for p.current.Type == l.COMMA {
+			p.advance()
+			if p.current.Type == l.RSQB {
+				break
+			}
+			item := p.parseExpression(LOWEST)
+			if item == a.NoNode {
+				p.errorCurrent("expected expression after ',' in subscript")
+				break
+			}
+			p.tree.AddChild(tuple, item)
+			p.tree.Nodes[tuple].End = p.tree.Nodes[item].End
+		}
+		index = tuple
+	}
+
 	if p.current.Type == l.COLON {
 		slice := p.parseSlice(index)
 		p.tree.AddChild(ret, slice)

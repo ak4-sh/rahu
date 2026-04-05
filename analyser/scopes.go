@@ -69,6 +69,8 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 	switch b.tree.Node(stmt).Kind {
 	case ast.NodeAssign:
 		b.visitAssign(stmt)
+	case ast.NodeAnnAssign:
+		b.visitAnnAssign(stmt)
 	case ast.NodeFunctionDef:
 		b.visitFunctionDef(stmt)
 	case ast.NodeIf:
@@ -366,6 +368,19 @@ func (b *ScopeBuilder) visitAssign(id ast.NodeID) {
 	}
 }
 
+func (b *ScopeBuilder) visitAnnAssign(id ast.NodeID) {
+	target, annotation, value := b.tree.AnnAssignParts(id)
+	if target == ast.NoNode {
+		return
+	}
+
+	if b.tree.Node(target).Kind == ast.NodeName {
+		b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+	}
+	b.visitExpr(annotation)
+	b.visitExpr(value)
+}
+
 func (b *ScopeBuilder) visitClassDef(id ast.NodeID) {
 	name, _, body := b.tree.ClassParts(id)
 	nameText, _ := b.tree.NameText(name)
@@ -429,7 +444,7 @@ func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
 	prevSelf := b.selfName
 	if b.current.Kind == ScopeClass && args != ast.NoNode {
 		firstParam := b.tree.Nodes[args].FirstChild
-		paramName := b.tree.Nodes[firstParam].FirstChild
+		paramName, _, _ := b.tree.ParamParts(firstParam)
 		b.selfName, _ = b.tree.NameText(paramName)
 	} else {
 		b.selfName = ""
@@ -441,9 +456,12 @@ func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
 
 	if args != ast.NoNode {
 		for arg := b.tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = b.tree.Nodes[arg].NextSibling {
-			paramName := b.tree.Nodes[arg].FirstChild
+			paramName, annotation, def := b.tree.ParamParts(arg)
 			b.define(b.current, paramName, SymParameter, b.tree.RangeOf(paramName))
-			if def := b.tree.Nodes[paramName].NextSibling; def != ast.NoNode {
+			if annotation != ast.NoNode {
+				b.visitExpr(annotation)
+			}
+			if def != ast.NoNode {
 				b.visitExpr(def)
 			}
 		}

@@ -92,6 +92,18 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 			printNode(w, tree, kids[0], indent+4, opts)
 		}
 
+	case ast.NodeAnnAssign:
+		target, annotation, value := tree.AnnAssignParts(id)
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "AnnAssign:"))
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Target:"))
+		printNode(w, tree, target, indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Annotation:"))
+		printNode(w, tree, annotation, indent+4, opts)
+		if value != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Value:"))
+			printNode(w, tree, value, indent+4, opts)
+		}
+
 	case ast.NodeAugAssign:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "AugAssign:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Target:"))
@@ -156,16 +168,20 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
 
 	case ast.NodeParam:
-		nameID := tree.ChildAt(id, 0)
+		nameID, annotation, def := tree.ParamParts(id)
 		name, _ := tree.NameText(nameID)
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Param("+name+")"))
-		if def := tree.ChildAt(id, 1); def != ast.NoNode {
+		if annotation != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Annotation:"))
+			printNode(w, tree, annotation, indent+4, opts)
+		}
+		if def != ast.NoNode {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Default:"))
 			printNode(w, tree, def, indent+4, opts)
 		}
 
 	case ast.NodeFunctionDef:
-		nameID, args, body := tree.FunctionParts(id)
+		nameID, args, returnAnnotation, body := tree.FunctionPartsWithReturn(id)
 		name, _ := tree.NameText(nameID)
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+name+"):"))
 		if doc, ok := tree.DocString(id); ok {
@@ -176,6 +192,10 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 			for _, arg := range tree.Children(args) {
 				printNode(w, tree, arg, indent+4, opts)
 			}
+		}
+		if returnAnnotation != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Returns:"))
+			printNode(w, tree, returnAnnotation, indent+4, opts)
 		}
 		if body != ast.NoNode {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))

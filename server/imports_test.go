@@ -251,6 +251,125 @@ func TestHoverShowsUnionType(t *testing.T) {
 	}
 }
 
+func TestHoverShowsAnnotatedParameterType(t *testing.T) {
+	code := "class Foo:\n    pass\n\ndef f(x: Foo):\n    x\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 4, 4)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "parameter(x: Foo)") {
+		t.Fatalf("expected annotated parameter type in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverShowsAnnotatedReturnTypePropagation(t *testing.T) {
+	code := "class Foo:\n    pass\n\ndef make() -> Foo:\n    return Foo()\n\nvalue = make()\nvalue\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 7, 0)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "variable(value: Foo)") {
+		t.Fatalf("expected annotated return type in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverShowsListAnnotation(t *testing.T) {
+	code := "def f(items: list[int]):\n    items\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 1, 4)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "parameter(items: list[int])") {
+		t.Fatalf("expected list[int] in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverShowsTupleAnnotation(t *testing.T) {
+	code := "def f(pair: tuple[str, int]):\n    pair\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 1, 4)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "parameter(pair: tuple[str, int])") {
+		t.Fatalf("expected tuple[str, int] in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverShowsDictAnnotation(t *testing.T) {
+	code := "def f(mapping: dict[str, int]):\n    mapping\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 1, 4)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "parameter(mapping: dict[str, int])") {
+		t.Fatalf("expected dict[str, int] in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverShowsSetAnnotation(t *testing.T) {
+	code := "def f(items: set[int]):\n    items\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 1, 4)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "parameter(items: set[int])") {
+		t.Fatalf("expected set[int] in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverShowsAnnotatedVariableType(t *testing.T) {
+	code := "value: dict[str, int] = {}\nvalue\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 1, 0)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "variable(value: dict[str, int])") {
+		t.Fatalf("expected annotated variable type in hover, got %q", content.Value)
+	}
+}
+
 func TestUnresolvedModuleDiagnosticForImport(t *testing.T) {
 	root := t.TempDir()
 	mainPath := filepath.Join(root, "main.py")

@@ -158,6 +158,8 @@ func cloneImportedSymbol(local, target *analyser.Symbol) {
 	local.Members = target.Members
 	local.Bases = target.Bases
 	local.InstanceOf = target.InstanceOf
+	local.Inferred = target.Inferred
+	local.Returns = target.Returns
 	if target.Scope != nil {
 		local.Scope = target.Scope
 	}
