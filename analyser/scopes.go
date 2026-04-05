@@ -7,6 +7,7 @@ import (
 )
 
 type ScopeBuilder struct {
+	tree         *ast.AST
 	currentClass *Symbol
 	current      *Scope
 	inFunction   bool
@@ -20,163 +21,250 @@ func (b *ScopeBuilder) newSymID() SymbolID {
 	return b.nextSymID
 }
 
-func (b *ScopeBuilder) define(scope *Scope, n *ast.Name, kind SymbolKind, span ast.Range) {
+func (b *ScopeBuilder) define(scope *Scope, nameID ast.NodeID, kind SymbolKind, span ast.Range) {
+	name, ok := b.tree.NameText(nameID)
+	if !ok {
+		return
+	}
+
 	sym := &Symbol{
 		ID:   b.newSymID(),
-		Name: n.Text,
+		Name: name,
 		Kind: kind,
 		Span: span,
-		Def:  n.ID,
+		Def:  nameID,
 	}
 	_ = scope.Define(sym)
-	b.Defs[n.ID] = sym
+	b.Defs[nameID] = sym
 }
 
-func BuildScopes(module *ast.Module) (*Scope, map[ast.NodeID]*Symbol) {
-	builtins := NewBuiltinScope()
-	global := NewScope(builtins, ScopeGlobal)
-	b := &ScopeBuilder{
-		current: global,
-		Defs:    make(map[ast.NodeID]*Symbol),
+func BuildScopes(tree *ast.AST) (*Scope, map[ast.NodeID]*Symbol) {
+	global := NewScope(builtinScope, ScopeGlobal)
+	defsCap := len(tree.Nodes) / 8
+	if defsCap < 8 {
+		defsCap = 8
 	}
-	b.visitModule(module)
+	b := &ScopeBuilder{
+		tree:    tree,
+		current: global,
+		Defs:    make(map[ast.NodeID]*Symbol, defsCap),
+	}
+	b.visitModule()
 	return global, b.Defs
 }
 
-func (b *ScopeBuilder) visitModule(m *ast.Module) {
-	for _, stmt := range m.Body {
-		if stmt != nil {
+func (b *ScopeBuilder) visitModule() {
+	if b.tree == nil {
+		return
+	}
+
+	for stmt := b.tree.Nodes[b.tree.Root].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
+		if stmt != ast.NoNode {
 			b.visitStmt(stmt)
 		}
 	}
 }
 
-func (b *ScopeBuilder) visitStmt(stmt ast.Statement) {
-	switch s := stmt.(type) {
-	case *ast.Assign:
-		b.visitAssign(s)
-	case *ast.FunctionDef:
-		b.visitFunctionDef(s)
-	case *ast.If:
-		b.visitIf(s)
-	case *ast.For:
-		b.visitFor(s)
-
-	case *ast.WhileLoop:
-		b.visitWhile(s)
-	case *ast.ClassDef:
-		b.visitClassDef(s)
-
-	case *ast.ExprStmt:
-		b.visitExpr(s.Value)
-	case *ast.Return:
-		if s.Value != nil {
-			b.visitExpr(s.Value)
+func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
+	switch b.tree.Node(stmt).Kind {
+	case ast.NodeAssign:
+		b.visitAssign(stmt)
+	case ast.NodeFunctionDef:
+		b.visitFunctionDef(stmt)
+	case ast.NodeIf:
+		b.visitIf(stmt)
+	case ast.NodeFor:
+		b.visitFor(stmt)
+	case ast.NodeWhile:
+		b.visitWhile(stmt)
+	case ast.NodeClassDef:
+		b.visitClassDef(stmt)
+	case ast.NodeExprStmt:
+		b.visitExpr(b.tree.Nodes[stmt].FirstChild)
+	case ast.NodeReturn:
+		if value := b.tree.Nodes[stmt].FirstChild; value != ast.NoNode {
+			b.visitExpr(value)
 		}
-	case *ast.AugAssign:
-		b.visitAugAssign(s)
-	case *ast.Break:
-	case *ast.Continue:
+	case ast.NodeAugAssign:
+		b.visitAugAssign(stmt)
+	case ast.NodeBreak, ast.NodeContinue, ast.NodeErrStmt:
 	default:
-		panic(fmt.Sprintf("unhandled statement type %T", s))
+		panic(fmt.Sprintf("unhandled statement type %s", b.tree.Node(stmt).Kind))
 	}
 }
 
-func (b *ScopeBuilder) visitAugAssign(a *ast.AugAssign) {
-	switch tt := a.Target.(type) {
-	case *ast.Name:
-		b.define(b.current, tt, SymVariable, tt.Pos)
+func (b *ScopeBuilder) visitAugAssign(id ast.NodeID) {
+	target := b.tree.Nodes[id].FirstChild
+	value := ast.NoNode
+	if target != ast.NoNode {
+		value = b.tree.Nodes[target].NextSibling
+	}
 
-	case *ast.Attribute:
+	switch b.tree.Node(target).Kind {
+	case ast.NodeName:
+		b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+
+	case ast.NodeAttribute:
 		if b.currentClass != nil && b.inFunction {
-			base, ok := tt.Value.(*ast.Name)
-			if ok && base.Text == b.selfName {
+			base := b.tree.Nodes[target].FirstChild
+			attr := ast.NoNode
+			if base != ast.NoNode {
+				attr = b.tree.Nodes[base].NextSibling
+			}
+			baseName, _ := b.tree.NameText(base)
+			attrName, _ := b.tree.NameText(attr)
+			if b.tree.Node(base).Kind == ast.NodeName && baseName == b.selfName {
 				if b.currentClass.Attrs == nil {
 					b.currentClass.Attrs = NewScope(nil, ScopeAttr)
 				}
 				sym := &Symbol{
-					Name: tt.Attr.Text,
+					Name: attrName,
 					Kind: SymAttr,
-					Span: tt.Attr.Pos,
-					Def:  tt.Attr.ID,
+					Span: b.tree.RangeOf(attr),
+					Def:  attr,
 					ID:   b.newSymID(),
 				}
 				_ = b.currentClass.Attrs.Define(sym)
-				b.Defs[tt.Attr.ID] = sym
+				b.Defs[attr] = sym
 			}
 		}
 	}
 
-	b.visitExpr(a.Value)
+	b.visitExpr(value)
 }
 
-func (b *ScopeBuilder) visitExpr(value ast.Expression) {
-	switch v := value.(type) {
-	case *ast.Name:
-	case *ast.Call:
-		b.visitExpr(v.Func)
-		for _, arg := range v.Args {
-			b.visitExpr(arg)
+func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
+	if id == ast.NoNode {
+		return
+	}
+
+	switch b.tree.Node(id).Kind {
+	case ast.NodeName, ast.NodeNumber, ast.NodeString, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+		return
+
+	case ast.NodeCall:
+		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
+			b.visitExpr(child)
 		}
 
-	case *ast.Attribute:
-		b.visitExpr(v.Value)
+	case ast.NodeAttribute:
+		b.visitExpr(b.tree.Nodes[id].FirstChild)
 
-	case *ast.BinOp:
-		b.visitExpr(v.Left)
-		b.visitExpr(v.Right)
+	case ast.NodeBinOp:
+		left := b.tree.Nodes[id].FirstChild
+		right := ast.NoNode
+		if left != ast.NoNode {
+			right = b.tree.Nodes[left].NextSibling
+		}
+		b.visitExpr(left)
+		b.visitExpr(right)
 
-	case *ast.UnaryOp:
-		b.visitExpr(v.Operand)
+	case ast.NodeUnaryOp:
+		b.visitExpr(b.tree.Nodes[id].FirstChild)
 
-	case *ast.Compare:
-		b.visitExpr(v.Left)
-		for _, c := range v.Right {
-			b.visitExpr(c)
+	case ast.NodeCompare:
+		left := b.tree.Nodes[id].FirstChild
+		if left == ast.NoNode {
+			return
+		}
+		b.visitExpr(left)
+		for cmp := b.tree.Nodes[left].NextSibling; cmp != ast.NoNode; cmp = b.tree.Nodes[cmp].NextSibling {
+			b.visitExpr(b.tree.Nodes[cmp].FirstChild)
 		}
 
+	case ast.NodeTuple, ast.NodeList, ast.NodeBooleanOp:
+		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
+			b.visitExpr(child)
+		}
 	}
 }
 
-func (b *ScopeBuilder) visitWhile(w *ast.WhileLoop) {
-	for _, stmt := range w.Body {
+func (b *ScopeBuilder) visitWhile(id ast.NodeID) {
+	test := b.tree.Nodes[id].FirstChild
+	body := ast.NoNode
+	if test != ast.NoNode {
+		body = b.tree.Nodes[test].NextSibling
+	}
+	for stmt := b.tree.Nodes[body].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
 		b.visitStmt(stmt)
 	}
 }
 
-func (b *ScopeBuilder) visitFor(f *ast.For) {
-	if name, ok := f.Target.(*ast.Name); ok {
-		b.define(b.current, name, SymVariable, name.Pos)
+func (b *ScopeBuilder) visitFor(id ast.NodeID) {
+	target := b.tree.Nodes[id].FirstChild
+	if b.tree.Node(target).Kind == ast.NodeName {
+		b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
 	}
 
-	for _, stmt := range f.Body {
+	iter := ast.NoNode
+	body := ast.NoNode
+	if target != ast.NoNode {
+		iter = b.tree.Nodes[target].NextSibling
+	}
+	if iter != ast.NoNode {
+		body = b.tree.Nodes[iter].NextSibling
+	}
+	for stmt := b.tree.Nodes[body].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
 		b.visitStmt(stmt)
 	}
+
+	orelse := ast.NoNode
+	if body != ast.NoNode {
+		orelse = b.tree.Nodes[body].NextSibling
+	}
+	if orelse != ast.NoNode {
+		for stmt := b.tree.Nodes[orelse].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
+			b.visitStmt(stmt)
+		}
+	}
 }
 
-func (b *ScopeBuilder) visitIf(i *ast.If) {
-	for _, stm := range i.Body {
-		b.visitStmt(stm)
+func (b *ScopeBuilder) visitIf(id ast.NodeID) {
+	test := b.tree.Nodes[id].FirstChild
+	body := ast.NoNode
+	if test != ast.NoNode {
+		body = b.tree.Nodes[test].NextSibling
+	}
+	for stmt := b.tree.Nodes[body].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
+		b.visitStmt(stmt)
 	}
 
-	for _, stm := range i.Orelse {
-		b.visitStmt(stm)
+	orelse := ast.NoNode
+	if body != ast.NoNode {
+		orelse = b.tree.Nodes[body].NextSibling
+	}
+	if orelse != ast.NoNode {
+		for stmt := b.tree.Nodes[orelse].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
+			b.visitStmt(stmt)
+		}
 	}
 }
 
-func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
-	for _, t := range a.Targets {
-		switch tt := t.(type) {
-		case *ast.Name:
-			b.define(b.current, tt, SymVariable, tt.Pos)
+func (b *ScopeBuilder) visitAssign(id ast.NodeID) {
+	value := b.tree.Nodes[id].FirstChild
+	for target := ast.NoNode; value != ast.NoNode; {
+		target = b.tree.Nodes[value].NextSibling
+		if target == ast.NoNode {
+			break
+		}
 
-		case *ast.Attribute:
+		switch b.tree.Node(target).Kind {
+		case ast.NodeName:
+			b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+
+		case ast.NodeAttribute:
 			if b.currentClass == nil || !b.inFunction {
 				break
 			}
-			base, ok := tt.Value.(*ast.Name)
 
-			if !ok || base.Text != b.selfName {
+			base := b.tree.Nodes[target].FirstChild
+			attr := ast.NoNode
+			if base != ast.NoNode {
+				attr = b.tree.Nodes[base].NextSibling
+			}
+			baseName, _ := b.tree.NameText(base)
+			attrName, _ := b.tree.NameText(attr)
+			if b.tree.Node(base).Kind != ast.NodeName || baseName != b.selfName {
 				break
 			}
 
@@ -185,38 +273,43 @@ func (b *ScopeBuilder) visitAssign(a *ast.Assign) {
 			}
 
 			sym := &Symbol{
-				Name: tt.Attr.Text,
+				Name: attrName,
 				Kind: SymAttr,
-				Span: tt.Attr.Pos,
-				Def:  tt.Attr.ID,
+				Span: b.tree.RangeOf(attr),
+				Def:  attr,
 				ID:   b.newSymID(),
 			}
 			_ = b.currentClass.Attrs.Define(sym)
-			b.Defs[tt.Attr.ID] = sym
-
+			b.Defs[attr] = sym
 		}
+
+		value = target
 	}
 
-	b.visitExpr(a.Value)
+	if value != ast.NoNode {
+		b.visitExpr(value)
+	}
 }
 
-func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
-	if c.Name.Text == "<incomplete>" {
+func (b *ScopeBuilder) visitClassDef(id ast.NodeID) {
+	name, _, body := b.tree.ClassParts(id)
+	nameText, _ := b.tree.NameText(name)
+	if nameText == "<incomplete>" {
 		return
 	}
 
 	classScope := NewScope(b.current, ScopeClass)
 
 	classSym := &Symbol{
-		Name: c.Name.Text,
+		Name: nameText,
 		Kind: SymClass,
-		Span: c.Name.Pos,
+		Span: b.tree.RangeOf(name),
 		ID:   b.newSymID(),
-		Def:  c.Name.ID,
+		Def:  name,
 	}
 	classScope.Owner = classSym
 	_ = b.current.Define(classSym)
-	b.Defs[c.Name.ID] = classSym
+	b.Defs[name] = classSym
 
 	classSym.Inner = classScope
 	prev := b.current
@@ -226,38 +319,43 @@ func (b *ScopeBuilder) visitClassDef(c *ast.ClassDef) {
 	b.currentClass = classSym
 	b.selfName = ""
 
-	for _, stmt := range c.Body {
+	for stmt := b.tree.Nodes[body].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
 		b.visitStmt(stmt)
 	}
+
 	b.current = prev
 	b.currentClass = prevClass
 	b.selfName = prevSelf
 }
 
-func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
-	if f.Name.Text == "<incomplete>" {
+func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
+	name, args, body := b.tree.FunctionParts(id)
+	nameText, _ := b.tree.NameText(name)
+	if nameText == "<incomplete>" {
 		return
 	}
 
 	fnScope := NewScope(b.current, ScopeFunction)
 
 	fnSym := &Symbol{
-		Name: f.Name.Text,
+		Name: nameText,
 		Kind: SymFunction,
-		Span: f.NamePos,
+		Span: b.tree.RangeOf(name),
 		ID:   b.newSymID(),
-		Def:  f.Name.ID,
+		Def:  name,
 	}
 
 	fnScope.Owner = fnSym
 
 	_ = b.current.Define(fnSym)
-	b.Defs[f.Name.ID] = fnSym
+	b.Defs[name] = fnSym
 
 	fnSym.Inner = fnScope
 	prevSelf := b.selfName
-	if b.current.Kind == ScopeClass && len(f.Args) > 0 {
-		b.selfName = f.Args[0].Name.Text
+	if b.current.Kind == ScopeClass && args != ast.NoNode {
+		firstParam := b.tree.Nodes[args].FirstChild
+		paramName := b.tree.Nodes[firstParam].FirstChild
+		b.selfName, _ = b.tree.NameText(paramName)
 	} else {
 		b.selfName = ""
 	}
@@ -266,11 +364,17 @@ func (b *ScopeBuilder) visitFunctionDef(f *ast.FunctionDef) {
 	prevInFunc := b.inFunction
 	b.inFunction = true
 
-	for _, arg := range f.Args {
-		b.define(b.current, arg.Name, SymParameter, arg.Pos)
+	if args != ast.NoNode {
+		for arg := b.tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = b.tree.Nodes[arg].NextSibling {
+			paramName := b.tree.Nodes[arg].FirstChild
+			b.define(b.current, paramName, SymParameter, b.tree.RangeOf(paramName))
+			if def := b.tree.Nodes[paramName].NextSibling; def != ast.NoNode {
+				b.visitExpr(def)
+			}
+		}
 	}
 
-	for _, stmt := range f.Body {
+	for stmt := b.tree.Nodes[body].FirstChild; stmt != ast.NoNode; stmt = b.tree.Nodes[stmt].NextSibling {
 		b.visitStmt(stmt)
 	}
 

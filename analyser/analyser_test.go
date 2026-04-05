@@ -14,9 +14,9 @@ func TestFunctionScope(t *testing.T) {
     `
 
 	p := parser.New(input)
-	module := p.Parse()
+	tree := p.Parse()
 
-	global, _ := BuildScopes(module)
+	global, _ := BuildScopes(tree)
 
 	if _, ok := global.Symbols["f"]; !ok {
 		t.Fatal("missing function symbol f")
@@ -38,119 +38,70 @@ func TestSimpleResolution(t *testing.T) {
 	`
 
 	p := parser.New(src)
-	module := p.Parse()
-	global, _ := BuildScopes(module)
+	tree := p.Parse()
+	global, _ := BuildScopes(tree)
 
-	resolver, errs := Resolve(module, global)
+	resolver, errs := Resolve(tree, global)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %+v", errs)
 	}
 
-	var xUses []*ast.Name
-	collectNames(module, &xUses)
+	var xUses []ast.NodeID
+	collectNames(tree, tree.Root, &xUses)
 
-	if resolver.Resolved[xUses[0].ID].Name != "x" {
+	if resolver.Resolved[xUses[0]].Name != "x" {
 		t.Fatal("x did not resolve to symbol x")
 	}
 }
 
-func collectNames(n ast.Node, out *[]*ast.Name) {
-	switch v := n.(type) {
-
-	// ----- statements -----
-
-	case *ast.Module:
-		for _, s := range v.Body {
-			collectNames(s, out)
-		}
-
-	case *ast.Assign:
-		for _, t := range v.Targets {
-			collectNames(t, out)
-		}
-		collectNames(v.Value, out)
-
-	case *ast.FunctionDef:
-		for _, arg := range v.Args {
-			if arg.Default != nil {
-				collectNames(arg.Default, out)
-			}
-		}
-		for _, s := range v.Body {
-			collectNames(s, out)
-		}
-
-	case *ast.ExprStmt:
-		collectNames(v.Value, out)
-
-	case *ast.If:
-		collectNames(v.Test, out)
-		for _, s := range v.Body {
-			collectNames(s, out)
-		}
-		for _, s := range v.Orelse {
-			collectNames(s, out)
-		}
-
-	case *ast.For:
-		collectNames(v.Target, out)
-		collectNames(v.Iter, out)
-		for _, s := range v.Body {
-			collectNames(s, out)
-		}
-
-	case *ast.WhileLoop:
-		collectNames(v.Test, out)
-		for _, s := range v.Body {
-			collectNames(s, out)
-		}
-
-	case *ast.Return:
-		if v.Value != nil {
-			collectNames(v.Value, out)
-		}
-
-	// ----- expressions -----
-
-	case *ast.Name:
-		*out = append(*out, v)
-
-	case *ast.BinOp:
-		collectNames(v.Left, out)
-		collectNames(v.Right, out)
-
-	case *ast.UnaryOp:
-		collectNames(v.Operand, out)
-
-	case *ast.Call:
-		collectNames(v.Func, out)
-		for _, a := range v.Args {
-			collectNames(a, out)
-		}
-
-	case *ast.Compare:
-		collectNames(v.Left, out)
-		for _, r := range v.Right {
-			collectNames(r, out)
-		}
-
-	case *ast.Tuple:
-		for _, e := range v.Elts {
-			collectNames(e, out)
-		}
-
-	case *ast.List:
-		for _, e := range v.Elts {
-			collectNames(e, out)
-		}
-
-	case *ast.BooleanOp:
-		for _, e := range v.Values {
-			collectNames(e, out)
-		}
-
-	// literals: nothing to do
-	case *ast.Number, *ast.String, *ast.Boolean:
+func collectNames(tree *ast.AST, id ast.NodeID, out *[]ast.NodeID) {
+	if id == ast.NoNode {
 		return
+	}
+
+	if tree.Node(id).Kind == ast.NodeName {
+		*out = append(*out, id)
+	}
+
+	for _, child := range tree.Children(id) {
+		collectNames(tree, child, out)
+	}
+}
+
+func TestBuildScopes_AllowsPartialFunctionHeader(t *testing.T) {
+	tree := parser.New("def foo(x=bar)").Parse()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("BuildScopes panicked on partial function: %v", r)
+		}
+	}()
+
+	global, _ := BuildScopes(tree)
+	if _, ok := global.Symbols["foo"]; !ok {
+		t.Fatal("missing function symbol foo")
+	}
+
+	if _, errs := Resolve(tree, global); len(errs) == 0 {
+		t.Fatal("expected unresolved default argument to produce an error")
+	}
+}
+
+func TestBuildScopes_AllowsPartialClassHeader(t *testing.T) {
+	tree := parser.New("class Foo(Bar)").Parse()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("BuildScopes panicked on partial class: %v", r)
+		}
+	}()
+
+	global, _ := BuildScopes(tree)
+	if _, ok := global.Symbols["Foo"]; !ok {
+		t.Fatal("missing class symbol Foo")
+	}
+
+	if _, errs := Resolve(tree, global); len(errs) == 0 {
+		t.Fatal("expected unresolved base class to produce an error")
 	}
 }
