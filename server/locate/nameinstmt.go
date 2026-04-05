@@ -155,6 +155,34 @@ func locateInStmt(tree *ast.AST, stmt ast.NodeID, pos int, mode locateMode) Resu
 
 	case ast.NodeExprStmt, ast.NodeReturn:
 		return locateInExpr(tree, tree.Nodes[stmt].FirstChild, pos, mode)
+
+	case ast.NodeImport:
+		for alias := tree.Nodes[stmt].FirstChild; alias != ast.NoNode; alias = tree.Nodes[alias].NextSibling {
+			target, asName := tree.AliasParts(alias)
+			if res := locateInExpr(tree, target, pos, mode); res.Kind != NoResult {
+				return res
+			}
+			if mode != locateAttrOnly && nodeContains(tree, asName, pos) {
+				return Result{Kind: NameResult, Node: asName}
+			}
+		}
+
+	case ast.NodeFromImport:
+		module, aliases := tree.FromImportParts(stmt)
+		if module != ast.NoNode {
+			if res := locateInExpr(tree, module, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+		for _, alias := range aliases {
+			target, asName := tree.AliasParts(alias)
+			if res := locateInExpr(tree, target, pos, mode); res.Kind != NoResult {
+				return res
+			}
+			if mode != locateAttrOnly && nodeContains(tree, asName, pos) {
+				return Result{Kind: NameResult, Node: asName}
+			}
+		}
 	}
 
 	return Result{}

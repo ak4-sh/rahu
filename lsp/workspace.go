@@ -93,3 +93,42 @@ type WorkspaceClientCapabilities struct {
 	DidChangeConfiguration *DidChangeConfigurationClientCapabilities `json:"didChangeConfiguration,omitempty"`
 	DidChangeWatchedFiles  *DidChangeWatchedFilesClientCapabilities  `json:"didChangeWatchedFiles,omitempty"`
 }
+
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+type SymbolKind int
+
+const (
+	SymbolKindFile       SymbolKind = 1
+	SymbolKindModule     SymbolKind = 2
+	SymbolKindNamespace  SymbolKind = 3
+	SymbolKindPackage    SymbolKind = 4
+	SymbolKindClass      SymbolKind = 5
+	SymbolKindMethod     SymbolKind = 6
+	SymbolKindProperty   SymbolKind = 7
+	SymbolKindField      SymbolKind = 8
+	SymbolKindFunction   SymbolKind = 12
+	SymbolKindVariable   SymbolKind = 13
+	SymbolKindConstant   SymbolKind = 14
+	SymbolKindString     SymbolKind = 15
+	SymbolKindNumber     SymbolKind = 16
+	SymbolKindBoolean    SymbolKind = 17
+	SymbolKindArray      SymbolKind = 18
+	SymbolKindObject     SymbolKind = 19
+	SymbolKindKey        SymbolKind = 20
+	SymbolKindNull       SymbolKind = 21
+	SymbolKindEnumMember SymbolKind = 22
+	SymbolKindStruct     SymbolKind = 23
+	SymbolKindEvent      SymbolKind = 24
+	SymbolKindOperator   SymbolKind = 25
+	SymbolKindTypeParam  SymbolKind = 26
+)
+
+type SymbolInformation struct {
+	Name          string     `json:"name"`
+	Kind          SymbolKind `json:"kind"`
+	Location      Location   `json:"location"`
+	ContainerName string     `json:"containerName,omitempty"`
+}

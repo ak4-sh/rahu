@@ -16,6 +16,10 @@ func Dispatch(conn *Conn) {
 			log.Printf("DISPATCH: request %s", m.Method)
 			go dispatchRequest(conn, m)
 
+		case *Response:
+			log.Printf("DISPATCH: response")
+			conn.deliverResponse(m)
+
 		case *Notification:
 			log.Printf("DISPATCH: notification %s", m.Method)
 			go dispatchNotification(conn, m)

@@ -48,4 +48,34 @@ func Register(s *Server) {
 		"textDocument/definition",
 		jsonrpc.AdaptRequest(s.Definition),
 	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/references",
+		jsonrpc.AdaptRequest(s.References),
+	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/completion",
+		jsonrpc.AdaptRequest(s.Completion),
+	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/rename",
+		jsonrpc.AdaptRequest(s.Rename),
+	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/prepareRename",
+		jsonrpc.AdaptRequest(s.PrepareRename),
+	)
+
+	jsonrpc.RegisterRequest(
+		"textDocument/documentSymbol",
+		jsonrpc.AdaptRequest(s.DocumentSymbol),
+	)
+
+	jsonrpc.RegisterRequest(
+		"workspace/symbol",
+		jsonrpc.AdaptRequest(s.WorkspaceSymbol),
+	)
 }

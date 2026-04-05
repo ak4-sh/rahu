@@ -3,10 +3,12 @@ package jsonrpc
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConn_Read(t *testing.T) {
@@ -157,4 +159,100 @@ func TestReadBody_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected parse error")
 	}
+}
+
+func TestConn_ReadResponse(t *testing.T) {
+	resp := `{"jsonrpc":"2.0","id":1,"result":"ok"}`
+	input := fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(resp), resp)
+
+	in := bytes.NewBufferString(input)
+	out := &bytes.Buffer{}
+
+	conn := NewConn(
+		bufio.NewReader(in),
+		bufio.NewWriter(out),
+		func() error { return nil },
+	)
+
+	conn.Start()
+
+	msg, ok := <-conn.Incoming()
+	if !ok {
+		t.Fatalf("incoming channel closed")
+	}
+	if _, ok := msg.(*Response); !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+
+	conn.Close()
+	conn.Wait()
+}
+
+func TestConn_RequestRoundTrip(t *testing.T) {
+	in := bytes.NewBuffer(nil)
+	out := &bytes.Buffer{}
+
+	conn := NewConn(
+		bufio.NewReader(in),
+		bufio.NewWriter(out),
+		func() error { return nil },
+	)
+	conn.Start()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	done := make(chan *Response, 1)
+	go func() {
+		resp, err := conn.Request(ctx, "window/showMessageRequest", map[string]any{"message": "hi"})
+		if err != nil {
+			t.Errorf("unexpected request error: %v", err)
+			return
+		}
+		done <- resp
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	output := out.String()
+	if !strings.Contains(output, `"method":"window/showMessageRequest"`) {
+		t.Fatalf("missing request method in output: %q", output)
+	}
+	if !strings.Contains(output, `"id":1`) {
+		t.Fatalf("missing request id in output: %q", output)
+	}
+
+	conn.deliverResponse(&Response{JSONRPC: "2.0", ID: json.RawMessage(`1`), Result: json.RawMessage(`{"title":"OK"}`)})
+	select {
+	case resp := <-done:
+		if string(resp.Result) != `{"title":"OK"}` {
+			t.Fatalf("unexpected response result: %s", resp.Result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for response")
+	}
+
+	conn.Close()
+	conn.Wait()
+}
+
+func TestConn_RequestContextCancel(t *testing.T) {
+	in := bytes.NewBuffer(nil)
+	out := &bytes.Buffer{}
+
+	conn := NewConn(
+		bufio.NewReader(in),
+		bufio.NewWriter(out),
+		func() error { return nil },
+	)
+	conn.Start()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := conn.Request(ctx, "window/showMessageRequest", map[string]any{"message": "hi"})
+	if err == nil {
+		t.Fatal("expected request timeout error")
+	}
+
+	conn.Close()
+	conn.Wait()
 }

@@ -87,9 +87,61 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 		}
 	case ast.NodeAugAssign:
 		b.visitAugAssign(stmt)
+	case ast.NodeImport:
+		b.visitImport(stmt)
+	case ast.NodeFromImport:
+		b.visitFromImport(stmt)
 	case ast.NodeBreak, ast.NodeContinue, ast.NodeErrStmt:
 	default:
 		panic(fmt.Sprintf("unhandled statement type %s", b.tree.Node(stmt).Kind))
+	}
+}
+
+func importBoundName(tree *ast.AST, target ast.NodeID) ast.NodeID {
+	if target == ast.NoNode {
+		return ast.NoNode
+	}
+
+	if tree.Node(target).Kind == ast.NodeName {
+		return target
+	}
+
+	if tree.Node(target).Kind != ast.NodeAttribute {
+		return ast.NoNode
+	}
+
+	base := tree.ChildAt(target, 0)
+	if base == ast.NoNode {
+		return ast.NoNode
+	}
+
+	return importBoundName(tree, base)
+}
+
+func (b *ScopeBuilder) visitImport(id ast.NodeID) {
+	for alias := b.tree.Node(id).FirstChild; alias != ast.NoNode; alias = b.tree.Node(alias).NextSibling {
+		target, asName := b.tree.AliasParts(alias)
+		bound := asName
+		if bound == ast.NoNode {
+			bound = importBoundName(b.tree, target)
+		}
+		if bound != ast.NoNode {
+			b.define(b.current, bound, SymImport, b.tree.RangeOf(bound))
+		}
+	}
+}
+
+func (b *ScopeBuilder) visitFromImport(id ast.NodeID) {
+	_, aliases := b.tree.FromImportParts(id)
+	for _, alias := range aliases {
+		target, asName := b.tree.AliasParts(alias)
+		bound := asName
+		if bound == ast.NoNode {
+			bound = target
+		}
+		if bound != ast.NoNode {
+			b.define(b.current, bound, SymImport, b.tree.RangeOf(bound))
+		}
 	}
 }
 
@@ -128,6 +180,9 @@ func (b *ScopeBuilder) visitAugAssign(id ast.NodeID) {
 				b.Defs[attr] = sym
 			}
 		}
+
+	case ast.NodeSubScript:
+		b.visitExpr(target)
 	}
 
 	b.visitExpr(value)
@@ -143,6 +198,23 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 		return
 
 	case ast.NodeCall:
+		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
+			b.visitExpr(child)
+		}
+
+	case ast.NodeKeywordArg:
+		b.visitExpr(b.tree.ChildAt(id, 1))
+
+	case ast.NodeSubScript:
+		base := b.tree.Nodes[id].FirstChild
+		index := ast.NoNode
+		if base != ast.NoNode {
+			index = b.tree.Nodes[base].NextSibling
+		}
+		b.visitExpr(base)
+		b.visitExpr(index)
+
+	case ast.NodeSlice:
 		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
 			b.visitExpr(child)
 		}
@@ -172,7 +244,7 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 			b.visitExpr(b.tree.Nodes[cmp].FirstChild)
 		}
 
-	case ast.NodeTuple, ast.NodeList, ast.NodeBooleanOp:
+	case ast.NodeTuple, ast.NodeList, ast.NodeDict, ast.NodeBooleanOp:
 		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
 			b.visitExpr(child)
 		}
@@ -281,6 +353,9 @@ func (b *ScopeBuilder) visitAssign(id ast.NodeID) {
 			}
 			_ = b.currentClass.Attrs.Define(sym)
 			b.Defs[attr] = sym
+
+		case ast.NodeSubScript:
+			b.visitExpr(target)
 		}
 
 		value = target

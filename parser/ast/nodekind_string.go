@@ -41,11 +41,17 @@ func _() {
 	_ = x[NodeBaseList-30]
 	_ = x[NodeErrStmt-31]
 	_ = x[NodeParam-32]
+	_ = x[NodeImport-33]
+	_ = x[NodeFromImport-34]
+	_ = x[NodeAlias-35]
+	_ = x[NodeSlice-36]
+	_ = x[NodeKeywordArg-37]
+	_ = x[NodeDict-38]
 }
 
-const _NodeKind_name = "NodeModuleNodeAssignNodeAugAssignNodeNameNodeNumberNodeStringNodeBinOpNodeUnaryOpNodeCallNodeAttributeNodeCompareNodeCompareOpNodeBooleanOpNodeBooleanNodeTupleNodeNoneNodeListNodeIfNodeForNodeWhileNodeReturnNodeBreakNodeContinueNodeFunctionDefNodeClassDefNodeExprStmtNodeBlockNodeArgsNodeErrExpNodeSubScriptNodeBaseListNodeErrStmtNodeParam"
+const _NodeKind_name = "NodeModuleNodeAssignNodeAugAssignNodeNameNodeNumberNodeStringNodeBinOpNodeUnaryOpNodeCallNodeAttributeNodeCompareNodeCompareOpNodeBooleanOpNodeBooleanNodeTupleNodeNoneNodeListNodeIfNodeForNodeWhileNodeReturnNodeBreakNodeContinueNodeFunctionDefNodeClassDefNodeExprStmtNodeBlockNodeArgsNodeErrExpNodeSubScriptNodeBaseListNodeErrStmtNodeParamNodeImportNodeFromImportNodeAliasNodeSliceNodeKeywordArgNodeDict"
 
-var _NodeKind_index = [...]uint16{0, 10, 20, 33, 41, 51, 61, 70, 81, 89, 102, 113, 126, 139, 150, 159, 167, 175, 181, 188, 197, 207, 216, 228, 243, 255, 267, 276, 284, 294, 307, 319, 330, 339}
+var _NodeKind_index = [...]uint16{0, 10, 20, 33, 41, 51, 61, 70, 81, 89, 102, 113, 126, 139, 150, 159, 167, 175, 181, 188, 197, 207, 216, 228, 243, 255, 267, 276, 284, 294, 307, 319, 330, 339, 349, 363, 372, 381, 395, 403}
 
 func (i NodeKind) String() string {
 	idx := int(i) - 0

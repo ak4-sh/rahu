@@ -15,8 +15,9 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 
 	p.advance()
 
+	seenKeyword := false
 	if p.current.Type != l.RPAR {
-		first := p.parseExpression(LOWEST)
+		first := p.parseCallArg(&seenKeyword)
 		if first == a.NoNode {
 			p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
 			end := p.current.End
@@ -37,7 +38,7 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 			if p.current.Type == l.RPAR {
 				break
 			}
-			arg := p.parseExpression(LOWEST)
+			arg := p.parseCallArg(&seenKeyword)
 
 			if arg == a.NoNode {
 				p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
@@ -70,4 +71,33 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 
 	p.tree.Nodes[callID].End = endPos
 	return callID
+}
+
+func (p *Parser) parseCallArg(seenKeyword *bool) a.NodeID {
+	if p.current.Type == l.NAME && p.peek.Type == l.EQUAL {
+		keyword := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
+		start := p.current.Start
+		p.advanceBy(2)
+
+		value := p.parseExpression(LOWEST)
+		if value == a.NoNode {
+			p.errorCurrent("expected expression after '=' in keyword argument")
+			return a.NoNode
+		}
+
+		arg := p.tree.NewNode(a.NodeKeywordArg, start, p.tree.Nodes[value].End)
+		p.tree.AddChild(arg, keyword)
+		p.tree.AddChild(arg, value)
+		*seenKeyword = true
+		return arg
+	}
+
+	arg := p.parseExpression(LOWEST)
+	if arg == a.NoNode {
+		return a.NoNode
+	}
+	if *seenKeyword {
+		p.error(a.Range{Start: p.tree.Nodes[arg].Start, End: p.tree.Nodes[arg].End}, "positional argument follows keyword argument")
+	}
+	return arg
 }

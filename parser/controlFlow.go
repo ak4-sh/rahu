@@ -414,6 +414,24 @@ func (p *Parser) parseReturn() a.NodeID {
 	}
 
 	value := p.parseExpression(LOWEST)
+	if value != a.NoNode && p.current.Type == l.COMMA {
+		tuple := p.tree.NewNode(a.NodeTuple, p.tree.Nodes[value].Start, p.tree.Nodes[value].End)
+		p.tree.AddChild(tuple, value)
+		for p.current.Type == l.COMMA {
+			p.advance()
+			if p.current.Type == l.NEWLINE || p.current.Type == l.EOF {
+				break
+			}
+			elt := p.parseExpression(LOWEST)
+			if elt == a.NoNode {
+				p.errorCurrent("expected expression after ',' in return value")
+				break
+			}
+			p.tree.AddChild(tuple, elt)
+			p.tree.Nodes[tuple].End = p.tree.Nodes[elt].End
+		}
+		value = tuple
+	}
 	endPos := p.current.Start
 	if p.current.Type == l.NEWLINE {
 		p.advance()

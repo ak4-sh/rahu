@@ -110,6 +110,9 @@ func (p *Parser) postfixParseLoop(left a.NodeID) a.NodeID {
 
 		case l.DOT:
 			left = p.parseAttribute(left)
+
+		case l.LSQB:
+			left = p.parseSubscript(left)
 		default:
 			return left
 		}
@@ -203,6 +206,9 @@ func (p *Parser) parsePrimary() a.NodeID {
 
 	case l.LSQB:
 		return p.parseList()
+
+	case l.LBRACE:
+		return p.parseDict()
 
 	case l.STRING:
 		idx := uint32(len(p.tree.Strings))

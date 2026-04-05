@@ -113,3 +113,66 @@ type DefinitionParams struct {
 	TextDocument       TextDocumentIdentifier `json:"textDocument"`
 	Position           Position               `json:"position"`
 }
+
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           SymbolKind       `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext       `json:"context"`
+}
+
+type RenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
+type PrepareRenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type PrepareRenameResult struct {
+	Range       Range  `json:"range"`
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
+type CompletionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type CompletionItemKind int
+
+const (
+	CompletionItemKindText     CompletionItemKind = 1
+	CompletionItemKindMethod   CompletionItemKind = 2
+	CompletionItemKindFunction CompletionItemKind = 3
+	CompletionItemKindClass    CompletionItemKind = 7
+	CompletionItemKindModule   CompletionItemKind = 9
+	CompletionItemKindVariable CompletionItemKind = 6
+	CompletionItemKindField    CompletionItemKind = 5
+	CompletionItemKindConstant CompletionItemKind = 21
+)
+
+type CompletionItem struct {
+	Label  string             `json:"label"`
+	Kind   CompletionItemKind `json:"kind,omitempty"`
+	Detail string             `json:"detail,omitempty"`
+}
