@@ -14,10 +14,7 @@ func (p *Parser) parseAttribute(left a.NodeID) a.NodeID {
 		return left
 	}
 
-	attr := p.tree.NewNode(a.NodeName, p.current.Start, p.current.End)
-	idx := uint32(len(p.tree.Names))
-	p.tree.Names = append(p.tree.Names, p.current.Literal)
-	p.tree.Nodes[attr].Data = idx
+	attr := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
 
 	p.advance() // consume name
 

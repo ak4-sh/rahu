@@ -70,22 +70,16 @@ func (p *Parser) parseFor() a.NodeID {
 	}
 	p.advance()
 
-	body := []a.NodeID{}
+	bodyBlock := p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
 	for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
 		stmt := p.parseStatement()
 		if stmt != a.NoNode {
-			body = append(body, stmt)
+			p.tree.AddChild(bodyBlock, stmt)
+			if p.tree.Nodes[bodyBlock].FirstChild == stmt {
+				p.tree.Nodes[bodyBlock].Start = p.tree.Nodes[stmt].Start
+			}
+			p.tree.Nodes[bodyBlock].End = p.tree.Nodes[stmt].End
 		}
-	}
-
-	bodyStart, bodyEnd := p.current.Start, p.current.Start
-	if len(body) > 0 {
-		bodyStart = p.tree.Nodes[body[0]].Start
-		bodyEnd = p.tree.Nodes[body[len(body)-1]].End
-	}
-	bodyBlock := p.tree.NewNode(a.NodeBlock, bodyStart, bodyEnd)
-	for _, child := range body {
-		p.tree.AddChild(bodyBlock, child)
 	}
 	p.tree.AddChild(ret, bodyBlock)
 
@@ -94,8 +88,8 @@ func (p *Parser) parseFor() a.NodeID {
 		p.advance()
 	}
 
-	orelse := []a.NodeID{}
 	if p.current.Type == l.ELSE {
+		elseBlock := a.NoNode
 		p.advance()
 
 		if p.current.Type != l.COLON {
@@ -127,22 +121,20 @@ func (p *Parser) parseFor() a.NodeID {
 			}
 		}
 		p.advance()
+		elseBlock = p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
 
 		for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
 			stmt := p.parseStatement()
 			if stmt != a.NoNode {
-				orelse = append(orelse, stmt)
+				p.tree.AddChild(elseBlock, stmt)
+				if p.tree.Nodes[elseBlock].FirstChild == stmt {
+					p.tree.Nodes[elseBlock].Start = p.tree.Nodes[stmt].Start
+				}
+				p.tree.Nodes[elseBlock].End = p.tree.Nodes[stmt].End
 			}
 		}
-
-		elseStart, elseEnd := p.current.Start, p.current.Start
-		if len(orelse) > 0 {
-			elseStart = p.tree.Nodes[orelse[0]].Start
-			elseEnd = p.tree.Nodes[orelse[len(orelse)-1]].End
-		}
-		elseBlock := p.tree.NewNode(a.NodeBlock, elseStart, elseEnd)
-		for _, child := range orelse {
-			p.tree.AddChild(elseBlock, child)
+		if p.tree.Nodes[elseBlock].End == p.tree.Nodes[elseBlock].Start {
+			p.tree.Nodes[elseBlock].End = p.current.Start
 		}
 		p.tree.AddChild(ret, elseBlock)
 
@@ -162,36 +154,23 @@ func (p *Parser) parseForTarget() a.NodeID {
 		return p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.End)
 	}
 
-	first := p.tree.NewNode(a.NodeName, p.current.Start, p.current.End)
-	firstIdx := uint32(len(p.tree.Names))
-	p.tree.Names = append(p.tree.Names, p.current.Literal)
-	p.tree.Nodes[first].Data = firstIdx
+	first := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
 	p.advance()
 
 	if p.current.Type == l.COMMA {
-		targets := []a.NodeID{first}
+		tuple := p.tree.NewNode(a.NodeTuple, p.tree.Nodes[first].Start, p.tree.Nodes[first].End)
+		p.tree.AddChild(tuple, first)
 		for p.current.Type == l.COMMA {
 			p.advance()
 			if p.current.Type != l.NAME {
 				p.errorCurrent("expected variable name")
-				id := p.tree.NewNode(a.NodeTuple, p.tree.Nodes[first].Start, p.tree.Nodes[targets[len(targets)-1]].End)
-				for _, child := range targets {
-					p.tree.AddChild(id, child)
-				}
-				return id
+				return tuple
 			}
 
-			newTarget := p.tree.NewNode(a.NodeName, p.current.Start, p.current.End)
-			idx := uint32(len(p.tree.Names))
-			p.tree.Names = append(p.tree.Names, p.current.Literal)
-			p.tree.Nodes[newTarget].Data = idx
-			targets = append(targets, newTarget)
+			newTarget := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
+			p.tree.AddChild(tuple, newTarget)
+			p.tree.Nodes[tuple].End = p.tree.Nodes[newTarget].End
 			p.advance()
-		}
-		lastName := p.tree.Nodes[targets[len(targets)-1]]
-		tuple := p.tree.NewNode(a.NodeTuple, p.tree.Nodes[first].Start, lastName.End)
-		for _, child := range targets {
-			p.tree.AddChild(tuple, child)
 		}
 		return tuple
 	}
@@ -242,17 +221,16 @@ func (p *Parser) parseWhile() a.NodeID {
 	p.advance()
 
 	body := p.tree.NewNode(a.NodeBlock, p.current.Start, 0)
-	bodyStmts := []a.NodeID{}
 
 	for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
 		stmt := p.parseStatement()
 		if stmt != a.NoNode {
-			bodyStmts = append(bodyStmts, stmt)
+			p.tree.AddChild(body, stmt)
+			if p.tree.Nodes[body].FirstChild == stmt {
+				p.tree.Nodes[body].Start = p.tree.Nodes[stmt].Start
+			}
+			p.tree.Nodes[body].End = uint32(p.tree.Nodes[stmt].End)
 		}
-	}
-	if len(bodyStmts) > 0 {
-		p.tree.Nodes[body].Start = p.tree.Nodes[bodyStmts[0]].Start
-		p.tree.Nodes[body].End = uint32(p.tree.Nodes[bodyStmts[len(bodyStmts)-1]].End)
 	}
 	endPos := p.current.Start
 
@@ -262,9 +240,6 @@ func (p *Parser) parseWhile() a.NodeID {
 
 	ret := p.tree.NewNode(a.NodeWhile, startPos, endPos)
 	p.tree.AddChild(ret, testExpr)
-	for _, child := range bodyStmts {
-		p.tree.AddChild(body, child)
-	}
 	p.tree.AddChild(ret, body)
 
 	return ret
@@ -501,10 +476,7 @@ func (p *Parser) parseIf() a.NodeID {
 
 	p.advance()
 
-	body := a.NoNode
-	bodyStartPos := p.current.Start
-	bodyStmts := []a.NodeID{}
-	bodyEndPos := p.current.Start
+	body := p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
 
 	for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
 		if p.current.Type == l.NEWLINE {
@@ -513,16 +485,15 @@ func (p *Parser) parseIf() a.NodeID {
 		}
 		stmt := p.parseStatement()
 		if stmt != a.NoNode {
-			bodyStmts = append(bodyStmts, stmt)
-			bodyEndPos = p.tree.Nodes[stmt].End
+			p.tree.AddChild(body, stmt)
+			if p.tree.Nodes[body].FirstChild == stmt {
+				p.tree.Nodes[body].Start = p.tree.Nodes[stmt].Start
+			}
+			p.tree.Nodes[body].End = p.tree.Nodes[stmt].End
 		}
 	}
-
-	if len(bodyStmts) > 0 {
-		body = p.tree.NewNode(a.NodeBlock, bodyStartPos, bodyEndPos)
-		for _, child := range bodyStmts {
-			p.tree.AddChild(body, child)
-		}
+	if p.tree.Nodes[body].End == p.tree.Nodes[body].Start {
+		body = a.NoNode
 	}
 
 	endPos := p.current.Start
@@ -532,7 +503,6 @@ func (p *Parser) parseIf() a.NodeID {
 		p.advance()
 	}
 
-	orElseStmts := []a.NodeID{}
 	orElseBlock := a.NoNode
 
 	switch p.current.Type {
@@ -544,7 +514,8 @@ func (p *Parser) parseIf() a.NodeID {
 			elifStmt = p.tree.NewNode(a.NodeErrStmt, p.current.Start, p.current.End)
 		}
 
-		orElseStmts = append(orElseStmts, elifStmt)
+		orElseBlock = p.tree.NewNode(a.NodeBlock, p.tree.Nodes[elifStmt].Start, p.tree.Nodes[elifStmt].End)
+		p.tree.AddChild(orElseBlock, elifStmt)
 	case l.ELSE:
 		p.advance()
 		if p.current.Type != l.COLON {
@@ -591,6 +562,7 @@ func (p *Parser) parseIf() a.NodeID {
 		}
 
 		p.advance()
+		orElseBlock = p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
 
 		for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
 			if p.current.Type == l.NEWLINE {
@@ -600,9 +572,16 @@ func (p *Parser) parseIf() a.NodeID {
 
 			stmt := p.parseStatement()
 			if stmt != a.NoNode {
-				orElseStmts = append(orElseStmts, stmt)
+				p.tree.AddChild(orElseBlock, stmt)
+				if p.tree.Nodes[orElseBlock].FirstChild == stmt {
+					p.tree.Nodes[orElseBlock].Start = p.tree.Nodes[stmt].Start
+				}
+				p.tree.Nodes[orElseBlock].End = p.tree.Nodes[stmt].End
 				endPos = p.tree.Nodes[stmt].End
 			}
+		}
+		if orElseBlock != a.NoNode && p.tree.Nodes[orElseBlock].End == p.tree.Nodes[orElseBlock].Start {
+			p.tree.Nodes[orElseBlock].End = endPos
 		}
 
 		if p.current.Type == l.DEDENT {
@@ -615,17 +594,7 @@ func (p *Parser) parseIf() a.NodeID {
 	if body != a.NoNode {
 		p.tree.AddChild(ret, body)
 	}
-	if len(orElseStmts) > 0 {
-		orElseBlock = p.tree.NewNode(
-			a.NodeBlock,
-			p.tree.Nodes[orElseStmts[0]].Start,
-			p.tree.Nodes[orElseStmts[len(orElseStmts)-1]].End,
-		)
-
-		for _, child := range orElseStmts {
-			p.tree.AddChild(orElseBlock, child)
-		}
-
+	if orElseBlock != a.NoNode {
 		p.tree.AddChild(ret, orElseBlock)
 	}
 

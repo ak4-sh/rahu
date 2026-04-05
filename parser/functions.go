@@ -35,7 +35,7 @@ func (p *Parser) parseFunc() a.NodeID {
 
 	p.advance()
 
-	params := []a.NodeID{}
+	args := a.NoNode
 	seenDefault := false
 
 	if p.current.Type != l.RPAR {
@@ -76,7 +76,11 @@ func (p *Parser) parseFunc() a.NodeID {
 				}
 			}
 
-			params = append(params, param)
+			if args == a.NoNode {
+				args = p.tree.NewNode(a.NodeArgs, p.tree.Nodes[param].Start, p.tree.Nodes[param].End)
+			}
+			p.tree.AddChild(args, param)
+			p.tree.Nodes[args].End = p.tree.Nodes[param].End
 
 			if p.current.Type == l.COMMA {
 				p.advance()
@@ -84,18 +88,6 @@ func (p *Parser) parseFunc() a.NodeID {
 			}
 
 			break
-		}
-	}
-
-	args := a.NoNode
-	if len(params) > 0 {
-		args = p.tree.NewNode(
-			a.NodeArgs,
-			p.tree.Nodes[params[0]].Start,
-			p.tree.Nodes[params[len(params)-1]].End,
-		)
-		for _, param := range params {
-			p.tree.AddChild(args, param)
 		}
 	}
 

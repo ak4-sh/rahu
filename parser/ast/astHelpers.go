@@ -124,3 +124,63 @@ func (a *AST) NumberText(id NodeID) (string, bool) {
 	}
 	return a.Numbers[idx], true
 }
+
+// FunctionParts returns the typed children of a function node.
+func (a *AST) FunctionParts(id NodeID) (name, args, body NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeFunctionDef {
+		return NoNode, NoNode, NoNode
+	}
+
+	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
+		if name == NoNode {
+			name = child
+			continue
+		}
+
+		switch a.Nodes[child].Kind {
+		case NodeArgs:
+			args = child
+		case NodeBlock:
+			body = child
+		}
+	}
+
+	return name, args, body
+}
+
+// ClassParts returns the typed children of a class node.
+func (a *AST) ClassParts(id NodeID) (name, bases, body NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeClassDef {
+		return NoNode, NoNode, NoNode
+	}
+
+	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
+		if name == NoNode {
+			name = child
+			continue
+		}
+
+		switch a.Nodes[child].Kind {
+		case NodeBaseList:
+			bases = child
+		case NodeBlock:
+			body = child
+		}
+	}
+
+	return name, bases, body
+}
+
+// DocString fetches the docstring stored in a node's Data field.
+func (a *AST) DocString(id NodeID) (string, bool) {
+	if id == NoNode {
+		return "", false
+	}
+
+	idx := a.Nodes[id].Data
+	if idx == 0 || int(idx) >= len(a.Strings) {
+		return "", false
+	}
+
+	return a.Strings[idx], true
+}

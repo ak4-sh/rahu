@@ -25,7 +25,8 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 
 		if isCompareOp(opTok.Type) {
 			startPos := p.tree.Nodes[left].Start
-			rights := make([]a.NodeID, 0)
+			leftID := p.tree.NewNode(a.NodeCompare, startPos, p.tree.Nodes[left].End)
+			p.tree.AddChild(leftID, left)
 
 			for isCompareOp(p.current.Type) {
 				op := tokenTypeToCompareOp(p.current.Type)
@@ -39,19 +40,8 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 				rightCompareOp := p.tree.NewNode(a.NodeCompareOp, p.tree.Nodes[right].Start, p.tree.Nodes[right].End)
 				p.tree.Nodes[rightCompareOp].Data = uint32(op)
 				p.tree.AddChild(rightCompareOp, right)
-				rights = append(rights, rightCompareOp)
-			}
-			lastRight := rights[len(rights)-1]
-			endPos := p.tree.Nodes[lastRight].End
-
-			leftID := p.tree.NewNode(
-				a.NodeCompare,
-				startPos,
-				endPos,
-			)
-			p.tree.AddChild(leftID, left)
-			for _, child := range rights {
-				p.tree.AddChild(leftID, child)
+				p.tree.AddChild(leftID, rightCompareOp)
+				p.tree.Nodes[leftID].End = p.tree.Nodes[rightCompareOp].End
 			}
 
 			left = leftID
@@ -154,10 +144,7 @@ func (p *Parser) parsePrimary() a.NodeID {
 		return ret
 
 	case l.NAME:
-		ret := p.tree.NewNode(a.NodeName, p.current.Start, p.current.End)
-		idx := uint32(len(p.tree.Names))
-		p.tree.Names = append(p.tree.Names, p.current.Literal)
-		p.tree.Nodes[ret].Data = idx
+		ret := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
 		p.advance()
 		return ret
 
@@ -187,7 +174,8 @@ func (p *Parser) parsePrimary() a.NodeID {
 			return first
 		}
 
-		elts := []a.NodeID{first}
+		ret := p.tree.NewNode(a.NodeTuple, startPos, p.tree.Nodes[first].End)
+		p.tree.AddChild(ret, first)
 		for p.current.Type == l.COMMA {
 			p.advance()
 			if p.current.Type == l.RPAR {
@@ -199,7 +187,8 @@ func (p *Parser) parsePrimary() a.NodeID {
 				p.errorCurrent("expected expression after ','")
 				return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
 			}
-			elts = append(elts, elt)
+			p.tree.AddChild(ret, elt)
+			p.tree.Nodes[ret].End = p.tree.Nodes[elt].End
 		}
 
 		if p.current.Type != l.RPAR {
@@ -209,10 +198,7 @@ func (p *Parser) parsePrimary() a.NodeID {
 
 		endPos := p.current.Start
 		p.advance()
-		ret := p.tree.NewNode(a.NodeTuple, startPos, endPos)
-		for _, child := range elts {
-			p.tree.AddChild(ret, child)
-		}
+		p.tree.Nodes[ret].End = endPos
 		return ret
 
 	case l.LSQB:
@@ -285,12 +271,13 @@ func (p *Parser) parsePrimary() a.NodeID {
 func (p *Parser) parseList() a.NodeID {
 	startPos := p.current.Start
 	p.advance()
-	elts := []a.NodeID{}
+	ret := p.tree.NewNode(a.NodeList, startPos, startPos)
 
 	if p.current.Type != l.RSQB {
 		first := p.parseExpression(LOWEST)
 		if first != a.NoNode {
-			elts = append(elts, first)
+			p.tree.AddChild(ret, first)
+			p.tree.Nodes[ret].End = p.tree.Nodes[first].End
 		} else {
 			p.errorCurrent("expected expression in list")
 		}
@@ -303,7 +290,8 @@ func (p *Parser) parseList() a.NodeID {
 
 			elt := p.parseExpression(LOWEST)
 			if elt != a.NoNode {
-				elts = append(elts, elt)
+				p.tree.AddChild(ret, elt)
+				p.tree.Nodes[ret].End = p.tree.Nodes[elt].End
 			} else {
 				p.errorCurrent("expected expression after ',' in list")
 				break
@@ -321,18 +309,12 @@ func (p *Parser) parseList() a.NodeID {
 			p.advance()
 		}
 
-		ret := p.tree.NewNode(a.NodeList, startPos, endPos)
-		for _, child := range elts {
-			p.tree.AddChild(ret, child)
-		}
+		p.tree.Nodes[ret].End = endPos
 		return ret
 	}
 
 	endPos := p.current.Start
 	p.advance()
-	ret := p.tree.NewNode(a.NodeList, startPos, endPos)
-	for _, child := range elts {
-		p.tree.AddChild(ret, child)
-	}
+	p.tree.Nodes[ret].End = endPos
 	return ret
 }

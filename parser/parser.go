@@ -195,7 +195,8 @@ func (p *Parser) parseAugAssignFromFirst(start uint32, expr a.NodeID) a.NodeID {
 }
 
 func (p *Parser) parseAssignmentFromFirst(start uint32, first a.NodeID) a.NodeID {
-	targets := []a.NodeID{first}
+	lastTarget := first
+	targetCount := 1
 	for p.current.Type == l.COMMA {
 		p.advance()
 		t := p.parseExpression(LOWEST)
@@ -203,7 +204,9 @@ func (p *Parser) parseAssignmentFromFirst(start uint32, first a.NodeID) a.NodeID
 			p.errorCurrent("expected assignment target")
 			break
 		}
-		targets = append(targets, t)
+		p.tree.Nodes[lastTarget].NextSibling = t
+		lastTarget = t
+		targetCount++
 	}
 
 	if p.current.Type != l.EQUAL {
@@ -212,8 +215,10 @@ func (p *Parser) parseAssignmentFromFirst(start uint32, first a.NodeID) a.NodeID
 		val := p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
 		ret := p.tree.NewNode(a.NodeAssign, start, p.current.Start)
 		p.tree.AddChild(ret, val)
-		for _, child := range targets {
+		for i, child := 0, first; i < targetCount; i++ {
+			next := p.tree.Nodes[child].NextSibling
 			p.tree.AddChild(ret, child)
+			child = next
 		}
 
 		if p.current.Type == l.NEWLINE {
@@ -242,8 +247,10 @@ func (p *Parser) parseAssignmentFromFirst(start uint32, first a.NodeID) a.NodeID
 	ret := p.tree.NewNode(a.NodeAssign, start, end)
 
 	p.tree.AddChild(ret, value)
-	for _, child := range targets {
+	for i, child := 0, first; i < targetCount; i++ {
+		next := p.tree.Nodes[child].NextSibling
 		p.tree.AddChild(ret, child)
+		child = next
 	}
 	return ret
 }

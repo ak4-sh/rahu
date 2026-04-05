@@ -10,10 +10,11 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 		return funcExpr
 	}
 	startPos := p.tree.Nodes[funcExpr].Start
+	callID := p.tree.NewNode(a.NodeCall, startPos, startPos)
+	p.tree.AddChild(callID, funcExpr)
 
 	p.advance()
 
-	args := make([]a.NodeID, 0)
 	if p.current.Type != l.RPAR {
 		first := p.parseExpression(LOWEST)
 		if first == a.NoNode {
@@ -23,12 +24,12 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 				end = p.current.Start
 				p.advance()
 			}
-			callID := p.tree.NewNode(a.NodeCall, startPos, end)
-			p.tree.AddChild(callID, funcExpr)
+			p.tree.Nodes[callID].End = end
 			return callID
 		}
 
-		args = append(args, first)
+		p.tree.AddChild(callID, first)
+		p.tree.Nodes[callID].End = p.tree.Nodes[first].End
 
 		for p.current.Type == l.COMMA {
 			p.advance()
@@ -45,14 +46,11 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 					end = p.current.Start
 					p.advance()
 				}
-				callID := p.tree.NewNode(a.NodeCall, startPos, end)
-				p.tree.AddChild(callID, funcExpr)
-				for _, child := range args {
-					p.tree.AddChild(callID, child)
-				}
+				p.tree.Nodes[callID].End = end
 				return callID
 			}
-			args = append(args, arg)
+			p.tree.AddChild(callID, arg)
+			p.tree.Nodes[callID].End = p.tree.Nodes[arg].End
 		}
 		if p.current.Type != l.RPAR {
 			p.errorCurrent("expected ')' after function arguments")
@@ -63,21 +61,13 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 				p.advance()
 			}
 
-			callID := p.tree.NewNode(a.NodeCall, startPos, endPos)
-			p.tree.AddChild(callID, funcExpr)
-			for _, child := range args {
-				p.tree.AddChild(callID, child)
-			}
+			p.tree.Nodes[callID].End = endPos
 			return callID
 		}
 	}
 	endPos := p.current.Start
 	p.advance()
 
-	callID := p.tree.NewNode(a.NodeCall, startPos, endPos)
-	p.tree.AddChild(callID, funcExpr)
-	for _, child := range args {
-		p.tree.AddChild(callID, child)
-	}
+	p.tree.Nodes[callID].End = endPos
 	return callID
 }
