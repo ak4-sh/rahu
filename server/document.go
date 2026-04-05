@@ -1,16 +1,21 @@
 package server
 
 import (
+	"context"
 	"strings"
+	"sync"
 
 	"rahu/analyser"
 	"rahu/jsonrpc"
 	"rahu/lsp"
 	ast "rahu/parser/ast"
+	"rahu/server/locate"
 	"rahu/source"
 )
 
 type Document struct {
+	mu sync.RWMutex // Protects all fields below
+
 	URI       lsp.DocumentURI
 	Version   int
 	Text      string
@@ -22,24 +27,33 @@ type Document struct {
 	SemErrs     []analyser.SemanticError
 	AttrSymbols map[ast.NodeID]*analyser.Symbol
 	Defs        map[ast.NodeID]*analyser.Symbol
+	PosIndex    *locate.PositionIndex // O(log n) position-to-node lookup
 }
 
 func (s *Server) Open(item lsp.TextDocumentItem) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.docs[item.URI] = &Document{
+	doc := &Document{
 		URI:       item.URI,
 		Version:   item.Version,
 		Text:      item.Text,
 		LineIndex: source.NewLineIndex(item.Text),
 	}
+
+	s.docsMu.Lock()
+	s.docs[item.URI] = doc
+	s.docsMu.Unlock()
+
+	if _, isModule := s.LookupModuleByURI(item.URI); isModule {
+		s.snapshotsMu.Lock()
+		s.openModuleCounts[item.URI]++
+		s.snapshotsMu.Unlock()
+	}
 }
 
 func (s *Server) Get(uri lsp.DocumentURI) *Document {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.docs[uri]
+	s.docsMu.RLock()
+	doc := s.docs[uri]
+	s.docsMu.RUnlock()
+	return doc
 }
 
 func (s *Server) SetAnalysis(
@@ -51,41 +65,68 @@ func (s *Server) SetAnalysis(
 	attrSymbols map[ast.NodeID]*analyser.Symbol,
 	semErrs []analyser.SemanticError,
 ) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	doc, ok := s.docs[uri]
-	if !ok {
+	doc := s.Get(uri)
+	if doc == nil {
 		return
 	}
 
+	// Build position index outside the lock (read-only tree access)
+	posIndex := locate.Build(tree)
+
+	doc.mu.Lock()
 	doc.Tree = tree
 	doc.Global = global
 	doc.Symbols = symbols
 	doc.SemErrs = semErrs
 	doc.AttrSymbols = attrSymbols
 	doc.Defs = defs
+	doc.PosIndex = posIndex
+	lineIndex := doc.LineIndex
+	doc.mu.Unlock()
+
+	// Update reference index with new analysis results
+	s.refIndex.IndexDocument(uri, tree, lineIndex, symbols, attrSymbols, defs)
 }
 
 func (s *Server) Close(uri lsp.DocumentURI) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// Stop debounce timer (separate lock scope)
+	s.miscMu.Lock()
 	if t, ok := s.debounce[uri]; ok {
 		t.Stop()
 		delete(s.debounce, uri)
 	}
+	s.miscMu.Unlock()
+
+	// Remove from docs map (separate lock scope)
+	s.docsMu.Lock()
 	delete(s.docs, uri)
+	s.docsMu.Unlock()
+
+	if _, isModule := s.LookupModuleByURI(uri); isModule {
+		s.snapshotsMu.Lock()
+		if count := s.openModuleCounts[uri]; count <= 1 {
+			delete(s.openModuleCounts, uri)
+		} else {
+			s.openModuleCounts[uri] = count - 1
+		}
+		s.snapshotsMu.Unlock()
+	}
+
+	// If not a workspace module, remove from reference index
+	// (workspace modules keep their snapshot-based index)
+	if _, isModule := s.LookupModuleByURI(uri); !isModule {
+		s.refIndex.RemoveDocument(uri)
+	}
 }
 
 func (s *Server) Update(uri lsp.DocumentURI, text string, version int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	doc, ok := s.docs[uri]
-	if !ok {
+	doc := s.Get(uri)
+	if doc == nil {
 		return
 	}
+
+	doc.mu.Lock()
+	defer doc.mu.Unlock()
 
 	if version <= doc.Version {
 		return
@@ -120,13 +161,14 @@ func (s *Server) ApplyIncremental(
 	changes []lsp.TextDocumentContentChangeEvent,
 	version int,
 ) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	doc, ok := s.docs[uri]
-	if !ok {
+	doc := s.Get(uri)
+	if doc == nil {
 		return
 	}
+
+	doc.mu.Lock()
+	defer doc.mu.Unlock()
+
 	if version <= doc.Version {
 		return
 	}
@@ -199,20 +241,35 @@ func (s *Server) Initialize(
 		}
 	}
 
-	s.mu.Lock()
+	s.miscMu.Lock()
 	s.capabilities = p.Capabilities
 	s.rootURI = rootURI
 	s.rootPath = rootPath
-	s.mu.Unlock()
+	s.priorityDir = rootPath // Default priority to workspace root
+	s.miscMu.Unlock()
 
-	s.buildModuleIndex()
-	s.buildWorkspaceSnapshots()
+	env := discoverPythonEnv(rootPath)
+	roots := normalizeExternalSearchRoots(rootPath, env.Paths)
+	s.indexMu.Lock()
+	s.pythonExecutable = env.Executable
+	s.externalSearchRoots = roots
+	s.indexMu.Unlock()
+
+	// Indexing will start in backgroundIndex() triggered by Initialized
 
 	return &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
-			TextDocumentSync:        lsp.TDSKFull,
-			HoverProvider:           true,
-			CompletionProvider:      map[string]any{"triggerCharacters": []string{"."}},
+			TextDocumentSync:      lsp.TDSKFull,
+			HoverProvider:         true,
+			CompletionProvider:    map[string]any{"triggerCharacters": []string{"."}},
+			SignatureHelpProvider: map[string]any{"triggerCharacters": []string{"(", ","}},
+			SemanticTokensProvider: map[string]any{
+				"legend": map[string]any{
+					"tokenTypes":     semanticTokenLegendTypes,
+					"tokenModifiers": semanticTokenLegendModifiers,
+				},
+				"full": true,
+			},
 			DefinitionProvider:      true,
 			ReferencesProvider:      true,
 			RenameProvider:          map[string]any{"prepareProvider": true},
@@ -223,20 +280,71 @@ func (s *Server) Initialize(
 }
 
 func (s *Server) Initialized(_ *struct{}) {
-	s.mu.Lock()
+	s.miscMu.Lock()
 	if s.workspaceIndexedNotified {
-		s.mu.Unlock()
+		s.miscMu.Unlock()
 		return
 	}
 	s.workspaceIndexedNotified = true
-	s.mu.Unlock()
+
+	// Create cancellation context and done channel
+	ctx, cancel := context.WithCancel(context.Background())
+	s.indexingCtx = ctx
+	s.indexingCancel = cancel
+	s.indexingDone = make(chan struct{})
+	s.miscMu.Unlock()
+
+	go s.backgroundIndex(ctx)
+}
+
+func (s *Server) backgroundIndex(ctx context.Context) {
+	defer close(s.indexingDone)
 
 	s.createWorkspaceIndexingProgress()
 	s.beginWorkspaceIndexingProgress()
+
+	if err := s.buildModuleIndexWithContext(ctx); err != nil {
+		s.endWorkspaceIndexingProgress()
+		return
+	}
+
+	if err := s.buildWorkspaceSnapshotsWithPriority(ctx); err != nil {
+		s.endWorkspaceIndexingProgress()
+		return
+	}
+
 	s.endWorkspaceIndexingProgress()
+
+	// Re-analyze all open documents to pick up cross-file imports
+	s.reanalyzeOpenDocuments()
+}
+
+// reanalyzeOpenDocuments re-analyzes all currently open documents.
+// Called after background indexing completes to update cross-file imports.
+func (s *Server) reanalyzeOpenDocuments() {
+	s.docsMu.RLock()
+	docs := make([]*Document, 0, len(s.docs))
+	for _, doc := range s.docs {
+		docs = append(docs, doc)
+	}
+	s.docsMu.RUnlock()
+
+	for _, doc := range docs {
+		if doc != nil {
+			s.analyze(doc)
+		}
+	}
 }
 
 func (s *Server) Shutdown(_ *struct{}) (*struct{}, *jsonrpc.Error) {
+	s.miscMu.Lock()
+	cancel := s.indexingCancel
+	s.miscMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
 	return &struct{}{}, nil
 }
 

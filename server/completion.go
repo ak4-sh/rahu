@@ -318,9 +318,14 @@ func visibleNameCompletionItems(doc *Document, pos lsp.Position, prefix string) 
 	if scope == nil {
 		return nil
 	}
-	candidates := make([]scoredCompletion, 0)
-	seen := make(map[string]struct{})
-	builtinSeen := make(map[string]struct{})
+	// Estimate capacity based on scope symbols; will grow if needed for parent scopes
+	initialCap := 32
+	if scope.Symbols != nil && len(scope.Symbols) > initialCap {
+		initialCap = len(scope.Symbols)
+	}
+	candidates := make([]scoredCompletion, 0, initialCap)
+	seen := make(map[string]struct{}, initialCap)
+	builtinSeen := make(map[string]struct{}, 32)
 	distance := 0
 	for current := scope; current != nil; current = current.Parent {
 		for name, sym := range current.Symbols {
@@ -354,9 +359,8 @@ func visibleNameCompletionItems(doc *Document, pos lsp.Position, prefix string) 
 }
 
 func (s *Server) moduleCompletionItems(prefix string) []lsp.CompletionItem {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	candidates := make([]scoredCompletion, 0)
+	s.indexMu.RLock()
+	candidates := make([]scoredCompletion, 0, len(s.modulesByName))
 	for name := range s.modulesByName {
 		if !matchesPrefix(prefix, name) {
 			continue
@@ -366,6 +370,7 @@ func (s *Server) moduleCompletionItems(prefix string) []lsp.CompletionItem {
 			score: completionScore(name, prefix, 0, 250, false),
 		})
 	}
+	s.indexMu.RUnlock()
 	return rankAndDedupeCompletions(candidates, false)
 }
 
@@ -374,8 +379,7 @@ func (s *Server) childModuleItems(container, prefix string) []lsp.CompletionItem
 		return nil
 	}
 	needle := container + "."
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.indexMu.RLock()
 	seen := make(map[string]struct{})
 	candidates := make([]scoredCompletion, 0)
 	for name := range s.modulesByName {
@@ -402,6 +406,7 @@ func (s *Server) childModuleItems(container, prefix string) []lsp.CompletionItem
 			score: completionScore(segment, prefix, 0, 220, false),
 		})
 	}
+	s.indexMu.RUnlock()
 	return rankAndDedupeCompletions(candidates, false)
 }
 
@@ -409,7 +414,7 @@ func exportCompletionItems(snapshot *ModuleSnapshot, prefix string) []lsp.Comple
 	if snapshot == nil || snapshot.Exports == nil {
 		return nil
 	}
-	candidates := make([]scoredCompletion, 0)
+	candidates := make([]scoredCompletion, 0, len(snapshot.Exports))
 	for name, sym := range snapshot.Exports {
 		if sym == nil || sym.Kind == a.SymImport || sym.Span.IsEmpty() || !matchesPrefix(prefix, name) {
 			continue
@@ -428,7 +433,7 @@ func memberCompletionItems(scope *a.Scope, prefix string, detail string) []lsp.C
 	if scope == nil {
 		return nil
 	}
-	candidates := make([]scoredCompletion, 0)
+	candidates := make([]scoredCompletion, 0, len(scope.Symbols))
 	for name, sym := range scope.Symbols {
 		if sym == nil || !matchesPrefix(prefix, name) {
 			continue
@@ -447,8 +452,9 @@ func classMemberCompletionItems(cls *a.Symbol, prefix string, detail string) []l
 	if cls == nil {
 		return nil
 	}
-	candidates := make([]scoredCompletion, 0)
-	seen := make(map[string]struct{})
+	// Estimate ~10 members per class on average
+	candidates := make([]scoredCompletion, 0, 16)
+	seen := make(map[string]struct{}, 16)
 	var collect func(*a.Symbol)
 	collect = func(sym *a.Symbol) {
 		if sym == nil {
@@ -481,8 +487,8 @@ func typeMemberCompletionItems(t *a.Type, prefix string, detail string) []lsp.Co
 		return nil
 	}
 	if t.Kind == a.TypeUnion {
-		candidates := make([]scoredCompletion, 0)
-		seen := make(map[string]struct{})
+		candidates := make([]scoredCompletion, 0, 16)
+		seen := make(map[string]struct{}, 16)
 		for _, arm := range t.Union {
 			for _, item := range typeMemberCompletionItems(arm, prefix, detail) {
 				if _, ok := seen[item.Label]; ok {
@@ -599,10 +605,13 @@ func (s *Server) moduleMemberCompletions(doc *Document, pos lsp.Position, receiv
 		sym = nil
 	}
 	if sym != nil && sym.Kind == a.SymModule && sym.URI != "" {
-		s.mu.RLock()
-		snapshot := s.moduleSnapshotsByURI[sym.URI]
-		s.mu.RUnlock()
-		candidates := make([]scoredCompletion, 0)
+		snapshot, _ := s.getModuleSnapshotByURI(sym.URI)
+		if snapshot == nil {
+			if mod, ok := s.LookupModuleByURI(sym.URI); ok {
+				snapshot, _ = s.analyzeModuleFile(mod)
+			}
+		}
+		candidates := make([]scoredCompletion, 0, 16)
 		for _, item := range exportCompletionItems(snapshot, memberPrefix) {
 			candidates = append(candidates, scoredCompletion{item: item, score: completionScore(item.Label, memberPrefix, 0, 240, false)})
 		}
@@ -629,6 +638,11 @@ func (s *Server) moduleMemberCompletions(doc *Document, pos lsp.Position, receiv
 }
 
 func (s *Server) Completion(p *lsp.CompletionParams) ([]lsp.CompletionItem, *jsonrpc.Error) {
+	// Wait for indexing before providing completions
+	if err := s.WaitForIndexing(); err != nil {
+		return []lsp.CompletionItem{}, nil
+	}
+
 	doc := s.Get(p.TextDocument.URI)
 	if doc == nil || doc.LineIndex == nil {
 		return nil, jsonrpc.InvalidParamsError(nil)

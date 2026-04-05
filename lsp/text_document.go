@@ -158,6 +158,39 @@ type CompletionParams struct {
 	Position     Position               `json:"position"`
 }
 
+type SignatureHelpParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type ParameterInformation struct {
+	Label string `json:"label"`
+}
+
+type SignatureInformation struct {
+	Label      string                 `json:"label"`
+	Parameters []ParameterInformation `json:"parameters,omitempty"`
+}
+
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature,omitempty"`
+	ActiveParameter int                    `json:"activeParameter,omitempty"`
+}
+
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+type SemanticTokens struct {
+	Data []uint32 `json:"data"`
+}
+
 type CompletionItemKind int
 
 const (

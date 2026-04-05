@@ -45,6 +45,15 @@ func (p *Parser) parseStatement() a.NodeID {
 		}
 		return p.tree.NewNode(a.NodeBreak, start, end)
 
+	case l.PASS:
+		start := p.current.Start
+		end := p.current.End
+		p.advance()
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+		}
+		return p.tree.NewNode(a.NodePass, start, end)
+
 	case l.CONTINUE:
 		start := p.current.Start
 		end := p.current.End
@@ -64,6 +73,8 @@ func (p *Parser) parseStatement() a.NodeID {
 
 	case l.CLASS:
 		return p.parseClass()
+	case l.TRY:
+		return p.parseTry()
 	default:
 		p.error(a.Range{Start: p.current.Start, End: p.current.End}, "unexpected token: "+p.current.String())
 		p.advance()

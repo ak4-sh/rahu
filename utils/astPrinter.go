@@ -309,6 +309,9 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 	case ast.NodeBreak:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Break"))
 
+	case ast.NodePass:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Pass"))
+
 	case ast.NodeContinue:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Continue"))
 

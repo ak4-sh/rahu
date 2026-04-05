@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -85,6 +86,12 @@ func TestInitializeBuildsModuleIndex(t *testing.T) {
 		t.Fatalf("unexpected initialize error: %v", err)
 	}
 
+	// Trigger background indexing and wait for completion
+	s.Initialized(nil)
+	if err := s.WaitForIndexing(); err != nil {
+		t.Fatalf("indexing failed: %v", err)
+	}
+
 	if s.rootURI != rootURI {
 		t.Fatalf("root URI mismatch: got %q want %q", s.rootURI, rootURI)
 	}
@@ -106,6 +113,12 @@ func TestInitializeBuildsWorkspaceSnapshots(t *testing.T) {
 	_, err := s.Initialize(&lsp.InitializeParams{RootURI: &rootURI})
 	if err != nil {
 		t.Fatalf("unexpected initialize error: %v", err)
+	}
+
+	// Trigger background indexing and wait for completion
+	s.Initialized(nil)
+	if err := s.WaitForIndexing(); err != nil {
+		t.Fatalf("indexing failed: %v", err)
 	}
 
 	snapshot, ok := s.moduleSnapshotsByName["pkg.mod"]
@@ -133,6 +146,12 @@ func TestInitializeBuildsWorkspaceDependencies(t *testing.T) {
 		t.Fatalf("unexpected initialize error: %v", err)
 	}
 
+	// Trigger background indexing and wait for completion
+	s.Initialized(nil)
+	if err := s.WaitForIndexing(); err != nil {
+		t.Fatalf("indexing failed: %v", err)
+	}
+
 	mainURI := pathToURI(filepath.Join(root, "main.py"))
 	imports := s.moduleImportsByURI[mainURI]
 	if len(imports) != 1 || imports[0] != "pkg.mod" {
@@ -141,6 +160,61 @@ func TestInitializeBuildsWorkspaceDependencies(t *testing.T) {
 	dependents := s.reverseDepsByModule["pkg.mod"]
 	if _, ok := dependents[mainURI]; !ok {
 		t.Fatal("expected reverse dependency from pkg.mod to main.py")
+	}
+}
+
+func TestWorkspaceIndexWorkerCount(t *testing.T) {
+	tests := []struct {
+		total int
+		want  int
+	}{
+		{total: 0, want: 1},
+		{total: 1, want: 1},
+		{total: 2, want: 2},
+		{total: 3, want: 3},
+		{total: 4, want: 4},
+		{total: 10, want: 4},
+	}
+	for _, tt := range tests {
+		if got := workspaceIndexWorkerCount(tt.total); got != tt.want {
+			t.Fatalf("worker count for %d modules: got %d want %d", tt.total, got, tt.want)
+		}
+	}
+}
+
+func TestBuildWorkspaceSnapshotsWithPriorityParallel(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceSource(t, filepath.Join(root, "a.py"), "value = 1\n")
+	writeWorkspaceSource(t, filepath.Join(root, "b.py"), "from a import value\nother = value\n")
+	writeWorkspaceSource(t, filepath.Join(root, "c.py"), "from b import other\nthird = other\n")
+	writeWorkspaceSource(t, filepath.Join(root, "d.py"), "from c import third\nresult = third\n")
+	writeWorkspaceSource(t, filepath.Join(root, "e.py"), "from d import result\nfinal = result\n")
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+	if err := s.buildWorkspaceSnapshotsWithPriority(context.Background()); err != nil {
+		t.Fatalf("parallel workspace snapshot build failed: %v", err)
+	}
+
+	if len(s.moduleSnapshotsByName) != 5 {
+		t.Fatalf("unexpected snapshot count: got %d want 5", len(s.moduleSnapshotsByName))
+	}
+	modD, ok := s.LookupModule("d")
+	if !ok {
+		t.Fatal("expected module d to be indexed")
+	}
+	imports := s.moduleImportsByURI[modD.URI]
+	if len(imports) != 1 || imports[0] != "c" {
+		t.Fatalf("unexpected imports for d.py: %+v", imports)
+	}
+	dependents := s.reverseDepsByModule["d"]
+	modE, ok := s.LookupModule("e")
+	if !ok {
+		t.Fatal("expected module e to be indexed")
+	}
+	if _, ok := dependents[modE.URI]; !ok {
+		t.Fatalf("expected reverse dependency from d to e, got %+v", dependents)
 	}
 }
 

@@ -1,9 +1,13 @@
 package server
 
 import (
+	"hash"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 
 	"rahu/analyser"
@@ -183,6 +187,176 @@ func extractExports(global *analyser.Scope) map[string]*analyser.Symbol {
 	return exports
 }
 
+func computeExportHash(exports map[string]*analyser.Symbol) uint64 {
+	if len(exports) == 0 {
+		return 0
+	}
+
+	names := make([]string, 0, len(exports))
+	for name := range exports {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	h := fnv.New64a()
+	for _, name := range names {
+		writeHashString(h, name)
+		writeHashByte(h, 0)
+		writeSymbolSignature(h, exports[name])
+		writeHashByte(h, 0xff)
+	}
+
+	return h.Sum64()
+}
+
+func writeSymbolSignature(h hash.Hash64, sym *analyser.Symbol) {
+	if sym == nil {
+		writeHashString(h, "<nil>")
+		return
+	}
+
+	writeHashString(h, sym.Name)
+	writeHashByte(h, 0)
+	writeHashInt(h, int(sym.Kind))
+	writeHashByte(h, 0)
+
+	switch sym.Kind {
+	case analyser.SymFunction:
+		writeFunctionSignature(h, sym)
+	case analyser.SymClass:
+		writeClassSignature(h, sym)
+	default:
+		writeTypeSignature(h, sym.Inferred)
+	}
+}
+
+func writeFunctionSignature(h hash.Hash64, sym *analyser.Symbol) {
+	if sym == nil || sym.Inner == nil {
+		writeHashString(h, "fn")
+		writeHashByte(h, 0)
+		writeTypeSignature(h, sym.Returns)
+		return
+	}
+
+	type paramSig struct {
+		name  string
+		start uint32
+		kind  analyser.SymbolKind
+		def   string
+		typ   *analyser.Type
+	}
+
+	params := make([]paramSig, 0, len(sym.Inner.Symbols))
+	for _, inner := range sym.Inner.Symbols {
+		if inner == nil || inner.Kind != analyser.SymParameter {
+			continue
+		}
+		params = append(params, paramSig{
+			name:  inner.Name,
+			start: inner.Span.Start,
+			kind:  inner.Kind,
+			def:   inner.DefaultValue,
+			typ:   inner.Inferred,
+		})
+	}
+
+	sort.Slice(params, func(i, j int) bool {
+		if params[i].start != params[j].start {
+			return params[i].start < params[j].start
+		}
+		return params[i].name < params[j].name
+	})
+
+	writeHashString(h, "fn")
+	writeHashByte(h, 0)
+	writeHashInt(h, len(params))
+	writeHashByte(h, 0)
+	for _, param := range params {
+		writeHashString(h, param.name)
+		writeHashByte(h, 0)
+		writeHashInt(h, int(param.kind))
+		writeHashByte(h, 0)
+		writeHashString(h, param.def)
+		writeHashByte(h, 0)
+		writeTypeSignature(h, param.typ)
+		writeHashByte(h, 0xfe)
+	}
+	writeTypeSignature(h, sym.Returns)
+}
+
+func writeClassSignature(h hash.Hash64, sym *analyser.Symbol) {
+	writeHashString(h, "class")
+	writeHashByte(h, 0)
+	writeHashInt(h, len(sym.Bases))
+	for _, base := range sym.Bases {
+		writeHashByte(h, 0)
+		if base == nil {
+			writeHashString(h, "<nil>")
+			continue
+		}
+		writeHashString(h, base.Name)
+	}
+	writeScopeSignature(h, sym.Attrs)
+	writeScopeSignature(h, sym.Members)
+}
+
+func writeScopeSignature(h hash.Hash64, scope *analyser.Scope) {
+	if scope == nil || len(scope.Symbols) == 0 {
+		writeHashByte(h, 0)
+		return
+	}
+
+	names := make([]string, 0, len(scope.Symbols))
+	for name := range scope.Symbols {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	writeHashInt(h, len(names))
+	for _, name := range names {
+		writeHashByte(h, 0)
+		writeHashString(h, name)
+		writeHashByte(h, 0)
+		writeSymbolSignature(h, scope.Symbols[name])
+	}
+}
+
+func writeTypeSignature(h hash.Hash64, typ *analyser.Type) {
+	if typ == nil {
+		writeHashString(h, "<nil>")
+		return
+	}
+
+	writeHashInt(h, int(typ.Kind))
+	writeHashByte(h, 0)
+	if typ.Symbol != nil {
+		writeHashString(h, typ.Symbol.Name)
+	}
+	writeHashByte(h, 0)
+	for _, union := range typ.Union {
+		writeTypeSignature(h, union)
+		writeHashByte(h, 1)
+	}
+	writeTypeSignature(h, typ.Elem)
+	writeHashByte(h, 2)
+	for _, item := range typ.Items {
+		writeTypeSignature(h, item)
+		writeHashByte(h, 3)
+	}
+	writeTypeSignature(h, typ.Key)
+}
+
+func writeHashString(h hash.Hash64, s string) {
+	_, _ = h.Write([]byte(s))
+}
+
+func writeHashByte(h hash.Hash64, b byte) {
+	_, _ = h.Write([]byte{b})
+}
+
+func writeHashInt(h hash.Hash64, n int) {
+	writeHashString(h, strconv.Itoa(n))
+}
+
 func (s *Server) extractImportsForModule(tree *ast.AST, importerURI lsp.DocumentURI) []string {
 	if tree == nil || tree.Root == ast.NoNode {
 		return nil
@@ -219,7 +393,7 @@ func (s *Server) extractImportsForModule(tree *ast.AST, importerURI lsp.Document
 func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, text string, lineIndex *source.LineIndex) *ModuleSnapshot {
 	p := parser.New(text)
 	tree := p.Parse()
-	global, defs := analyser.BuildScopes(tree)
+	global, defs := analyser.BuildScopes(tree, text)
 	resolver, semErrs := analyser.Resolve(tree, global)
 	stampSymbolURIs(uri, defs, resolver.Resolved, resolver.ResolvedAttr)
 
@@ -236,21 +410,24 @@ func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, tex
 		Global:      global,
 	}
 	snapshot.Exports = extractExports(global)
+	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	snapshot.Imports = s.extractImportsForModule(tree, uri)
 	if name != "" {
-		s.mu.Lock()
-		if !s.buildingModules[name] {
-			s.buildingModules[name] = true
-		}
-		s.moduleSnapshotsByName[name] = snapshot
-		s.moduleSnapshotsByURI[uri] = snapshot
-		s.moduleImportsByURI[uri] = append([]string(nil), snapshot.Imports...)
-		s.mu.Unlock()
+		partial := *snapshot
+		s.snapshotsMu.Lock()
+		s.moduleSnapshotsByName[name] = &partial
+		s.moduleSnapshotsByURI[uri] = &partial
+		s.snapshotsMu.Unlock()
+
+		s.depsMu.Lock()
+		s.moduleImportsByURI[uri] = append([]string(nil), partial.Imports...)
+		s.depsMu.Unlock()
 	}
 
 	semErrs = append(semErrs, s.bindWorkspaceImports(tree, defs, uri)...)
 	snapshot.SemErrs = semErrs
 	snapshot.Exports = extractExports(global)
+	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	return snapshot
 }
 
@@ -259,13 +436,11 @@ func (s *Server) analyzeModuleByName(name string) (*ModuleSnapshot, bool) {
 		return nil, false
 	}
 
-	s.mu.RLock()
-	if snapshot, ok := s.moduleSnapshotsByName[name]; ok {
-		s.mu.RUnlock()
+	if snapshot, ok := s.getModuleSnapshotByName(name); ok {
 		return snapshot, true
 	}
-	mod, ok := s.modulesByName[name]
-	s.mu.RUnlock()
+
+	mod, ok := s.LookupModule(name)
 	if !ok {
 		return nil, false
 	}
@@ -274,19 +449,30 @@ func (s *Server) analyzeModuleByName(name string) (*ModuleSnapshot, bool) {
 }
 
 func (s *Server) analyzeModuleFile(mod ModuleFile) (*ModuleSnapshot, bool) {
-	s.mu.RLock()
-	if snapshot, ok := s.moduleSnapshotsByURI[mod.URI]; ok {
-		s.mu.RUnlock()
+	if snapshot, ok := s.getModuleSnapshotByURI(mod.URI); ok {
 		return snapshot, true
 	}
+	if wait, started := s.beginModuleBuild(mod.Name); !started {
+		if wait != nil {
+			<-wait
+		}
+		return s.getModuleSnapshotByURI(mod.URI)
+	} else {
+		defer s.finishModuleBuild(mod.Name)
+	}
+
+	// Check for open document
+	s.docsMu.RLock()
 	openDoc := s.docs[mod.URI]
-	s.mu.RUnlock()
+	s.docsMu.RUnlock()
 
 	text := ""
 	lineIndex := (*source.LineIndex)(nil)
 	if openDoc != nil {
+		openDoc.mu.RLock()
 		text = openDoc.Text
 		lineIndex = openDoc.LineIndex
+		openDoc.mu.RUnlock()
 	} else {
 		bytes, err := os.ReadFile(mod.Path)
 		if err != nil {
@@ -307,12 +493,53 @@ func (s *Server) storeModuleSnapshot(mod ModuleFile, snapshot *ModuleSnapshot) {
 		return
 	}
 
-	s.mu.Lock()
+	s.snapshotsMu.Lock()
 	s.moduleSnapshotsByName[mod.Name] = snapshot
 	s.moduleSnapshotsByURI[mod.URI] = snapshot
+	s.snapshotLRU.touch(mod.URI, mod.Name)
+	s.snapshotsMu.Unlock()
+
+	s.depsMu.Lock()
 	s.moduleImportsByURI[mod.URI] = append([]string(nil), snapshot.Imports...)
-	delete(s.buildingModules, mod.Name)
-	s.mu.Unlock()
+	s.depsMu.Unlock()
+
+	// Update reference index with snapshot's symbols
+	s.refIndex.IndexDocument(snapshot.URI, snapshot.Tree, snapshot.LineIndex,
+		snapshot.Symbols, snapshot.AttrSymbols, snapshot.Defs)
+
+	s.enforceSnapshotLRULimit()
+}
+
+func (s *Server) beginModuleBuild(name string) (<-chan struct{}, bool) {
+	if name == "" {
+		return nil, true
+	}
+	s.snapshotsMu.Lock()
+	if s.moduleSnapshotsByName[name] != nil {
+		s.snapshotsMu.Unlock()
+		return nil, false
+	}
+	if ch, ok := s.buildingModules[name]; ok {
+		s.snapshotsMu.Unlock()
+		return ch, false
+	}
+	ch := make(chan struct{})
+	s.buildingModules[name] = ch
+	s.snapshotsMu.Unlock()
+	return ch, true
+}
+
+func (s *Server) finishModuleBuild(name string) {
+	if name == "" {
+		return
+	}
+	s.snapshotsMu.Lock()
+	ch := s.buildingModules[name]
+	delete(s.buildingModules, name)
+	s.snapshotsMu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
 }
 
 func (s *Server) rebuildModuleByURI(uri lsp.DocumentURI) (*ModuleSnapshot, bool) {
@@ -339,6 +566,68 @@ func (s *Server) rebuildModuleByURI(uri lsp.DocumentURI) (*ModuleSnapshot, bool)
 	s.storeModuleSnapshot(mod, snapshot)
 	s.rebuildReverseDeps()
 	return snapshot, true
+}
+
+func (s *Server) getModuleSnapshotByURI(uri lsp.DocumentURI) (*ModuleSnapshot, bool) {
+	s.snapshotsMu.Lock()
+	snapshot := s.moduleSnapshotsByURI[uri]
+	if snapshot != nil {
+		s.snapshotLRU.touch(snapshot.URI, snapshot.Name)
+	}
+	s.snapshotsMu.Unlock()
+	return snapshot, snapshot != nil
+}
+
+func (s *Server) getModuleSnapshotByName(name string) (*ModuleSnapshot, bool) {
+	s.snapshotsMu.Lock()
+	snapshot := s.moduleSnapshotsByName[name]
+	if snapshot != nil {
+		s.snapshotLRU.touch(snapshot.URI, snapshot.Name)
+	}
+	s.snapshotsMu.Unlock()
+	return snapshot, snapshot != nil
+}
+
+func (s *Server) enforceSnapshotLRULimit() {
+	if s.maxCachedModules <= 0 {
+		return
+	}
+
+	for {
+		s.snapshotsMu.Lock()
+		resident := len(s.moduleSnapshotsByURI)
+		if resident <= s.maxCachedModules {
+			s.snapshotsMu.Unlock()
+			return
+		}
+
+		candidate, ok := s.snapshotLRU.oldest()
+		if !ok {
+			s.snapshotsMu.Unlock()
+			return
+		}
+		if s.openModuleCounts[candidate.uri] > 0 || s.buildingModules[candidate.name] != nil {
+			s.snapshotLRU.touch(candidate.uri, candidate.name)
+			s.snapshotsMu.Unlock()
+			continue
+		}
+
+		snapshot := s.moduleSnapshotsByURI[candidate.uri]
+		if snapshot == nil {
+			s.snapshotLRU.remove(candidate.uri)
+			s.snapshotsMu.Unlock()
+			continue
+		}
+
+		delete(s.moduleSnapshotsByURI, candidate.uri)
+		if candidate.name != "" {
+			delete(s.moduleSnapshotsByName, candidate.name)
+		}
+		s.snapshotLRU.remove(candidate.uri)
+		s.snapshotsMu.Unlock()
+
+		s.refIndex.RemoveDocument(candidate.uri)
+	}
 }
 
 func lookupExport(snapshot *ModuleSnapshot, name string) (*analyser.Symbol, bool) {
@@ -468,13 +757,22 @@ func (s *Server) bindFromImportStmt(tree *ast.AST, stmt ast.NodeID, defs map[ast
 
 func (s *Server) lineIndexForURI(uri lsp.DocumentURI) *source.LineIndex {
 	if doc := s.Get(uri); doc != nil {
-		return doc.LineIndex
+		doc.mu.RLock()
+		li := doc.LineIndex
+		doc.mu.RUnlock()
+		return li
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if snapshot, ok := s.moduleSnapshotsByURI[uri]; ok {
+	snapshot, _ := s.getModuleSnapshotByURI(uri)
+	if snapshot != nil {
 		return snapshot.LineIndex
+	}
+
+	if mod, ok := s.LookupModuleByURI(uri); ok {
+		snapshot, ok := s.analyzeModuleFile(mod)
+		if ok && snapshot != nil {
+			return snapshot.LineIndex
+		}
 	}
 	return nil
 }

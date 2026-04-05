@@ -268,6 +268,81 @@ func (a *AST) FromImportParts(id NodeID) (module NodeID, aliases []NodeID) {
 	return module, aliases
 }
 
+// TryParts returns the try body, except handlers, optional else block, and optional finally block.
+func (a *AST) TryParts(id NodeID) (body NodeID, excepts []NodeID, elseBlock NodeID, finallyBlock NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeTry {
+		return NoNode, nil, NoNode, NoNode
+	}
+	children := a.Children(id)
+	if len(children) == 0 {
+		return NoNode, nil, NoNode, NoNode
+	}
+	body = children[0]
+	i := 1
+	for i < len(children) && a.Nodes[children[i]].Kind == NodeExcept {
+		excepts = append(excepts, children[i])
+		i++
+	}
+	if a.Nodes[id].Data&1 != 0 && i < len(children) {
+		elseBlock = children[i]
+		i++
+	}
+	if a.Nodes[id].Data&2 != 0 && i < len(children) {
+		finallyBlock = children[i]
+	}
+	return body, excepts, elseBlock, finallyBlock
+}
+
+// ExceptParts returns the optional exception type, optional bound name, and body block.
+func (a *AST) ExceptParts(id NodeID) (excType, asName, body NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeExcept {
+		return NoNode, NoNode, NoNode
+	}
+	children := a.Children(id)
+	if len(children) == 0 {
+		return NoNode, NoNode, NoNode
+	}
+	body = children[len(children)-1]
+	if len(children) >= 2 {
+		excType = children[0]
+	}
+	if len(children) >= 3 {
+		asName = children[1]
+	}
+	return excType, asName, body
+}
+
+// ListCompParts returns the result expression and comprehension clauses.
+func (a *AST) ListCompParts(id NodeID) (expr NodeID, clauses []NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeListComp {
+		return NoNode, nil
+	}
+	expr = a.Nodes[id].FirstChild
+	for child := a.Nodes[expr].NextSibling; child != NoNode; child = a.Nodes[child].NextSibling {
+		clauses = append(clauses, child)
+	}
+	return expr, clauses
+}
+
+// ComprehensionParts returns the target, iterable, and optional filters.
+func (a *AST) ComprehensionParts(id NodeID) (target, iter NodeID, filters []NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeComprehension {
+		return NoNode, NoNode, nil
+	}
+	target = a.Nodes[id].FirstChild
+	if target == NoNode {
+		return NoNode, NoNode, nil
+	}
+	iter = a.Nodes[target].NextSibling
+	if iter == NoNode {
+		return target, NoNode, nil
+	}
+	for child := a.Nodes[iter].NextSibling; child != NoNode; child = a.Nodes[child].NextSibling {
+		filters = append(filters, child)
+	}
+	return target, iter, filters
+}
+
 // DocString fetches the docstring stored in a node's Data field.
 func (a *AST) DocString(id NodeID) (string, bool) {
 	if id == NoNode {

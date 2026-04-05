@@ -5,7 +5,10 @@ type LineIndex struct {
 }
 
 func NewLineIndex(text string) *LineIndex {
-	starts := []int{0}
+	// Pre-allocate based on estimated line count (~40 chars per line for typical code)
+	estimatedLines := len(text)/40 + 1
+	starts := make([]int, 1, estimatedLines)
+	starts[0] = 0
 	for i, b := range []byte(text) {
 		if b == '\n' {
 			starts = append(starts, i+1)

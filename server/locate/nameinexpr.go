@@ -43,6 +43,31 @@ func locateInExpr(tree *ast.AST, expr ast.NodeID, pos int, mode locateMode) Resu
 			}
 		}
 
+	case ast.NodeListComp:
+		resultExpr, clauses := tree.ListCompParts(expr)
+		if res := locateInExpr(tree, resultExpr, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		for _, clause := range clauses {
+			if res := locateInExpr(tree, clause, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodeComprehension:
+		target, iter, filters := tree.ComprehensionParts(expr)
+		if res := locateInExpr(tree, target, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if res := locateInExpr(tree, iter, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		for _, filter := range filters {
+			if res := locateInExpr(tree, filter, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
 	case ast.NodeCompare:
 		left := tree.Nodes[expr].FirstChild
 		if left == ast.NoNode {

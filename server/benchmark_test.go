@@ -1,6 +1,9 @@
 package server
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -250,7 +253,7 @@ func TestDefinition(t *testing.T) {
 			if !tt.expectNilDoc {
 				p := parser.New(tt.code)
 				tree := p.Parse()
-				global, _ := analyser.BuildScopes(tree)
+				global, _ := analyser.BuildScopes(tree, tt.code)
 				resolver, _ := analyser.Resolve(tree, global)
 
 				s.docs[uri] = &Document{
@@ -307,7 +310,7 @@ y = x
 
 	p := parser.New(code)
 	tree := p.Parse()
-	global, _ := analyser.BuildScopes(tree)
+	global, _ := analyser.BuildScopes(tree, code)
 	resolver, _ := analyser.Resolve(tree, global)
 
 	s.docs[uri] = &Document{
@@ -355,6 +358,137 @@ var (
 	largeCode      = generateLargePython()
 	extraLargeCode = generatePythonLines(5000)
 )
+
+const (
+	benchWorkspaceSmall  = 48
+	benchWorkspaceMedium = 96
+	benchWorkspaceLarge  = 192
+)
+
+// Benchmark tiers:
+//
+// Fast:
+//   Safe for routine local runs. Intended command:
+//   go test ./server -run=^$ -bench='Fast' -benchmem
+//
+// Medium:
+//   Manual comparison runs that exercise larger workspaces and cache limits.
+//   Intended command:
+//   go test ./server -run=^$ -bench='Medium' -benchmem -benchtime=3x
+//
+// Stress:
+//   Expensive opt-in runs for cache pressure and indexing churn.
+//   Intended command:
+//   go test ./server -run=^$ -bench='Stress' -benchmem -benchtime=1x
+//
+// Custom metrics:
+//   resident_modules - number of workspace snapshots still resident after the benchmarked operation.
+//   refindex_uris    - number of URIs retained in the reference index after cache pressure.
+
+func writeBenchmarkFile(b *testing.B, path, content string) {
+	b.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		b.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		b.Fatalf("write failed: %v", err)
+	}
+}
+
+func benchmarkModuleCode(name string, imports []string) string {
+	var sb strings.Builder
+	for _, imp := range imports {
+		sb.WriteString("from ")
+		sb.WriteString(imp)
+		sb.WriteString(" import func_0\n")
+	}
+	sb.WriteString("\n")
+	for i := range 4 {
+		sb.WriteString(fmt.Sprintf("class %sClass%d:\n", name, i))
+		sb.WriteString("    def __init__(self, x, y):\n")
+		sb.WriteString("        self.x = x\n")
+		sb.WriteString("        self.y = y\n")
+		sb.WriteString("    def total(self):\n")
+		sb.WriteString("        return self.x + self.y\n\n")
+	}
+	for i := range 8 {
+		sb.WriteString(fmt.Sprintf("def func_%d(value, step=%d):\n", i, i+1))
+		sb.WriteString("    current = value + step\n")
+		if len(imports) > 0 {
+			sb.WriteString("    current = current + func_0(value)\n")
+		}
+		sb.WriteString("    return current\n\n")
+	}
+	sb.WriteString(fmt.Sprintf("CONSTANT_%s = func_0(1)\n", strings.ToUpper(name)))
+	return sb.String()
+}
+
+func createBenchmarkWorkspace(b *testing.B, moduleCount, importsPerModule int) string {
+	b.Helper()
+	root := b.TempDir()
+	for i := range moduleCount {
+		name := fmt.Sprintf("m%03d", i)
+		imports := make([]string, 0, importsPerModule)
+		for j := 1; j <= importsPerModule && i-j >= 0; j++ {
+			imports = append(imports, fmt.Sprintf("m%03d", i-j))
+		}
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, imports))
+	}
+	return root
+}
+
+func newBenchmarkWorkspaceServer(b *testing.B, root string, maxCachedModules int) *Server {
+	b.Helper()
+	s := New(nil)
+	s.rootPath = root
+	s.maxCachedModules = maxCachedModules
+	s.buildModuleIndex()
+	return s
+}
+
+func benchmarkWarmAllModules(b *testing.B, s *Server) []ModuleFile {
+	b.Helper()
+	s.indexMu.RLock()
+	mods := make([]ModuleFile, 0, len(s.modulesByName))
+	for _, mod := range s.modulesByName {
+		mods = append(mods, mod)
+	}
+	s.indexMu.RUnlock()
+	for _, mod := range mods {
+		if _, ok := s.analyzeModuleFile(mod); !ok {
+			b.Fatalf("failed to analyze module %s", mod.Name)
+		}
+	}
+	return mods
+}
+
+func benchmarkResidentSnapshotCount(s *Server) int {
+	s.snapshotsMu.RLock()
+	defer s.snapshotsMu.RUnlock()
+	return len(s.moduleSnapshotsByURI)
+}
+
+func benchmarkRefIndexURIEntryCount(s *Server) int {
+	s.refIndex.mu.RLock()
+	defer s.refIndex.mu.RUnlock()
+	return len(s.refIndex.byURI)
+}
+
+func benchmarkEvictModule(b *testing.B, s *Server, target string, mods []ModuleFile) {
+	b.Helper()
+	for _, mod := range mods {
+		if mod.Name == target {
+			continue
+		}
+		if _, ok := s.analyzeModuleFile(mod); !ok {
+			b.Fatalf("failed to analyze module %s during eviction", mod.Name)
+		}
+		if _, ok := s.getModuleSnapshotByName(target); !ok {
+			return
+		}
+	}
+	b.Fatalf("failed to evict module %s", target)
+}
 
 func BenchmarkServerStartup(b *testing.B) {
 	for b.Loop() {
@@ -567,11 +701,275 @@ func BenchmarkFullPipeline(b *testing.B) {
 		p := parser.New(input)
 		tree := p.Parse()
 
-		global, _ := analyser.BuildScopes(tree)
+		global, _ := analyser.BuildScopes(tree, input)
 		analyser.PromoteClassMembers(global)
 		resolver, _ := analyser.Resolve(tree, global)
 
 		_ = resolver
 		_ = global
 	}
+}
+
+func BenchmarkMediumWorkspaceIndex_Unbounded(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 2)
+	b.ResetTimer()
+	for b.Loop() {
+		s := newBenchmarkWorkspaceServer(b, root, benchWorkspaceMedium)
+		s.buildWorkspaceSnapshots()
+	}
+}
+
+func BenchmarkMediumWorkspaceIndex_LRU256(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 2)
+	var resident int
+	b.ResetTimer()
+	for b.Loop() {
+		s := newBenchmarkWorkspaceServer(b, root, 256)
+		s.buildWorkspaceSnapshots()
+		resident = benchmarkResidentSnapshotCount(s)
+	}
+	b.ReportMetric(float64(resident), "resident_modules")
+}
+
+func BenchmarkStressWorkspaceIndex_LRU32(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceLarge, 2)
+	var resident int
+	b.ResetTimer()
+	for b.Loop() {
+		s := newBenchmarkWorkspaceServer(b, root, 32)
+		s.buildWorkspaceSnapshots()
+		resident = benchmarkResidentSnapshotCount(s)
+	}
+	b.ReportMetric(float64(resident), "resident_modules")
+}
+
+func BenchmarkFastModuleLookup_Resident(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 2)
+	s := newBenchmarkWorkspaceServer(b, root, 256)
+	benchmarkWarmAllModules(b, s)
+	b.ResetTimer()
+	for b.Loop() {
+		snapshot, ok := s.analyzeModuleByName("m000")
+		if !ok || snapshot == nil {
+			b.Fatal("expected resident module lookup to succeed")
+		}
+	}
+}
+
+func BenchmarkFastModuleLookup_EvictedReload(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 2)
+	s := newBenchmarkWorkspaceServer(b, root, 32)
+	mods := benchmarkWarmAllModules(b, s)
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
+		benchmarkEvictModule(b, s, "m000", mods)
+		b.StartTimer()
+		snapshot, ok := s.analyzeModuleByName("m000")
+		if !ok || snapshot == nil {
+			b.Fatal("expected evicted module reload to succeed")
+		}
+	}
+}
+
+func BenchmarkFastWorkspaceSymbol_AllResident(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceSmall, 2)
+	s := newBenchmarkWorkspaceServer(b, root, benchWorkspaceSmall)
+	benchmarkWarmAllModules(b, s)
+	params := &lsp.WorkspaceSymbolParams{Query: "func_"}
+	b.ResetTimer()
+	for b.Loop() {
+		results, err := s.WorkspaceSymbol(params)
+		if err != nil || len(results) == 0 {
+			b.Fatalf("workspace symbols failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkMediumWorkspaceSymbol_LRU256(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 2)
+	s := newBenchmarkWorkspaceServer(b, root, 256)
+	benchmarkWarmAllModules(b, s)
+	params := &lsp.WorkspaceSymbolParams{Query: "func_"}
+	var resident int
+	b.ResetTimer()
+	for b.Loop() {
+		results, err := s.WorkspaceSymbol(params)
+		if err != nil || len(results) == 0 {
+			b.Fatalf("workspace symbols failed: %v", err)
+		}
+		resident = benchmarkResidentSnapshotCount(s)
+	}
+	b.ReportMetric(float64(resident), "resident_modules")
+}
+
+func BenchmarkStressWorkspaceSymbol_LRU32(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceLarge, 2)
+	s := newBenchmarkWorkspaceServer(b, root, 32)
+	benchmarkWarmAllModules(b, s)
+	params := &lsp.WorkspaceSymbolParams{Query: "func_"}
+	var resident int
+	b.ResetTimer()
+	for b.Loop() {
+		results, err := s.WorkspaceSymbol(params)
+		if err != nil || len(results) == 0 {
+			b.Fatalf("workspace symbols failed: %v", err)
+		}
+		resident = benchmarkResidentSnapshotCount(s)
+	}
+	b.ReportMetric(float64(resident), "resident_modules")
+}
+
+func BenchmarkFastCompletionFromImport_Resident(b *testing.B) {
+	root := b.TempDir()
+	writeBenchmarkFile(b, filepath.Join(root, "lib.py"), benchmarkModuleCode("lib", nil))
+	mainCode := "from lib import fu"
+	mainPath := filepath.Join(root, "main.py")
+	writeBenchmarkFile(b, mainPath, mainCode)
+
+	s := newBenchmarkWorkspaceServer(b, root, 16)
+	if _, ok := s.analyzeModuleByName("lib"); !ok {
+		b.Fatal("expected lib module analysis to succeed")
+	}
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	params := &lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 0, Character: len(mainCode)}}
+	b.ResetTimer()
+	for b.Loop() {
+		items, err := s.Completion(params)
+		if err != nil || len(items) == 0 {
+			b.Fatalf("completion failed: %v", err)
+		}
+	}
+	s.Close(mainURI)
+}
+
+func BenchmarkFastCompletionFromImport_Evicted(b *testing.B) {
+	root := b.TempDir()
+	writeBenchmarkFile(b, filepath.Join(root, "lib.py"), benchmarkModuleCode("lib", nil))
+	for i := range benchWorkspaceSmall {
+		name := fmt.Sprintf("m%03d", i)
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, nil))
+	}
+	mainCode := "from lib import fu"
+	mainPath := filepath.Join(root, "main.py")
+	writeBenchmarkFile(b, mainPath, mainCode)
+
+	s := newBenchmarkWorkspaceServer(b, root, 8)
+	mods := benchmarkWarmAllModules(b, s)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	params := &lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 0, Character: len(mainCode)}}
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
+		benchmarkEvictModule(b, s, "lib", mods)
+		b.StartTimer()
+		items, err := s.Completion(params)
+		if err != nil || len(items) == 0 {
+			b.Fatalf("completion failed: %v", err)
+		}
+	}
+	s.Close(mainURI)
+}
+
+func BenchmarkFastModuleMemberCompletion_Resident(b *testing.B) {
+	root := b.TempDir()
+	writeBenchmarkFile(b, filepath.Join(root, "lib.py"), benchmarkModuleCode("lib", nil))
+	mainCode := "import lib\nlib.fu"
+	mainPath := filepath.Join(root, "main.py")
+	writeBenchmarkFile(b, mainPath, mainCode)
+
+	s := newBenchmarkWorkspaceServer(b, root, 16)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+	params := &lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 1, Character: len("lib.fu")}}
+	b.ResetTimer()
+	for b.Loop() {
+		items, err := s.Completion(params)
+		if err != nil || len(items) == 0 {
+			b.Fatalf("completion failed: %v", err)
+		}
+	}
+	s.Close(mainURI)
+}
+
+func BenchmarkFastModuleMemberCompletion_Evicted(b *testing.B) {
+	root := b.TempDir()
+	writeBenchmarkFile(b, filepath.Join(root, "lib.py"), benchmarkModuleCode("lib", nil))
+	for i := range benchWorkspaceSmall {
+		name := fmt.Sprintf("m%03d", i)
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, nil))
+	}
+	mainCode := "import lib\nlib.fu"
+	mainPath := filepath.Join(root, "main.py")
+	writeBenchmarkFile(b, mainPath, mainCode)
+
+	s := newBenchmarkWorkspaceServer(b, root, 8)
+	mods := benchmarkWarmAllModules(b, s)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+	params := &lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 1, Character: len("lib.fu")}}
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
+		benchmarkEvictModule(b, s, "lib", mods)
+		b.StartTimer()
+		items, err := s.Completion(params)
+		if err != nil || len(items) == 0 {
+			b.Fatalf("completion failed: %v", err)
+		}
+	}
+	s.Close(mainURI)
+}
+
+func BenchmarkMediumModuleRebuild_NoEviction(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 1)
+	s := newBenchmarkWorkspaceServer(b, root, benchWorkspaceMedium)
+	s.indexMu.RLock()
+	mods := make([]ModuleFile, 0, len(s.modulesByName))
+	for _, mod := range s.modulesByName {
+		mods = append(mods, mod)
+	}
+	s.indexMu.RUnlock()
+	b.ResetTimer()
+	for b.Loop() {
+		for _, mod := range mods {
+			_, _ = s.rebuildModuleByURI(mod.URI)
+		}
+	}
+}
+
+func BenchmarkStressModuleRebuild_WithEviction(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceLarge, 1)
+	s := newBenchmarkWorkspaceServer(b, root, 16)
+	s.indexMu.RLock()
+	mods := make([]ModuleFile, 0, len(s.modulesByName))
+	for _, mod := range s.modulesByName {
+		mods = append(mods, mod)
+	}
+	s.indexMu.RUnlock()
+	b.ResetTimer()
+	for b.Loop() {
+		for _, mod := range mods {
+			_, _ = s.rebuildModuleByURI(mod.URI)
+		}
+	}
+}
+
+func BenchmarkMediumLRUEviction_RefIndexTrim(b *testing.B) {
+	root := createBenchmarkWorkspace(b, benchWorkspaceMedium, 2)
+	var resident int
+	var refEntries int
+	b.ResetTimer()
+	for b.Loop() {
+		s := newBenchmarkWorkspaceServer(b, root, 16)
+		benchmarkWarmAllModules(b, s)
+		resident = benchmarkResidentSnapshotCount(s)
+		refEntries = benchmarkRefIndexURIEntryCount(s)
+	}
+	b.ReportMetric(float64(resident), "resident_modules")
+	b.ReportMetric(float64(refEntries), "refindex_uris")
 }

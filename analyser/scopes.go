@@ -1,13 +1,10 @@
 package analyser
 
-import (
-	"fmt"
-
-	"rahu/parser/ast"
-)
+import "rahu/parser/ast"
 
 type ScopeBuilder struct {
 	tree         *ast.AST
+	source       string // Source text for extracting default values
 	currentClass *Symbol
 	current      *Scope
 	inFunction   bool
@@ -21,10 +18,28 @@ func (b *ScopeBuilder) newSymID() SymbolID {
 	return b.nextSymID
 }
 
-func (b *ScopeBuilder) define(scope *Scope, nameID ast.NodeID, kind SymbolKind, span ast.Range) {
+const maxDefaultValueLen = 50
+
+// extractValue extracts the source text for a node, truncating if too long.
+func (b *ScopeBuilder) extractValue(nodeID ast.NodeID) string {
+	if nodeID == ast.NoNode || b.source == "" {
+		return ""
+	}
+	r := b.tree.RangeOf(nodeID)
+	if int(r.End) > len(b.source) {
+		return ""
+	}
+	val := b.source[r.Start:r.End]
+	if len(val) > maxDefaultValueLen {
+		return val[:maxDefaultValueLen] + "..."
+	}
+	return val
+}
+
+func (b *ScopeBuilder) define(scope *Scope, nameID ast.NodeID, kind SymbolKind, span ast.Range) *Symbol {
 	name, ok := b.tree.NameText(nameID)
 	if !ok {
-		return
+		return nil
 	}
 
 	sym := &Symbol{
@@ -36,9 +51,10 @@ func (b *ScopeBuilder) define(scope *Scope, nameID ast.NodeID, kind SymbolKind, 
 	}
 	_ = scope.Define(sym)
 	b.Defs[nameID] = sym
+	return sym
 }
 
-func BuildScopes(tree *ast.AST) (*Scope, map[ast.NodeID]*Symbol) {
+func BuildScopes(tree *ast.AST, source string) (*Scope, map[ast.NodeID]*Symbol) {
 	global := NewScope(builtinScope, ScopeGlobal)
 	defsCap := len(tree.Nodes) / 8
 	if defsCap < 8 {
@@ -46,6 +62,7 @@ func BuildScopes(tree *ast.AST) (*Scope, map[ast.NodeID]*Symbol) {
 	}
 	b := &ScopeBuilder{
 		tree:    tree,
+		source:  source,
 		current: global,
 		Defs:    make(map[ast.NodeID]*Symbol, defsCap),
 	}
@@ -81,6 +98,10 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 		b.visitWhile(stmt)
 	case ast.NodeClassDef:
 		b.visitClassDef(stmt)
+	case ast.NodeTry:
+		b.visitTry(stmt)
+	case ast.NodeExcept:
+		b.visitExcept(stmt)
 	case ast.NodeExprStmt:
 		b.visitExpr(b.tree.Nodes[stmt].FirstChild)
 	case ast.NodeReturn:
@@ -93,9 +114,9 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 		b.visitImport(stmt)
 	case ast.NodeFromImport:
 		b.visitFromImport(stmt)
-	case ast.NodeBreak, ast.NodeContinue, ast.NodeErrStmt:
+	case ast.NodePass, ast.NodeBreak, ast.NodeContinue, ast.NodeErrStmt:
 	default:
-		panic(fmt.Sprintf("unhandled statement type %s", b.tree.Node(stmt).Kind))
+		return
 	}
 }
 
@@ -199,6 +220,14 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 	case ast.NodeName, ast.NodeNumber, ast.NodeString, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
 		return
 
+	case ast.NodeListComp:
+		b.visitListComp(id)
+		return
+
+	case ast.NodeComprehension:
+		b.visitComprehension(id)
+		return
+
 	case ast.NodeCall:
 		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
 			b.visitExpr(child)
@@ -253,6 +282,44 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 	}
 }
 
+func (b *ScopeBuilder) defineTargetPattern(id ast.NodeID) {
+	if id == ast.NoNode {
+		return
+	}
+	switch b.tree.Node(id).Kind {
+	case ast.NodeName:
+		b.define(b.current, id, SymVariable, b.tree.RangeOf(id))
+	case ast.NodeTuple, ast.NodeList:
+		for child := b.tree.Node(id).FirstChild; child != ast.NoNode; child = b.tree.Node(child).NextSibling {
+			b.defineTargetPattern(child)
+		}
+	}
+}
+
+func (b *ScopeBuilder) visitListComp(id ast.NodeID) {
+	expr, clauses := b.tree.ListCompParts(id)
+	compScope := NewScope(b.current, ScopeBlock)
+	prev := b.current
+	prevClass := b.currentClass
+	b.current = compScope
+	b.currentClass = nil
+	for _, clause := range clauses {
+		b.visitComprehension(clause)
+	}
+	b.visitExpr(expr)
+	b.current = prev
+	b.currentClass = prevClass
+}
+
+func (b *ScopeBuilder) visitComprehension(id ast.NodeID) {
+	target, iter, filters := b.tree.ComprehensionParts(id)
+	b.visitExpr(iter)
+	b.defineTargetPattern(target)
+	for _, filter := range filters {
+		b.visitExpr(filter)
+	}
+}
+
 func (b *ScopeBuilder) visitWhile(id ast.NodeID) {
 	test := b.tree.Nodes[id].FirstChild
 	body := ast.NoNode
@@ -266,9 +333,7 @@ func (b *ScopeBuilder) visitWhile(id ast.NodeID) {
 
 func (b *ScopeBuilder) visitFor(id ast.NodeID) {
 	target := b.tree.Nodes[id].FirstChild
-	if b.tree.Node(target).Kind == ast.NodeName {
-		b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
-	}
+	b.defineTargetPattern(target)
 
 	iter := ast.NoNode
 	body := ast.NoNode
@@ -314,8 +379,44 @@ func (b *ScopeBuilder) visitIf(id ast.NodeID) {
 	}
 }
 
+func (b *ScopeBuilder) visitTry(id ast.NodeID) {
+	body, excepts, elseBlock, finallyBlock := b.tree.TryParts(id)
+	if body != ast.NoNode {
+		for stmt := b.tree.Node(body).FirstChild; stmt != ast.NoNode; stmt = b.tree.Node(stmt).NextSibling {
+			b.visitStmt(stmt)
+		}
+	}
+	for _, exceptClause := range excepts {
+		b.visitExcept(exceptClause)
+	}
+	if elseBlock != ast.NoNode {
+		for stmt := b.tree.Node(elseBlock).FirstChild; stmt != ast.NoNode; stmt = b.tree.Node(stmt).NextSibling {
+			b.visitStmt(stmt)
+		}
+	}
+	if finallyBlock != ast.NoNode {
+		for stmt := b.tree.Node(finallyBlock).FirstChild; stmt != ast.NoNode; stmt = b.tree.Node(stmt).NextSibling {
+			b.visitStmt(stmt)
+		}
+	}
+}
+
+func (b *ScopeBuilder) visitExcept(id ast.NodeID) {
+	excType, asName, body := b.tree.ExceptParts(id)
+	b.visitExpr(excType)
+	if asName != ast.NoNode {
+		b.define(b.current, asName, SymVariable, b.tree.RangeOf(asName))
+	}
+	if body != ast.NoNode {
+		for stmt := b.tree.Node(body).FirstChild; stmt != ast.NoNode; stmt = b.tree.Node(stmt).NextSibling {
+			b.visitStmt(stmt)
+		}
+	}
+}
+
 func (b *ScopeBuilder) visitAssign(id ast.NodeID) {
-	value := b.tree.Nodes[id].FirstChild
+	firstValue := b.tree.Nodes[id].FirstChild
+	value := firstValue
 	for target := ast.NoNode; value != ast.NoNode; {
 		target = b.tree.Nodes[value].NextSibling
 		if target == ast.NoNode {
@@ -324,7 +425,10 @@ func (b *ScopeBuilder) visitAssign(id ast.NodeID) {
 
 		switch b.tree.Node(target).Kind {
 		case ast.NodeName:
-			b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+			sym := b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+			if sym != nil {
+				sym.DefaultValue = b.extractValue(firstValue)
+			}
 
 		case ast.NodeAttribute:
 			if b.currentClass == nil || !b.inFunction {
@@ -375,7 +479,10 @@ func (b *ScopeBuilder) visitAnnAssign(id ast.NodeID) {
 	}
 
 	if b.tree.Node(target).Kind == ast.NodeName {
-		b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+		sym := b.define(b.current, target, SymVariable, b.tree.RangeOf(target))
+		if sym != nil && value != ast.NoNode {
+			sym.DefaultValue = b.extractValue(value)
+		}
 	}
 	b.visitExpr(annotation)
 	b.visitExpr(value)
@@ -457,7 +564,10 @@ func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
 	if args != ast.NoNode {
 		for arg := b.tree.Nodes[args].FirstChild; arg != ast.NoNode; arg = b.tree.Nodes[arg].NextSibling {
 			paramName, annotation, def := b.tree.ParamParts(arg)
-			b.define(b.current, paramName, SymParameter, b.tree.RangeOf(paramName))
+			sym := b.define(b.current, paramName, SymParameter, b.tree.RangeOf(paramName))
+			if sym != nil && def != ast.NoNode {
+				sym.DefaultValue = b.extractValue(def)
+			}
 			if annotation != ast.NoNode {
 				b.visitExpr(annotation)
 			}

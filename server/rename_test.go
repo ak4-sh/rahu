@@ -103,6 +103,52 @@ func TestRenameBrokenImportFails(t *testing.T) {
 	}
 }
 
+func TestRenameDirectAttributeSameFile(t *testing.T) {
+	code := "class Foo:\n    def __init__(self):\n        self.value = 1\n\n    def read(self):\n        return self.value\n\nfoo = Foo()\nfoo.value\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	edit, err := s.Rename(renameParams(uri, code, 5, 20, "renamed"))
+	if err != nil {
+		t.Fatalf("unexpected rename error: %v", err)
+	}
+	if len(edit.Changes[uri]) != 3 {
+		t.Fatalf("unexpected direct attribute rename edits: %+v", edit.Changes)
+	}
+	for _, change := range edit.Changes[uri] {
+		if change.NewText != "renamed" {
+			t.Fatalf("unexpected new text: %+v", change)
+		}
+		if change.Range.End.Character-change.Range.Start.Character != len("value") {
+			t.Fatalf("expected attribute-only edit range, got %+v", change)
+		}
+	}
+}
+
+func TestRenameDirectAttributeDoesNotRenameOtherClassMember(t *testing.T) {
+	code := "class Foo:\n    def __init__(self):\n        self.value = 1\n\n    def read(self):\n        return self.value\n\nclass Bar:\n    def __init__(self):\n        self.value = 2\n\n    def read(self):\n        return self.value\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	edit, err := s.Rename(renameParams(uri, code, 5, 20, "renamed"))
+	if err != nil {
+		t.Fatalf("unexpected rename error: %v", err)
+	}
+	changes := edit.Changes[uri]
+	if len(changes) != 2 {
+		t.Fatalf("unexpected direct attribute rename edits: %+v", edit.Changes)
+	}
+	for _, change := range changes {
+		if change.Range.Start.Line >= 7 {
+			t.Fatalf("expected Foo.value edits only, got %+v", changes)
+		}
+	}
+}
+
 func renameParams(uri lsp.DocumentURI, code string, line, char int, newName string) *lsp.RenameParams {
 	li := source.NewLineIndex(code)
 	offset := li.PositionToOffset(line, char)

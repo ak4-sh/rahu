@@ -133,6 +133,59 @@ func TestReferencesBrokenImportReturnsNone(t *testing.T) {
 	}
 }
 
+func TestReferencesDirectAttributeIncludeDeclaration(t *testing.T) {
+	code := "class Foo:\n    def __init__(self):\n        self.value = 1\n\n    def read(self):\n        return self.value\n\nfoo = Foo()\nfoo.value\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	refs, err := s.References(referenceParams(uri, code, 5, 20, true))
+	if err != nil {
+		t.Fatalf("unexpected references error: %v", err)
+	}
+	if len(refs) != 3 {
+		t.Fatalf("unexpected attribute reference count: %+v", refs)
+	}
+}
+
+func TestReferencesDirectAttributeExcludeDeclaration(t *testing.T) {
+	code := "class Foo:\n    def __init__(self):\n        self.value = 1\n\n    def read(self):\n        return self.value\n\nfoo = Foo()\nfoo.value\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	refs, err := s.References(referenceParams(uri, code, 5, 20, false))
+	if err != nil {
+		t.Fatalf("unexpected references error: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("unexpected attribute reference count without declaration: %+v", refs)
+	}
+}
+
+func TestReferencesDirectAttributeDoNotMixClasses(t *testing.T) {
+	code := "class Foo:\n    def __init__(self):\n        self.value = 1\n\n    def read(self):\n        return self.value\n\nclass Bar:\n    def __init__(self):\n        self.value = 2\n\n    def read(self):\n        return self.value\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	refs, err := s.References(referenceParams(uri, code, 5, 20, true))
+	if err != nil {
+		t.Fatalf("unexpected references error: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("unexpected mixed-class attribute references: %+v", refs)
+	}
+	for _, ref := range refs {
+		if ref.Range.Start.Line >= 7 {
+			t.Fatalf("expected Foo.value references only, got %+v", refs)
+		}
+	}
+}
+
 func referenceParams(uri lsp.DocumentURI, code string, line, char int, includeDecl bool) *lsp.ReferenceParams {
 	li := source.NewLineIndex(code)
 	offset := li.PositionToOffset(line, char)

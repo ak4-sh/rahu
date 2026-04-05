@@ -138,6 +138,45 @@ func locateInStmt(tree *ast.AST, stmt ast.NodeID, pos int, mode locateMode) Resu
 			}
 		}
 
+	case ast.NodeTry:
+		body, excepts, elseBlock, finallyBlock := tree.TryParts(stmt)
+		for inner := tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = tree.Nodes[inner].NextSibling {
+			if res := locateInStmt(tree, inner, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+		for _, exceptClause := range excepts {
+			if res := locateInStmt(tree, exceptClause, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+		for inner := tree.Nodes[elseBlock].FirstChild; inner != ast.NoNode; inner = tree.Nodes[inner].NextSibling {
+			if res := locateInStmt(tree, inner, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+		for inner := tree.Nodes[finallyBlock].FirstChild; inner != ast.NoNode; inner = tree.Nodes[inner].NextSibling {
+			if res := locateInStmt(tree, inner, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodeExcept:
+		excType, asName, body := tree.ExceptParts(stmt)
+		if res := locateInExpr(tree, excType, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if mode != locateAttrOnly && nodeContains(tree, asName, pos) {
+			return Result{Kind: NameResult, Node: asName}
+		}
+		for inner := tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = tree.Nodes[inner].NextSibling {
+			if res := locateInStmt(tree, inner, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodePass:
+
 	case ast.NodeFor:
 		target := tree.Nodes[stmt].FirstChild
 		if res := locateInExpr(tree, target, pos, mode); res.Kind != NoResult {

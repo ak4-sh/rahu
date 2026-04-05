@@ -150,6 +150,10 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		builder.WriteString(": ")
 		builder.WriteString(typeText)
 	}
+	if sym.DefaultValue != "" {
+		builder.WriteString(" = ")
+		builder.WriteString(sym.DefaultValue)
+	}
 	builder.WriteString(")\n```")
 
 	if sym.Kind == a.SymClass && sym.DocString != "" {
@@ -166,7 +170,11 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		params := []string{}
 		for _, p := range sym.Inner.Symbols {
 			if p.Kind == a.SymParameter {
-				params = append(params, p.Name)
+				paramStr := p.Name
+				if p.DefaultValue != "" {
+					paramStr += "=" + p.DefaultValue
+				}
+				params = append(params, paramStr)
 			}
 		}
 		name := sym.Name
@@ -201,6 +209,10 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		builder.WriteString(sym.Name)
 		builder.WriteString(": ")
 		builder.WriteString(typeText)
+		if sym.DefaultValue != "" {
+			builder.WriteString(" = ")
+			builder.WriteString(sym.DefaultValue)
+		}
 		builder.WriteString(")\n```")
 	}
 
@@ -236,7 +248,8 @@ func symbolAtOffset(doc *Document, offset int) (*a.Symbol, ast.NodeID, bool) {
 		return nil, ast.NoNode, false
 	}
 
-	res := l.LocateAtPos(doc.Tree, offset)
+	// Use indexed lookup for O(log n) performance when available
+	res := l.LocateAtPosIndexed(doc.Tree, offset, doc.PosIndex)
 	switch res.Kind {
 	case l.AttributeResult:
 		sym := doc.AttrSymbols[res.Node]
@@ -439,7 +452,7 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 }
 
 func (s *Server) scheduleAnalysis(uri lsp.DocumentURI) {
-	s.mu.Lock()
+	s.miscMu.Lock()
 	if t, ok := s.debounce[uri]; ok {
 		t.Stop()
 	}
@@ -451,5 +464,5 @@ func (s *Server) scheduleAnalysis(uri lsp.DocumentURI) {
 		}
 	})
 
-	s.mu.Unlock()
+	s.miscMu.Unlock()
 }

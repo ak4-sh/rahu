@@ -353,6 +353,8 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.visitExpr(value, Read)
 		}
 
+	case ast.NodePass:
+
 	case ast.NodeBreak:
 		r.checkLoopContext(r.tree.RangeOf(stmt), "break")
 
@@ -360,6 +362,27 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		r.checkLoopContext(r.tree.RangeOf(stmt), "continue")
 
 	case ast.NodeImport, ast.NodeFromImport:
+	case ast.NodeTry:
+		body, excepts, elseBlock, finallyBlock := r.tree.TryParts(stmt)
+		for inner := r.tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
+			r.visitStmt(inner)
+		}
+		for _, exceptClause := range excepts {
+			r.visitStmt(exceptClause)
+		}
+		for inner := r.tree.Nodes[elseBlock].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
+			r.visitStmt(inner)
+		}
+		for inner := r.tree.Nodes[finallyBlock].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
+			r.visitStmt(inner)
+		}
+
+	case ast.NodeExcept:
+		excType, _, body := r.tree.ExceptParts(stmt)
+		r.visitExpr(excType, Read)
+		for inner := r.tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
+			r.visitStmt(inner)
+		}
 	}
 }
 
@@ -581,6 +604,9 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 			r.setExprType(expr, TupleType(itemTypes...))
 		}
 
+	case ast.NodeListComp:
+		r.visitListComp(expr)
+
 	case ast.NodeDict:
 		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
 			r.visitExpr(child, Read)
@@ -614,6 +640,65 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 			Class:    r.currentClass,
 			SelfName: r.selfName,
 		})
+	}
+}
+
+func (r *Resolver) visitListComp(expr ast.NodeID) {
+	resultExpr, clauses := r.tree.ListCompParts(expr)
+	compScope := NewScope(r.current, ScopeBlock)
+	prev := r.current
+	r.current = compScope
+	for _, clause := range clauses {
+		r.visitComprehension(clause)
+	}
+	r.visitExpr(resultExpr, Read)
+	r.current = prev
+	r.setExprType(expr, ListType(r.exprType(resultExpr)))
+}
+
+func (r *Resolver) visitComprehension(id ast.NodeID) {
+	target, iter, filters := r.tree.ComprehensionParts(id)
+	r.visitExpr(iter, Read)
+	r.defineComprehensionTarget(target)
+	r.visitExpr(target, Write)
+	r.assignTargetType(target, SubscriptResultType(r.exprType(iter)))
+	for _, filter := range filters {
+		r.visitExpr(filter, Read)
+	}
+}
+
+func (r *Resolver) defineComprehensionTarget(target ast.NodeID) {
+	if target == ast.NoNode {
+		return
+	}
+	switch r.tree.Node(target).Kind {
+	case ast.NodeName:
+		name, _ := r.tree.NameText(target)
+		if _, ok := r.current.Symbols[name]; ok {
+			return
+		}
+		sym := &Symbol{Name: name, Kind: SymVariable, Span: r.tree.RangeOf(target), Def: target}
+		_ = r.current.Define(sym)
+	case ast.NodeTuple, ast.NodeList:
+		for child := r.tree.Node(target).FirstChild; child != ast.NoNode; child = r.tree.Node(child).NextSibling {
+			r.defineComprehensionTarget(child)
+		}
+	}
+}
+
+func (r *Resolver) assignTargetType(target ast.NodeID, typ *Type) {
+	if target == ast.NoNode || IsUnknownType(typ) {
+		return
+	}
+	switch r.tree.Node(target).Kind {
+	case ast.NodeName:
+		if sym := r.Resolved[target]; sym != nil {
+			sym.Inferred = JoinTypes(sym.Inferred, typ)
+		}
+	case ast.NodeTuple, ast.NodeList:
+		for child := r.tree.Node(target).FirstChild; child != ast.NoNode; child = r.tree.Node(child).NextSibling {
+			r.assignTargetType(child, typ)
+		}
 	}
 }
 
