@@ -96,6 +96,47 @@ func TestSemanticTokensIncludePassKeyword(t *testing.T) {
 	assertSemanticToken(t, decoded, 1, 4, 4, "keyword")
 }
 
+func TestSemanticTokensEmptyDataIsNonNil(t *testing.T) {
+	code := "x\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	tokens, err := s.SemanticTokensFull(&lsp.SemanticTokensParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatalf("unexpected semantic tokens error: %v", err)
+	}
+	if tokens == nil {
+		t.Fatal("expected semantic tokens result")
+	}
+	if tokens.Data == nil {
+		t.Fatal("expected non-nil semantic token data")
+	}
+	if len(tokens.Data) != 0 {
+		t.Fatalf("expected empty semantic token data, got %v", tokens.Data)
+	}
+}
+
+func TestSemanticTokensMissingDocumentReturnsEmptyData(t *testing.T) {
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///missing.py")
+
+	tokens, err := s.SemanticTokensFull(&lsp.SemanticTokensParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatalf("unexpected semantic tokens error: %v", err)
+	}
+	if tokens == nil {
+		t.Fatal("expected semantic tokens result")
+	}
+	if tokens.Data == nil {
+		t.Fatal("expected non-nil semantic token data")
+	}
+	if len(tokens.Data) != 0 {
+		t.Fatalf("expected empty semantic token data, got %v", tokens.Data)
+	}
+}
+
 func decodeSemanticTokens(tokens *lsp.SemanticTokens) []decodedSemanticToken {
 	if tokens == nil || len(tokens.Data) == 0 {
 		return nil

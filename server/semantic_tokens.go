@@ -262,7 +262,7 @@ func appendImportModuleTokens(entries *[]semanticTokenEntry, seen map[semanticTo
 
 func encodeSemanticTokens(entries []semanticTokenEntry) []uint32 {
 	if len(entries) == 0 {
-		return nil
+		return []uint32{}
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].line != entries[j].line {
@@ -325,7 +325,7 @@ func buildSemanticTokens(doc *Document) []semanticTokenEntry {
 func (s *Server) SemanticTokensFull(p *lsp.SemanticTokensParams) (*lsp.SemanticTokens, *jsonrpc.Error) {
 	doc := s.Get(p.TextDocument.URI)
 	if doc == nil {
-		return nil, jsonrpc.InvalidParamsError(nil)
+		return &lsp.SemanticTokens{Data: []uint32{}}, nil
 	}
 	doc.mu.RLock()
 	entries := buildSemanticTokens(doc)
