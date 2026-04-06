@@ -7,9 +7,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+type dispatchOrderParams struct {
+	Value string `json:"value"`
+}
+
+type signalBuffer struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	writes chan struct{}
+}
+
+func newSignalBuffer() *signalBuffer {
+	return &signalBuffer{writes: make(chan struct{}, 16)}
+}
+
+func (b *signalBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	n, err := b.buf.Write(p)
+	if n > 0 {
+		select {
+		case b.writes <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
+func (b *signalBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func TestConn_Read(t *testing.T) {
 	req := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
@@ -190,7 +225,7 @@ func TestConn_ReadResponse(t *testing.T) {
 
 func TestConn_RequestRoundTrip(t *testing.T) {
 	in := bytes.NewBuffer(nil)
-	out := &bytes.Buffer{}
+	out := newSignalBuffer()
 
 	conn := NewConn(
 		bufio.NewReader(in),
@@ -212,7 +247,12 @@ func TestConn_RequestRoundTrip(t *testing.T) {
 		done <- resp
 	}()
 
-	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-out.writes:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request write")
+	}
+
 	output := out.String()
 	if !strings.Contains(output, `"method":"window/showMessageRequest"`) {
 		t.Fatalf("missing request method in output: %q", output)
@@ -255,4 +295,55 @@ func TestConn_RequestContextCancel(t *testing.T) {
 
 	conn.Close()
 	conn.Wait()
+}
+
+func TestDispatchProcessesNotificationsBeforeFollowingRequests(t *testing.T) {
+	notifMethod := "test/dispatch-order/notification"
+	reqMethod := "test/dispatch-order/request"
+
+	notifStarted := make(chan struct{})
+	releaseNotif := make(chan struct{})
+	requestRan := make(chan bool, 1)
+
+	RegisterNotification(notifMethod, AdaptNotification(func(p *dispatchOrderParams) {
+		close(notifStarted)
+		<-releaseNotif
+	}))
+	RegisterRequest(reqMethod, AdaptRequest(func(p *dispatchOrderParams) (map[string]any, *Error) {
+		select {
+		case <-notifStarted:
+			requestRan <- true
+		default:
+			requestRan <- false
+		}
+		return map[string]any{"ok": true}, nil
+	}))
+
+	conn := NewConn(bufio.NewReader(bytes.NewBuffer(nil)), bufio.NewWriter(&bytes.Buffer{}), func() error { return nil })
+	go Dispatch(conn)
+
+	conn.incoming <- &Notification{JSONRPC: "2.0", Method: notifMethod, Params: json.RawMessage(`{"value":"open"}`)}
+	<-notifStarted
+	conn.incoming <- &Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: reqMethod, Params: json.RawMessage(`{"value":"tokens"}`)}
+
+	select {
+	case ran := <-requestRan:
+		if ran {
+			t.Fatal("expected request to wait for notification completion")
+		}
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseNotif)
+
+	select {
+	case ran := <-requestRan:
+		if !ran {
+			t.Fatal("expected request to run after notification completion")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request after notification")
+	}
+
+	close(conn.incoming)
 }

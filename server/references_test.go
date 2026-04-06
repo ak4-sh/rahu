@@ -113,6 +113,38 @@ func TestReferencesIncludeIndexedNonOpenFiles(t *testing.T) {
 	}
 }
 
+func TestReferencesReadyAfterStartupIndexing(t *testing.T) {
+	root := t.TempDir()
+	modPath := filepath.Join(root, "mod.py")
+	mainPath := filepath.Join(root, "main.py")
+	modCode := "def foo():\n    pass\n"
+	mainCode := "from mod import foo\nfoo()\n"
+	writeWorkspaceFile(t, modPath, modCode)
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := New(nil)
+	rootURI := pathToURI(root)
+	if _, err := s.Initialize(&lsp.InitializeParams{RootURI: &rootURI}); err != nil {
+		t.Fatalf("initialize failed: %v", err)
+	}
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.Initialized(nil)
+	if err := s.WaitForIndexing(); err != nil {
+		t.Fatalf("indexing failed: %v", err)
+	}
+
+	refs, err := s.References(referenceParams(mainURI, mainCode, 1, 0, true))
+	if err != nil {
+		t.Fatalf("unexpected references error: %v", err)
+	}
+	if len(refs) != 3 {
+		t.Fatalf("expected startup-built references, got %+v", refs)
+	}
+	assertReferenceURI(t, refs, pathToURI(modPath))
+	assertReferenceURI(t, refs, mainURI)
+}
+
 func TestReferencesBrokenImportReturnsNone(t *testing.T) {
 	root := t.TempDir()
 	mainPath := filepath.Join(root, "main.py")

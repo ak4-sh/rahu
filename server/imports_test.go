@@ -6,9 +6,33 @@ import (
 	"strings"
 	"testing"
 
+	"rahu/analyser"
 	"rahu/lsp"
 	"rahu/source"
 )
+
+func TestComputeExportHashSkipsRevisitedClassSymbols(t *testing.T) {
+	a := &analyser.Symbol{Name: "A", Kind: analyser.SymClass, ID: 1}
+	b := &analyser.Symbol{Name: "B", Kind: analyser.SymClass, ID: 2}
+	a.Members = analyser.NewScope(nil, analyser.ScopeMember)
+	b.Members = analyser.NewScope(nil, analyser.ScopeMember)
+	a.Members.Symbols[b.Name] = b
+	b.Members.Symbols[a.Name] = a
+
+	exports := map[string]*analyser.Symbol{
+		"A": a,
+		"B": b,
+	}
+
+	first := computeExportHash(exports)
+	second := computeExportHash(exports)
+	if first == 0 {
+		t.Fatal("expected non-zero hash for cyclic exports")
+	}
+	if first != second {
+		t.Fatalf("expected stable hash for cyclic exports, got %d then %d", first, second)
+	}
+}
 
 func TestDefinitionFromImportCrossFile(t *testing.T) {
 	root := t.TempDir()

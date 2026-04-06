@@ -3,15 +3,58 @@ package server
 import (
 	"context"
 	"io/fs"
+	"log"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"rahu/lsp"
 )
+
+type startupIndexTimings struct {
+	moduleCount      int
+	phaseABuild      time.Duration
+	phaseABuildTotal atomic.Int64
+	phaseBBind       time.Duration
+	phaseBBindTotal  time.Duration
+	refIndexBuild    time.Duration
+	reverseDeps      time.Duration
+}
+
+func (t *startupIndexTimings) log() {
+	if t == nil {
+		return
+	}
+	log.Printf(
+		"INDEX: modules=%d phase_a=%s phase_a_total=%s phase_b=%s phase_b_total=%s ref_index=%s reverse_deps=%s",
+		t.moduleCount,
+		t.phaseABuild,
+		totalDurationFromAtomic(&t.phaseABuildTotal),
+		t.phaseBBind,
+		t.phaseBBindTotal,
+		t.refIndexBuild,
+		t.reverseDeps,
+	)
+}
+
+func totalDurationFromAtomic(v *atomic.Int64) time.Duration {
+	if v == nil {
+		return 0
+	}
+	return time.Duration(v.Load())
+}
+
+func addDurationAtomic(v *atomic.Int64, d time.Duration) {
+	if v == nil {
+		return
+	}
+	v.Add(int64(d))
+}
 
 func uriToPath(uri lsp.DocumentURI) (string, bool) {
 	u, err := url.Parse(string(uri))
@@ -196,12 +239,16 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 	// Sort by priority: priorityDir first, then parents, then rest
 	sortModulesByPriority(mods, priorityDir)
 
+	timings := &startupIndexTimings{moduleCount: len(mods)}
 	total := len(mods)
 	workers := workspaceIndexWorkerCount(total)
 	jobs := make(chan ModuleFile)
 	var wg sync.WaitGroup
 	var completed atomic.Int32
+	baseByName := make(map[string]*ModuleSnapshot, len(mods))
+	var baseMu sync.Mutex
 
+	phaseAStart := time.Now()
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -214,7 +261,14 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 					if !ok {
 						return
 					}
-					_, _ = s.analyzeModuleFile(mod)
+					started := time.Now()
+					snapshot, ok := s.buildBaseSnapshotForModule(mod)
+					addDurationAtomic(&timings.phaseABuildTotal, time.Since(started))
+					if ok && snapshot != nil {
+						baseMu.Lock()
+						baseByName[mod.Name] = snapshot
+						baseMu.Unlock()
+					}
 					current := int(completed.Add(1))
 					if current%10 == 0 || current == total {
 						s.reportIndexingProgress(current, total)
@@ -235,22 +289,76 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 	}
 	close(jobs)
 	wg.Wait()
+	timings.phaseABuild = time.Since(phaseAStart)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
+	lookup := func(name string) (*ModuleSnapshot, bool) {
+		baseMu.Lock()
+		snapshot := baseByName[name]
+		baseMu.Unlock()
+		return snapshot, snapshot != nil
+	}
+
+	phaseBStart := time.Now()
+	for _, mod := range mods {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		baseMu.Lock()
+		snapshot := baseByName[mod.Name]
+		baseMu.Unlock()
+		if snapshot == nil {
+			continue
+		}
+		started := time.Now()
+		snapshot.SemErrs = append(snapshot.SemErrs, s.bindWorkspaceImportsWithLookup(snapshot.Tree, snapshot.Defs, snapshot.URI, lookup)...)
+		snapshot.Exports = extractExports(snapshot.Global)
+		snapshot.ExportHash = computeExportHash(snapshot.Exports)
+		timings.phaseBBindTotal += time.Since(started)
+	}
+	timings.phaseBBind = time.Since(phaseBStart)
+
+	s.refIndex.Clear()
+	phaseRefStart := time.Now()
+	for _, mod := range mods {
+		baseMu.Lock()
+		snapshot := baseByName[mod.Name]
+		baseMu.Unlock()
+		if snapshot == nil {
+			continue
+		}
+		s.publishModuleSnapshot(mod, snapshot)
+		s.refIndex.IndexDocument(snapshot.URI, snapshot.Tree, snapshot.LineIndex, snapshot.Symbols, snapshot.AttrSymbols, snapshot.Defs)
+	}
+	timings.refIndexBuild = time.Since(phaseRefStart)
+	s.enforceSnapshotLRULimit()
+
+	reverseDepsStart := time.Now()
 	s.rebuildReverseDeps()
+	timings.reverseDeps = time.Since(reverseDepsStart)
+	if s.conn != nil {
+		timings.log()
+	}
 	return nil
 }
 
 func workspaceIndexWorkerCount(total int) int {
+	return workspaceIndexWorkerCountWithAvailable(total, runtime.GOMAXPROCS(0))
+}
+
+func workspaceIndexWorkerCountWithAvailable(total, available int) int {
 	if total <= 1 {
 		return 1
 	}
-	if total >= 4 {
-		return 4
+	if available < 1 {
+		available = 1
 	}
-	return total
+	workers := min(total, available)
+	return min(workers, 8)
 }
 
 func sortModulesByPriority(mods []ModuleFile, priorityDir string) {
