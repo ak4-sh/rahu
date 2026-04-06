@@ -7,12 +7,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type dispatchOrderParams struct {
 	Value string `json:"value"`
+}
+
+type signalBuffer struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	writes chan struct{}
+}
+
+func newSignalBuffer() *signalBuffer {
+	return &signalBuffer{writes: make(chan struct{}, 16)}
+}
+
+func (b *signalBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	n, err := b.buf.Write(p)
+	if n > 0 {
+		select {
+		case b.writes <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
+func (b *signalBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestConn_Read(t *testing.T) {
@@ -194,7 +225,7 @@ func TestConn_ReadResponse(t *testing.T) {
 
 func TestConn_RequestRoundTrip(t *testing.T) {
 	in := bytes.NewBuffer(nil)
-	out := &bytes.Buffer{}
+	out := newSignalBuffer()
 
 	conn := NewConn(
 		bufio.NewReader(in),
@@ -216,7 +247,12 @@ func TestConn_RequestRoundTrip(t *testing.T) {
 		done <- resp
 	}()
 
-	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-out.writes:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request write")
+	}
+
 	output := out.String()
 	if !strings.Contains(output, `"method":"window/showMessageRequest"`) {
 		t.Fatalf("missing request method in output: %q", output)
