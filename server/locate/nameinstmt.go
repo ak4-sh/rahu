@@ -46,6 +46,11 @@ func locateInStmt(tree *ast.AST, stmt ast.NodeID, pos int, mode locateMode) Resu
 		}
 
 	case ast.NodeClassDef:
+		for _, decorator := range tree.Decorators(stmt) {
+			if res := locateInExpr(tree, tree.DecoratorExpr(decorator), pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
 		nameID, bases, body := tree.ClassParts(stmt)
 		if mode != locateAttrOnly && nodeContains(tree, nameID, pos) {
 			return Result{Kind: NameResult, Node: nameID}
@@ -75,6 +80,11 @@ func locateInStmt(tree *ast.AST, stmt ast.NodeID, pos int, mode locateMode) Resu
 		}
 
 	case ast.NodeFunctionDef:
+		for _, decorator := range tree.Decorators(stmt) {
+			if res := locateInExpr(tree, tree.DecoratorExpr(decorator), pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
 		nameID, args, returnAnnotation, body := tree.FunctionPartsWithReturn(stmt)
 		if mode != locateAttrOnly && nodeContains(tree, nameID, pos) {
 			return Result{Kind: NameResult, Node: nameID}

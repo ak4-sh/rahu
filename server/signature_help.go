@@ -101,6 +101,11 @@ func formatSignatureParam(sym *a.Symbol) string {
 		return ""
 	}
 	var b strings.Builder
+	if sym.IsKwArg {
+		b.WriteString("**")
+	} else if sym.IsVarArg {
+		b.WriteString("*")
+	}
 	b.WriteString(sym.Name)
 	if typeText := formatHoverType(a.SymbolType(sym)); typeText != "" {
 		b.WriteString(": ")

@@ -124,6 +124,23 @@ func TestSignatureHelpOutsideCallFails(t *testing.T) {
 	}
 }
 
+func TestSignatureHelpShowsVarArgsAndKwArgs(t *testing.T) {
+	code := "def foo(x, *args, **kwargs):\n    pass\n\nfoo(1, \n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	help, err := s.SignatureHelp(signatureHelpParams(uri, code, 3, 7))
+	if err != nil {
+		t.Fatalf("unexpected signatureHelp error: %v", err)
+	}
+	label := help.Signatures[0].Label
+	if !strings.Contains(label, "foo(x, *args, **kwargs)") {
+		t.Fatalf("unexpected vararg signature label: %q", label)
+	}
+}
+
 func signatureHelpParams(uri lsp.DocumentURI, code string, line, char int) *lsp.SignatureHelpParams {
 	li := source.NewLineIndex(code)
 	offset := li.PositionToOffset(line, char)

@@ -171,6 +171,11 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		for _, p := range sym.Inner.Symbols {
 			if p.Kind == a.SymParameter {
 				paramStr := p.Name
+				if p.IsKwArg {
+					paramStr = "**" + paramStr
+				} else if p.IsVarArg {
+					paramStr = "*" + paramStr
+				}
 				if p.DefaultValue != "" {
 					paramStr += "=" + p.DefaultValue
 				}
