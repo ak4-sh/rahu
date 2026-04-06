@@ -165,20 +165,24 @@ func TestInitializeBuildsWorkspaceDependencies(t *testing.T) {
 
 func TestWorkspaceIndexWorkerCount(t *testing.T) {
 	tests := []struct {
-		total int
-		want  int
+		name      string
+		total     int
+		available int
+		want      int
 	}{
-		{total: 0, want: 1},
-		{total: 1, want: 1},
-		{total: 2, want: 2},
-		{total: 3, want: 3},
-		{total: 4, want: 4},
-		{total: 10, want: 4},
+		{name: "empty workspace", total: 0, available: 4, want: 1},
+		{name: "single module", total: 1, available: 4, want: 1},
+		{name: "limited by total", total: 2, available: 8, want: 2},
+		{name: "limited by available", total: 10, available: 3, want: 3},
+		{name: "clamped to hard cap", total: 20, available: 16, want: 8},
+		{name: "invalid available falls back", total: 6, available: 0, want: 1},
 	}
 	for _, tt := range tests {
-		if got := workspaceIndexWorkerCount(tt.total); got != tt.want {
-			t.Fatalf("worker count for %d modules: got %d want %d", tt.total, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workspaceIndexWorkerCountWithAvailable(tt.total, tt.available); got != tt.want {
+				t.Fatalf("worker count for %d modules with %d available: got %d want %d", tt.total, tt.available, got, tt.want)
+			}
+		})
 	}
 }
 

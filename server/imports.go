@@ -17,6 +17,8 @@ import (
 	"rahu/source"
 )
 
+type moduleSnapshotLookup func(string) (*ModuleSnapshot, bool)
+
 func stampSymbolURIs(uri lsp.DocumentURI, maps ...map[ast.NodeID]*analyser.Symbol) {
 	for _, m := range maps {
 		for _, sym := range m {
@@ -187,6 +189,32 @@ func extractExports(global *analyser.Scope) map[string]*analyser.Symbol {
 	return exports
 }
 
+func (s *Server) buildBaseModuleSnapshot(name string, uri lsp.DocumentURI, path, text string, lineIndex *source.LineIndex) *ModuleSnapshot {
+	p := parser.New(text)
+	tree := p.Parse()
+	global, defs := analyser.BuildScopes(tree, text)
+	resolver, semErrs := analyser.Resolve(tree, global)
+	stampSymbolURIs(uri, defs, resolver.Resolved, resolver.ResolvedAttr)
+
+	snapshot := &ModuleSnapshot{
+		Name:        name,
+		URI:         uri,
+		Path:        path,
+		LineIndex:   lineIndex,
+		Tree:        tree,
+		ParseErrs:   p.Errors(),
+		Symbols:     resolver.Resolved,
+		AttrSymbols: resolver.ResolvedAttr,
+		Defs:        defs,
+		SemErrs:     semErrs,
+		Global:      global,
+	}
+	snapshot.Imports = s.extractImportsForModule(tree, uri)
+	snapshot.Exports = extractExports(snapshot.Global)
+	snapshot.ExportHash = computeExportHash(snapshot.Exports)
+	return snapshot
+}
+
 func computeExportHash(exports map[string]*analyser.Symbol) uint64 {
 	if len(exports) == 0 {
 		return 0
@@ -199,6 +227,8 @@ func computeExportHash(exports map[string]*analyser.Symbol) uint64 {
 	sort.Strings(names)
 
 	h := fnv.New64a()
+	visitedSymbols := make(map[analyser.SymbolID]struct{}, len(exports))
+	visitedTypes := map[*analyser.Type]struct{}{}
 	for _, name := range names {
 		writeHashString(h, name)
 		writeHashByte(h, 0)
@@ -214,6 +244,18 @@ func writeSymbolSignature(h hash.Hash64, sym *analyser.Symbol, visitedSymbols ma
 		writeHashString(h, "<nil>")
 		return
 	}
+	if sym.ID != 0 {
+		if _, ok := visitedSymbols[sym.ID]; ok {
+			writeHashString(h, "<cycle>")
+			writeHashByte(h, 0)
+			writeHashString(h, sym.Name)
+			writeHashByte(h, 0)
+			writeHashInt(h, int(sym.Kind))
+			return
+		}
+		visitedSymbols[sym.ID] = struct{}{}
+		defer delete(visitedSymbols, sym.ID)
+	}
 
 	writeHashString(h, sym.Name)
 	writeHashByte(h, 0)
@@ -227,8 +269,6 @@ func writeSymbolSignature(h hash.Hash64, sym *analyser.Symbol, visitedSymbols ma
 		writeClassSignature(h, sym, visitedSymbols, visitedTypes)
 	default:
 		writeTypeSignature(h, sym.Inferred, visitedSymbols, visitedTypes)
-	visitedSymbols := make(map[analyser.SymbolID]struct{}, len(exports))
-	visitedTypes := map[*analyser.Type]struct{}{}
 	}
 }
 
@@ -246,18 +286,6 @@ func writeFunctionSignature(h hash.Hash64, sym *analyser.Symbol, visitedSymbols 
 		name  string
 		start uint32
 		kind  analyser.SymbolKind
-	if sym.ID != 0 {
-		if _, ok := visitedSymbols[sym.ID]; ok {
-			writeHashString(h, "<cycle>")
-			writeHashByte(h, 0)
-			writeHashString(h, sym.Name)
-			writeHashByte(h, 0)
-			writeHashInt(h, int(sym.Kind))
-			return
-		}
-		visitedSymbols[sym.ID] = struct{}{}
-		defer delete(visitedSymbols, sym.ID)
-	}
 		def   string
 		typ   *analyser.Type
 	}
@@ -342,6 +370,14 @@ func writeTypeSignature(h hash.Hash64, typ *analyser.Type, visitedSymbols map[an
 		writeHashString(h, "<nil>")
 		return
 	}
+	if _, ok := visitedTypes[typ]; ok {
+		writeHashString(h, "<cycle>")
+		writeHashByte(h, 0)
+		writeHashInt(h, int(typ.Kind))
+		return
+	}
+	visitedTypes[typ] = struct{}{}
+	defer delete(visitedTypes, typ)
 
 	writeHashInt(h, int(typ.Kind))
 	writeHashByte(h, 0)
@@ -370,14 +406,6 @@ func writeHashByte(h hash.Hash64, b byte) {
 	_, _ = h.Write([]byte{b})
 }
 
-	if _, ok := visitedTypes[typ]; ok {
-		writeHashString(h, "<cycle>")
-		writeHashByte(h, 0)
-		writeHashInt(h, int(typ.Kind))
-		return
-	}
-	visitedTypes[typ] = struct{}{}
-	defer delete(visitedTypes, typ)
 func writeHashInt(h hash.Hash64, n int) {
 	writeHashString(h, strconv.Itoa(n))
 }
@@ -416,27 +444,10 @@ func (s *Server) extractImportsForModule(tree *ast.AST, importerURI lsp.Document
 }
 
 func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, text string, lineIndex *source.LineIndex) *ModuleSnapshot {
-	p := parser.New(text)
-	tree := p.Parse()
-	global, defs := analyser.BuildScopes(tree, text)
-	resolver, semErrs := analyser.Resolve(tree, global)
-	stampSymbolURIs(uri, defs, resolver.Resolved, resolver.ResolvedAttr)
-
-	snapshot := &ModuleSnapshot{
-		Name:        name,
-		URI:         uri,
-		Path:        path,
-		LineIndex:   lineIndex,
-		Tree:        tree,
-		ParseErrs:   p.Errors(),
-		Symbols:     resolver.Resolved,
-		AttrSymbols: resolver.ResolvedAttr,
-		Defs:        defs,
-		Global:      global,
+	snapshot := s.buildBaseModuleSnapshot(name, uri, path, text, lineIndex)
+	if snapshot == nil {
+		return nil
 	}
-	snapshot.Exports = extractExports(global)
-	snapshot.ExportHash = computeExportHash(snapshot.Exports)
-	snapshot.Imports = s.extractImportsForModule(tree, uri)
 	if name != "" {
 		partial := *snapshot
 		s.snapshotsMu.Lock()
@@ -449,11 +460,35 @@ func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, tex
 		s.depsMu.Unlock()
 	}
 
-	semErrs = append(semErrs, s.bindWorkspaceImports(tree, defs, uri)...)
-	snapshot.SemErrs = semErrs
-	snapshot.Exports = extractExports(global)
+	snapshot.SemErrs = append(snapshot.SemErrs, s.bindWorkspaceImports(snapshot.Tree, snapshot.Defs, uri)...)
+	snapshot.Exports = extractExports(snapshot.Global)
 	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	return snapshot
+}
+
+func (s *Server) buildBaseSnapshotForModule(mod ModuleFile) (*ModuleSnapshot, bool) {
+	// Check for open document
+	s.docsMu.RLock()
+	openDoc := s.docs[mod.URI]
+	s.docsMu.RUnlock()
+
+	text := ""
+	lineIndex := (*source.LineIndex)(nil)
+	if openDoc != nil {
+		openDoc.mu.RLock()
+		text = openDoc.Text
+		lineIndex = openDoc.LineIndex
+		openDoc.mu.RUnlock()
+	} else {
+		bytes, err := os.ReadFile(mod.Path)
+		if err != nil {
+			return nil, false
+		}
+		text = string(bytes)
+		lineIndex = source.NewLineIndex(text)
+	}
+
+	return s.buildBaseModuleSnapshot(mod.Name, mod.URI, mod.Path, text, lineIndex), true
 }
 
 func (s *Server) analyzeModuleByName(name string) (*ModuleSnapshot, bool) {
@@ -514,6 +549,16 @@ func (s *Server) analyzeModuleFile(mod ModuleFile) (*ModuleSnapshot, bool) {
 }
 
 func (s *Server) storeModuleSnapshot(mod ModuleFile, snapshot *ModuleSnapshot) {
+	s.publishModuleSnapshot(mod, snapshot)
+
+	// Update reference index with snapshot's symbols
+	s.refIndex.IndexDocument(snapshot.URI, snapshot.Tree, snapshot.LineIndex,
+		snapshot.Symbols, snapshot.AttrSymbols, snapshot.Defs)
+
+	s.enforceSnapshotLRULimit()
+}
+
+func (s *Server) publishModuleSnapshot(mod ModuleFile, snapshot *ModuleSnapshot) {
 	if snapshot == nil {
 		return
 	}
@@ -527,12 +572,6 @@ func (s *Server) storeModuleSnapshot(mod ModuleFile, snapshot *ModuleSnapshot) {
 	s.depsMu.Lock()
 	s.moduleImportsByURI[mod.URI] = append([]string(nil), snapshot.Imports...)
 	s.depsMu.Unlock()
-
-	// Update reference index with snapshot's symbols
-	s.refIndex.IndexDocument(snapshot.URI, snapshot.Tree, snapshot.LineIndex,
-		snapshot.Symbols, snapshot.AttrSymbols, snapshot.Defs)
-
-	s.enforceSnapshotLRULimit()
 }
 
 func (s *Server) beginModuleBuild(name string) (<-chan struct{}, bool) {
@@ -663,6 +702,14 @@ func lookupExport(snapshot *ModuleSnapshot, name string) (*analyser.Symbol, bool
 	return sym, ok
 }
 
+func lookupSnapshotByNameFromMap(snapshots map[string]*ModuleSnapshot, name string) (*ModuleSnapshot, bool) {
+	if snapshots == nil || name == "" {
+		return nil, false
+	}
+	snapshot := snapshots[name]
+	return snapshot, snapshot != nil
+}
+
 func unresolvedModuleError(span ast.Range, name string) analyser.SemanticError {
 	return analyser.SemanticError{
 		Span: span,
@@ -678,6 +725,10 @@ func missingImportNameError(span ast.Range, moduleName, name string) analyser.Se
 }
 
 func (s *Server) bindWorkspaceImports(tree *ast.AST, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI) []analyser.SemanticError {
+	return s.bindWorkspaceImportsWithLookup(tree, defs, importerURI, s.analyzeModuleByName)
+}
+
+func (s *Server) bindWorkspaceImportsWithLookup(tree *ast.AST, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI, lookup moduleSnapshotLookup) []analyser.SemanticError {
 	if tree == nil || tree.Root == ast.NoNode {
 		return nil
 	}
@@ -687,9 +738,9 @@ func (s *Server) bindWorkspaceImports(tree *ast.AST, defs map[ast.NodeID]*analys
 	for stmt := tree.Node(tree.Root).FirstChild; stmt != ast.NoNode; stmt = tree.Node(stmt).NextSibling {
 		switch tree.Node(stmt).Kind {
 		case ast.NodeImport:
-			errs = append(errs, s.bindImportStmt(tree, stmt, defs)...)
+			errs = append(errs, s.bindImportStmtWithLookup(tree, stmt, defs, lookup)...)
 		case ast.NodeFromImport:
-			errs = append(errs, s.bindFromImportStmt(tree, stmt, defs, importerURI)...)
+			errs = append(errs, s.bindFromImportStmtWithLookup(tree, stmt, defs, importerURI, lookup)...)
 		}
 	}
 
@@ -697,6 +748,10 @@ func (s *Server) bindWorkspaceImports(tree *ast.AST, defs map[ast.NodeID]*analys
 }
 
 func (s *Server) bindImportStmt(tree *ast.AST, stmt ast.NodeID, defs map[ast.NodeID]*analyser.Symbol) []analyser.SemanticError {
+	return s.bindImportStmtWithLookup(tree, stmt, defs, s.analyzeModuleByName)
+}
+
+func (s *Server) bindImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, defs map[ast.NodeID]*analyser.Symbol, lookup moduleSnapshotLookup) []analyser.SemanticError {
 	var errs []analyser.SemanticError
 
 	for alias := tree.Node(stmt).FirstChild; alias != ast.NoNode; alias = tree.Node(alias).NextSibling {
@@ -719,7 +774,7 @@ func (s *Server) bindImportStmt(tree *ast.AST, stmt ast.NodeID, defs map[ast.Nod
 		local.Span = ast.Range{}
 		local.URI = ""
 
-		snapshot, ok := s.analyzeModuleByName(moduleToBind)
+		snapshot, ok := lookup(moduleToBind)
 		if !ok {
 			errs = append(errs, unresolvedModuleError(tree.RangeOf(target), moduleToBind))
 			continue
@@ -740,13 +795,17 @@ func (s *Server) bindImportStmt(tree *ast.AST, stmt ast.NodeID, defs map[ast.Nod
 }
 
 func (s *Server) bindFromImportStmt(tree *ast.AST, stmt ast.NodeID, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI) []analyser.SemanticError {
+	return s.bindFromImportStmtWithLookup(tree, stmt, defs, importerURI, s.analyzeModuleByName)
+}
+
+func (s *Server) bindFromImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI, lookup moduleSnapshotLookup) []analyser.SemanticError {
 	module, aliases := tree.FromImportParts(stmt)
 	moduleName, ok := s.resolveImportModuleName(importerURI, tree, module, tree.Node(stmt).Data)
 	if !ok {
 		return nil
 	}
 
-	snapshot, ok := s.analyzeModuleByName(moduleName)
+	snapshot, ok := lookup(moduleName)
 	if !ok {
 		return []analyser.SemanticError{unresolvedModuleError(fromImportModuleSpan(tree, stmt, module), moduleName)}
 	}
