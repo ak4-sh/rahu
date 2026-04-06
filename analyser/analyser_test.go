@@ -780,6 +780,49 @@ func TestResolveDecoratorExpressionAndDecoratedFunction(t *testing.T) {
 	}
 }
 
+func TestResolveRaiseExpression(t *testing.T) {
+	src := "kind = print\nerr = kind\nraise err\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	errDef := defs[mustNameNode(t, tree, "err")]
+	if errDef == nil {
+		t.Fatal("expected err symbol")
+	}
+
+	raiseNode := findNodeByKind(t, tree, ast.NodeRaise)
+	exc, cause := tree.RaiseParts(raiseNode)
+	if cause != ast.NoNode {
+		t.Fatalf("unexpected cause node: %v", cause)
+	}
+	if resolver.Resolved[exc] != errDef {
+		t.Fatalf("expected raised expr to resolve to err, got %+v", resolver.Resolved[exc])
+	}
+}
+
+func TestResolveRaiseCauseExpression(t *testing.T) {
+	src := "kind = print\nroot = print\nerr = kind\ncause = root\nraise err from cause\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	raiseNode := findNodeByKind(t, tree, ast.NodeRaise)
+	exc, cause := tree.RaiseParts(raiseNode)
+	if resolver.Resolved[exc] != defs[mustNameNode(t, tree, "err")] {
+		t.Fatalf("expected raise expr to resolve to err, got %+v", resolver.Resolved[exc])
+	}
+	if resolver.Resolved[cause] != defs[mustNameNode(t, tree, "cause")] {
+		t.Fatalf("expected raise cause to resolve to cause, got %+v", resolver.Resolved[cause])
+	}
+}
+
 func TestResolveDictLiteralTraversal(t *testing.T) {
 	src := "base = 1\ndef sq(x):\n    return x\ndef sin(x):\n    return x\ndata = {\"name\": base, \"root\": sq(16), \"sine\": sin(0)}\n"
 	tree := parser.New(src).Parse()

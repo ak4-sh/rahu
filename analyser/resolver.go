@@ -361,6 +361,11 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.visitExpr(value, Read)
 		}
 
+	case ast.NodeRaise:
+		exc, cause := r.tree.RaiseParts(stmt)
+		r.visitExpr(exc, Read)
+		r.visitExpr(cause, Read)
+
 	case ast.NodePass:
 
 	case ast.NodeBreak:

@@ -110,6 +110,10 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 		if value := b.tree.Nodes[stmt].FirstChild; value != ast.NoNode {
 			b.visitExpr(value)
 		}
+	case ast.NodeRaise:
+		exc, cause := b.tree.RaiseParts(stmt)
+		b.visitExpr(exc)
+		b.visitExpr(cause)
 	case ast.NodeAugAssign:
 		b.visitAugAssign(stmt)
 	case ast.NodeImport:
