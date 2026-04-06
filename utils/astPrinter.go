@@ -141,6 +141,20 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 		value, _ := tree.StringText(id)
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, `String("`+value+`")`))
 
+	case ast.NodeFString:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FString:"))
+		for _, child := range tree.Children(id) {
+			printNode(w, tree, child, indent+2, opts)
+		}
+
+	case ast.NodeFStringText:
+		value, _ := tree.StringText(id)
+		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, `FStringText("`+value+`")`))
+
+	case ast.NodeFStringExpr:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FStringExpr:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
+
 	case ast.NodeBoolean:
 		fmt.Fprintf(w, "%s%s\n", prefix, literal(opts, "Boolean("+boolString(ast.BooleanVal(node.Data))+")"))
 
@@ -170,7 +184,13 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 	case ast.NodeParam:
 		nameID, annotation, def := tree.ParamParts(id)
 		name, _ := tree.NameText(nameID)
-		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Param("+name+")"))
+		prefixName := name
+		if tree.ParamIsKwArg(id) {
+			prefixName = "**" + prefixName
+		} else if tree.ParamIsVarArg(id) {
+			prefixName = "*" + prefixName
+		}
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Param("+prefixName+")"))
 		if annotation != ast.NoNode {
 			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Annotation:"))
 			printNode(w, tree, annotation, indent+4, opts)
@@ -184,6 +204,10 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 		nameID, args, returnAnnotation, body := tree.FunctionPartsWithReturn(id)
 		name, _ := tree.NameText(nameID)
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "FunctionDef("+name+"):"))
+		for _, decorator := range tree.Decorators(id) {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Decorator:"))
+			printNode(w, tree, decorator, indent+4, opts)
+		}
 		if doc, ok := tree.DocString(id); ok {
 			fmt.Fprintf(w, "%s  %s %s\n", prefix, field(opts, "Doc:"), literal(opts, doc))
 		}
@@ -237,10 +261,44 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 			printNode(w, tree, elseID, indent+4, opts)
 		}
 
+	case ast.NodeWith:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "With:"))
+		items, body := tree.WithParts(id)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Items:"))
+		for _, item := range items {
+			printNode(w, tree, item, indent+4, opts)
+		}
+		if body != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Body:"))
+			printNode(w, tree, body, indent+4, opts)
+		}
+
+	case ast.NodeWithItem:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "WithItem:"))
+		contextExpr, asTarget := tree.WithItemParts(id)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Context:"))
+		printNode(w, tree, contextExpr, indent+4, opts)
+		if asTarget != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "As:"))
+			printNode(w, tree, asTarget, indent+4, opts)
+		}
+
 	case ast.NodeList:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "List:"))
 		for _, child := range tree.Children(id) {
 			printNode(w, tree, child, indent+2, opts)
+		}
+
+	case ast.NodeDictComp:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "DictComp:"))
+		keyExpr, valueExpr, clauses := tree.DictCompParts(id)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Key:"))
+		printNode(w, tree, keyExpr, indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Value:"))
+		printNode(w, tree, valueExpr, indent+4, opts)
+		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Clauses:"))
+		for _, clause := range clauses {
+			printNode(w, tree, clause, indent+4, opts)
 		}
 
 	case ast.NodeTuple:
@@ -294,6 +352,10 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 		nameID, bases, body := tree.ClassParts(id)
 		name, _ := tree.NameText(nameID)
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "ClassDef("+name+"):"))
+		for _, decorator := range tree.Decorators(id) {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Decorator:"))
+			printNode(w, tree, decorator, indent+4, opts)
+		}
 		if doc, ok := tree.DocString(id); ok {
 			fmt.Fprintf(w, "%s  %s %s\n", prefix, field(opts, "Doc:"), literal(opts, doc))
 		}
@@ -329,6 +391,18 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 
 	case ast.NodeCompareOp:
 		fmt.Fprintf(w, "%s%s\n", prefix, keyword(opts, "CompareOp("+compareOpString(ast.CompareOp(node.Data))+")"))
+
+	case ast.NodeDecorator:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Decorator:"))
+		printNode(w, tree, tree.DecoratorExpr(id), indent+2, opts)
+
+	case ast.NodeStarArg:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "StarArg:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
+
+	case ast.NodeKwStarArg:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "KwStarArg:"))
+		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
 
 	default:
 		fmt.Fprintf(w, "%sUnknown(%s)\n", prefix, node.Kind)
@@ -370,6 +444,14 @@ func compareOpString(op ast.CompareOp) string {
 		return ">"
 	case ast.GtE:
 		return ">="
+	case ast.In:
+		return "in"
+	case ast.NotIn:
+		return "not in"
+	case ast.Is:
+		return "is"
+	case ast.IsNot:
+		return "is not"
 	default:
 		return "<?>"
 	}

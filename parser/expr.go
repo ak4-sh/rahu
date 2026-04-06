@@ -17,20 +17,23 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 
 	for {
 		bp := infixBindingPower(p.current.Type)
+		if isCompareOp(p.current.Type, p.peek.Type) {
+			bp = COMPARE
+		}
 		if bp <= minBP {
 			break
 		}
 
 		opTok := p.current
 
-		if isCompareOp(opTok.Type) {
+		if isCompareOp(opTok.Type, p.peek.Type) {
 			startPos := p.tree.Nodes[left].Start
 			leftID := p.tree.NewNode(a.NodeCompare, startPos, p.tree.Nodes[left].End)
 			p.tree.AddChild(leftID, left)
 
-			for isCompareOp(p.current.Type) {
-				op := tokenTypeToCompareOp(p.current.Type)
-				p.advance()
+			for isCompareOp(p.current.Type, p.peek.Type) {
+				op := tokenTypesToCompareOp(p.current.Type, p.peek.Type)
+				p.advanceBy(compareOpTokenWidth(p.current.Type, p.peek.Type))
 
 				right := p.parseExpression(COMPARE + 1)
 				if right == a.NoNode {
@@ -217,6 +220,9 @@ func (p *Parser) parsePrimary() a.NodeID {
 		p.tree.Nodes[ret].Data = idx
 		p.advance()
 		return ret
+
+	case l.FSTRING:
+		return p.parseFString()
 
 	case l.MINUS:
 		startPos := p.current.Start

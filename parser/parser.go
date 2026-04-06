@@ -24,7 +24,7 @@ func (p *Parser) parseStatement() a.NodeID {
 	case l.IF:
 		return p.parseIf()
 
-	case l.NAME, l.NUMBER, l.STRING, l.LPAR, l.LSQB, l.LBRACE, l.MINUS, l.PLUS, l.NOT, l.TRUE, l.FALSE, l.NONE:
+	case l.NAME, l.NUMBER, l.STRING, l.FSTRING, l.LPAR, l.LSQB, l.LBRACE, l.MINUS, l.PLUS, l.NOT, l.TRUE, l.FALSE, l.NONE:
 		return p.dispatchExprParse()
 
 	case l.DEF:
@@ -75,6 +75,10 @@ func (p *Parser) parseStatement() a.NodeID {
 		return p.parseClass()
 	case l.TRY:
 		return p.parseTry()
+	case l.WITH:
+		return p.parseWith()
+	case l.AT:
+		return p.parseDecoratedDef()
 	default:
 		p.error(a.Range{Start: p.current.Start, End: p.current.End}, "unexpected token: "+p.current.String())
 		p.advance()

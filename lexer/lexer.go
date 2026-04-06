@@ -421,6 +421,56 @@ func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
 	}
 }
 
+func (l *Lexer) readFString() (string, TokenType) {
+	start := l.position
+	quoteType := l.peek()
+	isTriple := l.peekAhead(1) == quoteType && l.peekAhead(2) == quoteType
+
+	l.readChar() // consume prefix
+	if isTriple {
+		for range 3 {
+			l.readChar()
+		}
+		for {
+			if l.ch == 0 {
+				return l.input[start:l.position], UNTERMINATED_STRING
+			}
+			if l.ch == quoteType && l.peek() == quoteType && l.peekAhead(1) == quoteType {
+				for range 3 {
+					l.readChar()
+				}
+				return l.input[start:l.position], FSTRING
+			}
+			if l.ch == '\\' {
+				l.readChar()
+				if l.ch == 0 {
+					return l.input[start:l.position], UNTERMINATED_STRING
+				}
+			}
+			l.readChar()
+		}
+	}
+
+	l.readChar() // consume opening quote
+	for l.ch != 0 {
+		if l.ch == '\\' {
+			l.readChar()
+			if l.ch == 0 {
+				return l.input[start:l.position], UNTERMINATED_STRING
+			}
+			l.readChar()
+			continue
+		}
+		if l.ch == quoteType {
+			l.readChar()
+			return l.input[start:l.position], FSTRING
+		}
+		l.readChar()
+	}
+
+	return l.input[start:l.position], UNTERMINATED_STRING
+}
+
 func (l *Lexer) consumeLeadingIndent() (uint32, byte, bool, error) {
 	var count uint32
 	seenSpace := false
@@ -573,6 +623,11 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	if l.isChar() || l.ch == '_' {
+		if (l.ch == 'f' || l.ch == 'F') && (l.peek() == '"' || l.peek() == '\'') {
+			start := l.position
+			lit, typ := l.readFString()
+			return Token{Type: typ, Literal: lit, Start: start, End: l.position}
+		}
 		start := l.position
 		lit := l.readIdentifier()
 		typ := NAME

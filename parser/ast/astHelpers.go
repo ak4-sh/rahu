@@ -1,5 +1,12 @@
 package ast
 
+const (
+	ParamFlagHasAnnotation = 1 << iota
+	ParamFlagHasDefault
+	ParamFlagIsVarArg
+	ParamFlagIsKwArg
+)
+
 // ChildCount counts all immediate children of a given nodeID
 func (a *AST) ChildCount(id NodeID) int {
 	if id == NoNode {
@@ -100,7 +107,7 @@ func (a *AST) NameText(id NodeID) (string, bool) {
 
 // StringText fetches the string from a given NodeString
 func (a *AST) StringText(id NodeID) (string, bool) {
-	if id == NoNode || a.Nodes[id].Kind != NodeString {
+	if id == NoNode || (a.Nodes[id].Kind != NodeString && a.Nodes[id].Kind != NodeFStringText) {
 		return "", false
 	}
 
@@ -142,8 +149,8 @@ func (a *AST) ParamParts(id NodeID) (name, annotation, defaultValue NodeID) {
 	}
 
 	flags := a.Nodes[id].Data
-	hasAnnotation := flags&1 != 0
-	hasDefault := flags&2 != 0
+	hasAnnotation := flags&ParamFlagHasAnnotation != 0
+	hasDefault := flags&ParamFlagHasDefault != 0
 	if hasAnnotation && !hasDefault {
 		return name, second, NoNode
 	}
@@ -161,6 +168,14 @@ func (a *AST) ParamParts(id NodeID) (name, annotation, defaultValue NodeID) {
 	}
 
 	return name, NoNode, second
+}
+
+func (a *AST) ParamIsVarArg(id NodeID) bool {
+	return id != NoNode && a.Nodes[id].Kind == NodeParam && a.Nodes[id].Data&ParamFlagIsVarArg != 0
+}
+
+func (a *AST) ParamIsKwArg(id NodeID) bool {
+	return id != NoNode && a.Nodes[id].Kind == NodeParam && a.Nodes[id].Data&ParamFlagIsKwArg != 0
 }
 
 // AnnAssignParts returns the typed children of an annotated assignment node.
@@ -187,6 +202,33 @@ func (a *AST) FunctionParts(id NodeID) (name, args, body NodeID) {
 	return name, args, body
 }
 
+// Decorators returns decorator children for function or class definitions.
+func (a *AST) Decorators(id NodeID) []NodeID {
+	if id == NoNode {
+		return nil
+	}
+	if a.Nodes[id].Kind != NodeFunctionDef && a.Nodes[id].Kind != NodeClassDef {
+		return nil
+	}
+
+	var decorators []NodeID
+	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
+		if a.Nodes[child].Kind != NodeDecorator {
+			break
+		}
+		decorators = append(decorators, child)
+	}
+	return decorators
+}
+
+// DecoratorExpr returns the expression child of a decorator node.
+func (a *AST) DecoratorExpr(id NodeID) NodeID {
+	if id == NoNode || a.Nodes[id].Kind != NodeDecorator {
+		return NoNode
+	}
+	return a.Nodes[id].FirstChild
+}
+
 // FunctionPartsWithReturn returns the typed children of a function node,
 // including the optional return annotation expression.
 func (a *AST) FunctionPartsWithReturn(id NodeID) (name, args, returnAnnotation, body NodeID) {
@@ -195,6 +237,9 @@ func (a *AST) FunctionPartsWithReturn(id NodeID) (name, args, returnAnnotation, 
 	}
 
 	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
+		if a.Nodes[child].Kind == NodeDecorator {
+			continue
+		}
 		if name == NoNode {
 			name = child
 			continue
@@ -220,6 +265,9 @@ func (a *AST) ClassParts(id NodeID) (name, bases, body NodeID) {
 	}
 
 	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
+		if a.Nodes[child].Kind == NodeDecorator {
+			continue
+		}
 		if name == NoNode {
 			name = child
 			continue
@@ -324,6 +372,26 @@ func (a *AST) ListCompParts(id NodeID) (expr NodeID, clauses []NodeID) {
 	return expr, clauses
 }
 
+// DictCompParts returns the key expression, value expression, and comprehension clauses.
+func (a *AST) DictCompParts(id NodeID) (key, value NodeID, clauses []NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeDictComp {
+		return NoNode, NoNode, nil
+	}
+
+	key = a.Nodes[id].FirstChild
+	if key == NoNode {
+		return NoNode, NoNode, nil
+	}
+	value = a.Nodes[key].NextSibling
+	if value == NoNode {
+		return key, NoNode, nil
+	}
+	for child := a.Nodes[value].NextSibling; child != NoNode; child = a.Nodes[child].NextSibling {
+		clauses = append(clauses, child)
+	}
+	return key, value, clauses
+}
+
 // ComprehensionParts returns the target, iterable, and optional filters.
 func (a *AST) ComprehensionParts(id NodeID) (target, iter NodeID, filters []NodeID) {
 	if id == NoNode || a.Nodes[id].Kind != NodeComprehension {
@@ -341,6 +409,37 @@ func (a *AST) ComprehensionParts(id NodeID) (target, iter NodeID, filters []Node
 		filters = append(filters, child)
 	}
 	return target, iter, filters
+}
+
+// WithParts returns the with-items and body block for a with statement.
+func (a *AST) WithParts(id NodeID) (items []NodeID, body NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeWith {
+		return nil, NoNode
+	}
+
+	for child := a.Nodes[id].FirstChild; child != NoNode; child = a.Nodes[child].NextSibling {
+		if a.Nodes[child].Kind == NodeBlock {
+			body = child
+			continue
+		}
+		items = append(items, child)
+	}
+
+	return items, body
+}
+
+// WithItemParts returns the context expression and optional bound target.
+func (a *AST) WithItemParts(id NodeID) (contextExpr, asTarget NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeWithItem {
+		return NoNode, NoNode
+	}
+
+	contextExpr = a.Nodes[id].FirstChild
+	if contextExpr != NoNode {
+		asTarget = a.Nodes[contextExpr].NextSibling
+	}
+
+	return contextExpr, asTarget
 }
 
 // DocString fetches the docstring stored in a node's Data field.
