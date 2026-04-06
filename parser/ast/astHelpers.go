@@ -341,6 +341,20 @@ func (a *AST) TryParts(id NodeID) (body NodeID, excepts []NodeID, elseBlock Node
 	return body, excepts, elseBlock, finallyBlock
 }
 
+// RaiseParts returns the optional exception expression and optional cause expression.
+func (a *AST) RaiseParts(id NodeID) (exc, cause NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeRaise {
+		return NoNode, NoNode
+	}
+
+	exc = a.Nodes[id].FirstChild
+	if exc != NoNode {
+		cause = a.Nodes[exc].NextSibling
+	}
+
+	return exc, cause
+}
+
 // ExceptParts returns the optional exception type, optional bound name, and body block.
 func (a *AST) ExceptParts(id NodeID) (excType, asName, body NodeID) {
 	if id == NoNode || a.Nodes[id].Kind != NodeExcept {

@@ -65,6 +65,8 @@ func (p *Parser) parseStatement() a.NodeID {
 
 	case l.RETURN:
 		return p.parseReturn()
+	case l.RAISE:
+		return p.parseRaise()
 
 	case l.FOR:
 		return p.parseFor()

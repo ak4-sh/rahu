@@ -1537,6 +1537,77 @@ func TestParseReturnParenthesizedTupleRegression(t *testing.T) {
 	requireChildCount(t, tree, tuple, 2)
 }
 
+func TestParseRaiseBare(t *testing.T) {
+	p, tree := parseSource(t, "raise\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeRaise)
+	exc, cause := tree.RaiseParts(stmt)
+	if exc != a.NoNode || cause != a.NoNode {
+		t.Fatalf("unexpected bare raise parts: exc=%v cause=%v", exc, cause)
+	}
+}
+
+func TestParseRaiseExpression(t *testing.T) {
+	p, tree := parseSource(t, "raise ValueError\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeRaise)
+	exc, cause := tree.RaiseParts(stmt)
+	if got := nameText(t, tree, exc); got != "ValueError" {
+		t.Fatalf("unexpected raised expr: got %q", got)
+	}
+	if cause != a.NoNode {
+		t.Fatalf("unexpected raise cause: %v", cause)
+	}
+}
+
+func TestParseRaiseWithCause(t *testing.T) {
+	p, tree := parseSource(t, "raise ValueError from cause\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeRaise)
+	exc, cause := tree.RaiseParts(stmt)
+	if got := nameText(t, tree, exc); got != "ValueError" {
+		t.Fatalf("unexpected raised expr: got %q", got)
+	}
+	if got := nameText(t, tree, cause); got != "cause" {
+		t.Fatalf("unexpected raise cause: got %q", got)
+	}
+}
+
+func TestParseRaiseCallExpression(t *testing.T) {
+	p, tree := parseSource(t, "raise make_error()\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeRaise)
+	exc, _ := tree.RaiseParts(stmt)
+	requireKind(t, tree, exc, a.NodeCall)
+}
+
+func TestParseRaiseErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "missing expr", src: "raise )\n", want: "expected expression after 'raise'"},
+		{name: "missing cause", src: "raise err from\n", want: "expected expression after 'from' in raise"},
+		{name: "bad cause expr", src: "raise err from )\n", want: "expected expression after 'from' in raise"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := parseSource(t, tt.src)
+			requireParseErrorContains(t, p, tt.want)
+		})
+	}
+}
+
 func TestParseSliceRange(t *testing.T) {
 	p, tree := parseSource(t, "a[1:3]\n")
 	requireNoParseErrors(t, p)

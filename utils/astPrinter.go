@@ -230,6 +230,18 @@ func printNode(w io.Writer, tree *ast.AST, id ast.NodeID, indent int, opts Print
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Return:"))
 		printNode(w, tree, tree.ChildAt(id, 0), indent+2, opts)
 
+	case ast.NodeRaise:
+		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "Raise:"))
+		exc, cause := tree.RaiseParts(id)
+		if exc != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Exception:"))
+			printNode(w, tree, exc, indent+4, opts)
+		}
+		if cause != ast.NoNode {
+			fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Cause:"))
+			printNode(w, tree, cause, indent+4, opts)
+		}
+
 	case ast.NodeIf:
 		fmt.Fprintf(w, "%s%s\n", prefix, nodeLabel(opts, "If:"))
 		fmt.Fprintf(w, "%s  %s\n", prefix, field(opts, "Test:"))

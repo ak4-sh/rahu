@@ -131,6 +131,7 @@ const (
 	NodeFor
 	NodeWhile
 	NodeReturn
+	NodeRaise
 	NodePass
 	NodeBreak
 	NodeContinue

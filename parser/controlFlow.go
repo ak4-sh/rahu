@@ -673,6 +673,45 @@ func (p *Parser) parseReturn() a.NodeID {
 	return ret
 }
 
+func (p *Parser) parseRaise() a.NodeID {
+	startPos := p.current.Start
+	p.advance()
+	if p.current.Type == l.NEWLINE || p.current.Type == l.EOF {
+		endPos := p.current.Start
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+		}
+		return p.tree.NewNode(a.NodeRaise, startPos, endPos)
+	}
+
+	exc := p.parseExpression(LOWEST)
+	if exc == a.NoNode {
+		p.errorCurrent("expected expression after 'raise'")
+		return p.tree.NewNode(a.NodeRaise, startPos, p.current.Start)
+	}
+
+	ret := p.tree.NewNode(a.NodeRaise, startPos, p.tree.Nodes[exc].End)
+	p.tree.AddChild(ret, exc)
+
+	if p.current.Type == l.FROM {
+		p.advance()
+		cause := p.parseExpression(LOWEST)
+		if cause == a.NoNode {
+			p.errorCurrent("expected expression after 'from' in raise")
+			return ret
+		}
+		p.tree.AddChild(ret, cause)
+		p.tree.Nodes[ret].End = p.tree.Nodes[cause].End
+	}
+
+	p.tree.Nodes[ret].End = p.current.Start
+	if p.current.Type == l.NEWLINE {
+		p.advance()
+	}
+
+	return ret
+}
+
 func (p *Parser) parseIf() a.NodeID {
 	startPos := p.current.Start
 	p.advance()
