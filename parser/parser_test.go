@@ -236,6 +236,36 @@ func TestParseFuncReturnAnnotation(t *testing.T) {
 	requireKind(t, tree, body, a.NodeBlock)
 }
 
+func TestParseFuncParamUnionAnnotation(t *testing.T) {
+	p, tree := parseSource(t, "def f(x: int | None):\n    x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, args, _, _ := tree.FunctionPartsWithReturn(fn)
+	params := requireChildCount(t, tree, args, 1)
+	_, annotation, _ := tree.ParamParts(params[0])
+	requireKind(t, tree, annotation, a.NodeBinOp)
+	parts := requireChildCount(t, tree, annotation, 2)
+	if got := nameText(t, tree, parts[0]); got != "int" {
+		t.Fatalf("unexpected left union annotation: got %q", got)
+	}
+	requireKind(t, tree, parts[1], a.NodeNone)
+}
+
+func TestParseFuncReturnUnionAnnotation(t *testing.T) {
+	p, tree := parseSource(t, "def f() -> str | None:\n    x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, returnAnnotation, _ := tree.FunctionPartsWithReturn(fn)
+	requireKind(t, tree, returnAnnotation, a.NodeBinOp)
+	parts := requireChildCount(t, tree, returnAnnotation, 2)
+	if got := nameText(t, tree, parts[0]); got != "str" {
+		t.Fatalf("unexpected left return annotation: got %q", got)
+	}
+	requireKind(t, tree, parts[1], a.NodeNone)
+}
+
 func TestParseFuncAnnotationErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -902,6 +932,27 @@ func TestParseAnnotatedAssignmentWithoutValue(t *testing.T) {
 	}
 }
 
+func TestParseAnnotatedAssignmentUnionShape(t *testing.T) {
+	p, tree := parseSource(t, "x: int | None = 1\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeAnnAssign)
+	target, annotation, value := tree.AnnAssignParts(stmt)
+	if got := nameText(t, tree, target); got != "x" {
+		t.Fatalf("unexpected annotated assign target: got %q", got)
+	}
+	requireKind(t, tree, annotation, a.NodeBinOp)
+	parts := requireChildCount(t, tree, annotation, 2)
+	if got := nameText(t, tree, parts[0]); got != "int" {
+		t.Fatalf("unexpected left annotation: got %q", got)
+	}
+	requireKind(t, tree, parts[1], a.NodeNone)
+	if got := numberValue(t, tree, value); got != "1" {
+		t.Fatalf("unexpected annotated assign value: got %q", got)
+	}
+}
+
 func TestParseSubscriptAugAssignShape(t *testing.T) {
 	p, tree := parseSource(t, "a[0] += 1\n")
 	requireNoParseErrors(t, p)
@@ -1267,6 +1318,79 @@ func TestParseFromImportMultiple(t *testing.T) {
 	}
 }
 
+func TestParseFromImportStar(t *testing.T) {
+	p, tree := parseSource(t, "from pkg import *\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeFromImport)
+	parts := children(tree, stmt)
+	if len(parts) != 2 {
+		t.Fatalf("unexpected child count: got %d want 2", len(parts))
+	}
+	if got := nameText(t, tree, parts[0]); got != "pkg" {
+		t.Fatalf("unexpected module path: got %q", got)
+	}
+	target, alias := tree.AliasParts(parts[1])
+	if got := nameText(t, tree, target); got != "*" {
+		t.Fatalf("unexpected star import target: got %q", got)
+	}
+	if alias != a.NoNode {
+		t.Fatal("did not expect alias for star import")
+	}
+}
+
+func TestParseFromImportParenthesized(t *testing.T) {
+	p, tree := parseSource(t, "from pkg import (x, y as z)\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeFromImport)
+	parts := children(tree, stmt)
+	if len(parts) != 3 {
+		t.Fatalf("unexpected child count: got %d want 3", len(parts))
+	}
+	if got := nameText(t, tree, parts[0]); got != "pkg" {
+		t.Fatalf("unexpected module path: got %q", got)
+	}
+	firstTarget, firstAlias := tree.AliasParts(parts[1])
+	if got := nameText(t, tree, firstTarget); got != "x" {
+		t.Fatalf("unexpected first imported target: got %q", got)
+	}
+	if firstAlias != a.NoNode {
+		t.Fatal("did not expect alias for first imported name")
+	}
+	secondTarget, secondAlias := tree.AliasParts(parts[2])
+	if got := nameText(t, tree, secondTarget); got != "y" {
+		t.Fatalf("unexpected second imported target: got %q", got)
+	}
+	if got := nameText(t, tree, secondAlias); got != "z" {
+		t.Fatalf("unexpected second imported alias: got %q", got)
+	}
+}
+
+func TestParseFromImportParenthesizedMultiline(t *testing.T) {
+	p, tree := parseSource(t, "from urllib3.exceptions import (\n    ClosedPoolError,\n    ConnectTimeoutError,\n    MaxRetryError,\n)\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeFromImport)
+	module, aliases := tree.FromImportParts(stmt)
+	requireKind(t, tree, module, a.NodeAttribute)
+	if len(aliases) != 3 {
+		t.Fatalf("unexpected alias count: got %d want 3", len(aliases))
+	}
+	if got := nameText(t, tree, tree.ChildAt(aliases[0], 0)); got != "ClosedPoolError" {
+		t.Fatalf("unexpected first imported target: got %q", got)
+	}
+	if got := nameText(t, tree, tree.ChildAt(aliases[1], 0)); got != "ConnectTimeoutError" {
+		t.Fatalf("unexpected second imported target: got %q", got)
+	}
+	if got := nameText(t, tree, tree.ChildAt(aliases[2], 0)); got != "MaxRetryError" {
+		t.Fatalf("unexpected third imported target: got %q", got)
+	}
+}
+
 func TestParseRelativeFromImportForms(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1315,6 +1439,8 @@ func TestParseImportErrors(t *testing.T) {
 		{name: "missing alias name", src: "import pkg as\n", want: "expected alias name after 'as'"},
 		{name: "missing import keyword", src: "from pkg\n", want: "expected 'import' after module path"},
 		{name: "missing imported name", src: "from pkg import\n", want: "expected imported name"},
+		{name: "missing imported name in parens", src: "from pkg import ()\n", want: "expected imported name"},
+		{name: "missing closing paren", src: "from pkg import (x, y\n", want: "expected ')' after imported names"},
 		{name: "missing imported alias name", src: "from pkg import x as\n", want: "expected alias name after 'as'"},
 	}
 

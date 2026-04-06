@@ -73,6 +73,46 @@ func TestDefinitionFromImportAliasCrossFile(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStubModulePrefersPyi(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.pyi"), "foo: int\n")
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "foo = 'py'\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg.mod import foo\nfoo\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(root, "pkg", "mod.pyi"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected workspace stub module URI: got %q want %q", loc.URI, wantURI)
+	}
+}
+
+func TestWorkspaceStubPackagePrefersInitPyi(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "__init__.pyi"), "foo: int\n")
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "__init__.py"), "foo = 'py'\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg import foo\nfoo\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(root, "pkg", "__init__.pyi"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected workspace stub package URI: got %q want %q", loc.URI, wantURI)
+	}
+}
+
 func TestDefinitionImportAliasModuleCrossFile(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "foo = 1\n")
@@ -486,6 +526,94 @@ func TestDefinitionFromExternalImportLazyResolution(t *testing.T) {
 	}
 }
 
+func TestDefinitionFromExternalStubModulePrefersPyi(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg.pyi"), "value: int\n")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg.py"), "value = 'py'\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg import value\nvalue\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(extRoot, "extpkg.pyi"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected external stub definition URI: got %q want %q", loc.URI, wantURI)
+	}
+}
+
+func TestDefinitionFromExternalStubPackagePrefersInitPyi(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.pyi"), "value: int\n")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "value = 'py'\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg import value\nvalue\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(extRoot, "extpkg", "__init__.pyi"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected external stub package URI: got %q want %q", loc.URI, wantURI)
+	}
+}
+
+func TestImportBuiltinModuleSysResolves(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "import sys\nsys\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "unresolved module: sys" || err.Msg == "undefined name: sys" {
+			t.Fatalf("unexpected builtin import diagnostic: %+v", err)
+		}
+	}
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	if got := string(loc.URI); !strings.HasPrefix(got, "builtin:///") {
+		t.Fatalf("unexpected builtin module URI: got %q", got)
+	}
+}
+
+func TestFromImportBuiltinModuleMemberSysPathResolves(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from sys import path\npath\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "unresolved module: sys" || err.Msg == "cannot import name 'path' from 'sys'" || err.Msg == "undefined name: path" {
+			t.Fatalf("unexpected builtin from-import diagnostic: %+v", err)
+		}
+	}
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	if got := string(loc.URI); !strings.HasPrefix(got, "builtin:///") {
+		t.Fatalf("unexpected builtin member URI: got %q", got)
+	}
+}
+
 func TestCompletionFromExternalModuleExports(t *testing.T) {
 	root := t.TempDir()
 	extRoot := filepath.Join(t.TempDir(), "site-packages")
@@ -505,6 +633,74 @@ func TestCompletionFromExternalModuleExports(t *testing.T) {
 	}
 	assertCompletionLabel(t, items, "foo")
 	assertCompletionLabel(t, items, "bar")
+}
+
+func TestFromImportExternalModuleWithUnionAnnotations(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "poolmanager.py"), "Alias: int | None = None\n\nclass PoolManager:\n    pass\n\ndef proxy_from_url(url: str | None = None):\n    return url\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg.poolmanager import PoolManager, proxy_from_url\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "cannot import name 'PoolManager' from 'extpkg.poolmanager'" || err.Msg == "cannot import name 'proxy_from_url' from 'extpkg.poolmanager'" {
+			t.Fatalf("unexpected missing import diagnostic: %+v", err)
+		}
+	}
+}
+
+func TestFromImportExternalPackageSubmodule(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "poolmanager.py"), "class PoolManager:\n    pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg import poolmanager\npoolmanager\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "cannot import name 'poolmanager' from 'extpkg'" {
+			t.Fatalf("unexpected missing submodule diagnostic: %+v", err)
+		}
+	}
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(extRoot, "extpkg", "poolmanager.py"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected submodule definition URI: got %q want %q", loc.URI, wantURI)
+	}
+}
+
+func TestFromImportExternalModuleParenthesizedNames(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "exceptions.py"), "class ClosedPoolError:\n    pass\n\nclass ConnectTimeoutError:\n    pass\n\nclass MaxRetryError:\n    pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg.exceptions import (\n    ClosedPoolError,\n    ConnectTimeoutError,\n    MaxRetryError,\n)\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "cannot import name 'ClosedPoolError' from 'extpkg.exceptions'" || err.Msg == "cannot import name 'ConnectTimeoutError' from 'extpkg.exceptions'" || err.Msg == "cannot import name 'MaxRetryError' from 'extpkg.exceptions'" {
+			t.Fatalf("unexpected missing import diagnostic: %+v", err)
+		}
+	}
 }
 
 func TestWorkspaceModuleShadowsExternalModule(t *testing.T) {
@@ -561,6 +757,93 @@ func TestMissingImportedNameDiagnosticWithAlias(t *testing.T) {
 
 	doc := s.Get(mainURI)
 	assertSemanticDiagnostic(t, doc, "cannot import name 'bar' from 'pkg.mod'", 0, 20)
+}
+
+func TestStarImportFromWorkspaceModuleBindsExportedNames(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "foo = 1\n_hidden = 2\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg.mod import *\nfoo\n_hidden\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "undefined name: foo" {
+			t.Fatalf("unexpected undefined imported name: %+v", err)
+		}
+	}
+	assertSemanticDiagnostic(t, s.Get(mainURI), "undefined name: _hidden", 2, 0)
+
+	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
+	wantURI := pathToURI(filepath.Join(root, "pkg", "mod.py"))
+	if loc.URI != wantURI {
+		t.Fatalf("unexpected star import definition URI: got %q want %q", loc.URI, wantURI)
+	}
+}
+
+func TestStarImportUsesStaticAllWhenPresent(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "foo = 1\nbar = 2\n__all__ = ['bar']\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg.mod import *\nfoo\nbar\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	assertSemanticDiagnostic(t, s.Get(mainURI), "undefined name: foo", 1, 0)
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "undefined name: bar" {
+			t.Fatalf("unexpected undefined __all__ import: %+v", err)
+		}
+	}
+}
+
+func TestStarImportFallsBackWhenAllIsNotStatic(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "foo = 1\nbar = 2\n__all__ = names\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg.mod import *\nfoo\nbar\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "undefined name: foo" || err.Msg == "undefined name: bar" {
+			t.Fatalf("unexpected undefined fallback import: %+v", err)
+		}
+	}
+}
+
+func TestStarImportFromExternalModuleBindsExportedNames(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "__init__.py"), "")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "mod.py"), "foo = 1\n_hidden = 2\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from extpkg.mod import *\nfoo\n_hidden\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "undefined name: foo" {
+			t.Fatalf("unexpected undefined imported name: %+v", err)
+		}
+	}
+	assertSemanticDiagnostic(t, s.Get(mainURI), "undefined name: _hidden", 2, 0)
 }
 
 func TestDefinitionRelativeSiblingImportCrossFile(t *testing.T) {

@@ -252,9 +252,18 @@ func (s *Server) Initialize(
 
 	env := discoverPythonEnv(rootPath)
 	roots := normalizeExternalSearchRoots(rootPath, env.Paths)
+	builtins := make(map[string]struct{}, len(env.Builtins))
+	for _, name := range env.Builtins {
+		if name == "" {
+			continue
+		}
+		builtins[name] = struct{}{}
+	}
 	s.indexMu.Lock()
 	s.pythonExecutable = env.Executable
 	s.externalSearchRoots = roots
+	s.pythonBuiltinNames = builtins
+	s.pythonModuleInfoByName = make(map[string]pythonModuleInfo)
 	s.indexMu.Unlock()
 
 	// Indexing will start in backgroundIndex() triggered by Initialized

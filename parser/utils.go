@@ -59,6 +59,8 @@ func (p *Parser) tokenTypeToOperator(t lexer.TokenType) a.Operator {
 		return a.FloorDiv
 	case lexer.PERCENT:
 		return a.Mod
+	case lexer.VBAR:
+		return a.BitOr
 	case lexer.DOUBLESTAR:
 		return a.Pow
 	default:

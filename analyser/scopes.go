@@ -164,6 +164,9 @@ func (b *ScopeBuilder) visitFromImport(id ast.NodeID) {
 	_, aliases := b.tree.FromImportParts(id)
 	for _, alias := range aliases {
 		target, asName := b.tree.AliasParts(alias)
+		if name, ok := b.tree.NameText(target); ok && name == "*" {
+			continue
+		}
 		bound := asName
 		if bound == ast.NoNode {
 			bound = target

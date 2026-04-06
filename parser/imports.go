@@ -59,6 +59,17 @@ func (p *Parser) parseImportAlias() a.NodeID {
 	return aliasNode
 }
 
+func (p *Parser) parseFromImportAlias() a.NodeID {
+	if p.current.Type == l.STAR {
+		aliasNode := p.tree.NewNode(a.NodeAlias, p.current.Start, p.current.End)
+		target := p.tree.NewNameNode(p.current.Start, p.current.End, "*")
+		p.tree.AddChild(aliasNode, target)
+		p.advance()
+		return aliasNode
+	}
+	return p.parseImportAlias()
+}
+
 func (p *Parser) finishSimpleStatement(start uint32, end uint32, msg string) uint32 {
 	if p.current.Type == l.NEWLINE {
 		end = p.current.Start
@@ -154,7 +165,47 @@ func (p *Parser) parseFromImport() a.NodeID {
 	}
 	p.advance()
 
-	alias := p.parseImportAlias()
+	if p.current.Type == l.LPAR {
+		p.advance()
+		parsedAlias := false
+		for p.current.Type != l.RPAR && p.current.Type != l.EOF {
+			alias := p.parseFromImportAlias()
+			if alias == a.NoNode {
+				p.errorCurrent("expected imported name")
+				p.syncTo(l.COMMA, l.RPAR, l.NEWLINE, l.EOF)
+				if p.current.Type == l.COMMA {
+					p.advance()
+					continue
+				}
+				break
+			}
+			parsedAlias = true
+			p.tree.AddChild(ret, alias)
+			p.tree.Nodes[ret].End = p.tree.Nodes[alias].End
+
+			if p.current.Type != l.COMMA {
+				break
+			}
+			p.advance()
+		}
+
+		if !parsedAlias {
+			p.errorCurrent("expected imported name")
+		}
+		if p.current.Type != l.RPAR {
+			p.errorCurrent("expected ')' after imported names")
+			p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
+		}
+		if p.current.Type == l.RPAR {
+			p.tree.Nodes[ret].End = p.current.End
+			p.advance()
+		}
+
+		p.tree.Nodes[ret].End = p.finishSimpleStatement(start, p.tree.Nodes[ret].End, "expected newline after from-import statement")
+		return ret
+	}
+
+	alias := p.parseFromImportAlias()
 	if alias == a.NoNode {
 		p.errorCurrent("expected imported name")
 		p.syncTo(l.NEWLINE, l.EOF)
@@ -169,7 +220,7 @@ func (p *Parser) parseFromImport() a.NodeID {
 
 	for p.current.Type == l.COMMA {
 		p.advance()
-		alias = p.parseImportAlias()
+		alias = p.parseFromImportAlias()
 		if alias == a.NoNode {
 			p.errorCurrent("expected imported name after ','")
 			break

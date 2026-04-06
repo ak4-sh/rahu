@@ -98,6 +98,7 @@ const (
 	Div
 	FloorDiv
 	Mod
+	BitOr
 	Pow
 )
 

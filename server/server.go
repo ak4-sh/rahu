@@ -23,13 +23,15 @@ type Server struct {
 	docs   map[lsp.DocumentURI]*Document
 
 	// Module index lock - protects module file index (read-heavy, written at startup)
-	indexMu               sync.RWMutex
-	modulesByName         map[string]ModuleFile
-	modulesByURI          map[lsp.DocumentURI]ModuleFile
-	externalModulesByName map[string]ModuleFile
-	externalModulesByURI  map[lsp.DocumentURI]ModuleFile
-	externalSearchRoots   []string
-	pythonExecutable      string
+	indexMu                sync.RWMutex
+	modulesByName          map[string]ModuleFile
+	modulesByURI           map[lsp.DocumentURI]ModuleFile
+	externalModulesByName  map[string]ModuleFile
+	externalModulesByURI   map[lsp.DocumentURI]ModuleFile
+	pythonBuiltinNames     map[string]struct{}
+	pythonModuleInfoByName map[string]pythonModuleInfo
+	externalSearchRoots    []string
+	pythonExecutable       string
 
 	// Snapshots lock - protects module analysis cache (read-heavy)
 	snapshotsMu           sync.RWMutex
@@ -67,6 +69,7 @@ type ModuleFile struct {
 	Name string
 	URI  lsp.DocumentURI
 	Path string
+	Kind string
 }
 
 type ModuleSnapshot struct {
@@ -88,22 +91,24 @@ type ModuleSnapshot struct {
 
 func New(conn *jsonrpc.Conn) *Server {
 	return &Server{
-		conn:                  conn,
-		docs:                  make(map[lsp.DocumentURI]*Document),
-		debounce:              make(map[lsp.DocumentURI]*time.Timer),
-		modulesByName:         make(map[string]ModuleFile),
-		modulesByURI:          make(map[lsp.DocumentURI]ModuleFile),
-		externalModulesByName: make(map[string]ModuleFile),
-		externalModulesByURI:  make(map[lsp.DocumentURI]ModuleFile),
-		moduleImportsByURI:    make(map[lsp.DocumentURI][]string),
-		reverseDepsByModule:   make(map[string]map[lsp.DocumentURI]struct{}),
-		buildingModules:       make(map[string]chan struct{}),
-		openModuleCounts:      make(map[lsp.DocumentURI]int),
-		moduleSnapshotsByName: make(map[string]*ModuleSnapshot),
-		moduleSnapshotsByURI:  make(map[lsp.DocumentURI]*ModuleSnapshot),
-		snapshotLRU:           newSnapshotLRU(),
-		maxCachedModules:      defaultMaxCachedModules,
-		refIndex:              NewRefIndex(),
+		conn:                   conn,
+		docs:                   make(map[lsp.DocumentURI]*Document),
+		debounce:               make(map[lsp.DocumentURI]*time.Timer),
+		modulesByName:          make(map[string]ModuleFile),
+		modulesByURI:           make(map[lsp.DocumentURI]ModuleFile),
+		externalModulesByName:  make(map[string]ModuleFile),
+		externalModulesByURI:   make(map[lsp.DocumentURI]ModuleFile),
+		pythonBuiltinNames:     make(map[string]struct{}),
+		pythonModuleInfoByName: make(map[string]pythonModuleInfo),
+		moduleImportsByURI:     make(map[lsp.DocumentURI][]string),
+		reverseDepsByModule:    make(map[string]map[lsp.DocumentURI]struct{}),
+		buildingModules:        make(map[string]chan struct{}),
+		openModuleCounts:       make(map[lsp.DocumentURI]int),
+		moduleSnapshotsByName:  make(map[string]*ModuleSnapshot),
+		moduleSnapshotsByURI:   make(map[lsp.DocumentURI]*ModuleSnapshot),
+		snapshotLRU:            newSnapshotLRU(),
+		maxCachedModules:       defaultMaxCachedModules,
+		refIndex:               NewRefIndex(),
 	}
 }
 

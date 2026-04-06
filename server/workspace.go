@@ -83,7 +83,8 @@ func pathToURI(path string) lsp.DocumentURI {
 }
 
 func moduleNameFromPath(rootPath, filePath string) (string, bool) {
-	if rootPath == "" || filepath.Ext(filePath) != ".py" {
+	ext := filepath.Ext(filePath)
+	if rootPath == "" || (ext != ".py" && ext != ".pyi") {
 		return "", false
 	}
 
@@ -102,14 +103,14 @@ func moduleNameFromPath(rootPath, filePath string) (string, bool) {
 	}
 
 	base := filepath.Base(rel)
-	if base == "__init__.py" {
+	if base == "__init__.py" || base == "__init__.pyi" {
 		dir := filepath.Dir(rel)
 		if dir == "." {
 			return "", false
 		}
 		rel = dir
 	} else {
-		rel = strings.TrimSuffix(rel, ".py")
+		rel = strings.TrimSuffix(rel, ext)
 	}
 
 	rel = filepath.ToSlash(rel)
@@ -121,6 +122,29 @@ func moduleNameFromPath(rootPath, filePath string) (string, bool) {
 	}
 
 	return strings.Join(parts, "."), true
+}
+
+func modulePathPriority(path string) int {
+	base := filepath.Base(path)
+	switch {
+	case base == "__init__.pyi":
+		return 0
+	case base == "__init__.py":
+		return 1
+	case strings.HasSuffix(base, ".pyi"):
+		return 2
+	case strings.HasSuffix(base, ".py"):
+		return 3
+	default:
+		return 4
+	}
+}
+
+func shouldPreferModulePath(candidate, existing string) bool {
+	if existing == "" {
+		return true
+	}
+	return modulePathPriority(candidate) < modulePathPriority(existing)
 }
 
 func (s *Server) buildModuleIndex() {
@@ -161,7 +185,7 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 			return nil
 		}
 
-		if _, exists := modulesByName[name]; exists {
+		if existing, exists := modulesByName[name]; exists && !shouldPreferModulePath(path, existing.Path) {
 			return nil
 		}
 
@@ -315,7 +339,9 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 			continue
 		}
 		started := time.Now()
-		snapshot.SemErrs = append(snapshot.SemErrs, s.bindWorkspaceImportsWithLookup(snapshot.Tree, snapshot.Defs, snapshot.URI, lookup)...)
+		importErrs := s.bindWorkspaceImportsWithLookup(snapshot.Tree, snapshot.Global, snapshot.Defs, snapshot.URI, lookup)
+		reResolveSnapshot(snapshot)
+		snapshot.SemErrs = append(snapshot.SemErrs, importErrs...)
 		snapshot.Exports = extractExports(snapshot.Global)
 		snapshot.ExportHash = computeExportHash(snapshot.Exports)
 		timings.phaseBBindTotal += time.Since(started)
