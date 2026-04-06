@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"rahu/analyser"
 	"rahu/jsonrpc"
@@ -303,20 +305,29 @@ func (s *Server) backgroundIndex(ctx context.Context) {
 	s.createWorkspaceIndexingProgress()
 	s.beginWorkspaceIndexingProgress()
 
+	moduleIndexStart := time.Now()
 	if err := s.buildModuleIndexWithContext(ctx); err != nil {
 		s.endWorkspaceIndexingProgress()
 		return
 	}
+	moduleIndexDuration := time.Since(moduleIndexStart)
 
+	workspaceStart := time.Now()
 	if err := s.buildWorkspaceSnapshotsWithPriority(ctx); err != nil {
 		s.endWorkspaceIndexingProgress()
 		return
 	}
+	workspaceDuration := time.Since(workspaceStart)
 
 	s.endWorkspaceIndexingProgress()
 
 	// Re-analyze all open documents to pick up cross-file imports
+	reanalyzeStart := time.Now()
 	s.reanalyzeOpenDocuments()
+	reanalyzeDuration := time.Since(reanalyzeStart)
+	if s.conn != nil {
+		log.Printf("INDEX: module_index=%s workspace=%s reanalyze_open_docs=%s", moduleIndexDuration, workspaceDuration, reanalyzeDuration)
+	}
 }
 
 // reanalyzeOpenDocuments re-analyzes all currently open documents.
