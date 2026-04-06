@@ -201,6 +201,8 @@ func appendKeywordTokens(entries *[]semanticTokenEntry, seen map[semanticTokenKe
 			appendKeywordToken(entries, seen, doc, node.Start, "class")
 		case ast.NodeReturn:
 			appendKeywordToken(entries, seen, doc, node.Start, "return")
+		case ast.NodeRaise:
+			appendKeywordToken(entries, seen, doc, node.Start, "raise")
 		case ast.NodePass:
 			appendKeywordToken(entries, seen, doc, node.Start, "pass")
 		case ast.NodeIf:
