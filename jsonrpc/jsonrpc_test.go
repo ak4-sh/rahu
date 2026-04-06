@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+type dispatchOrderParams struct {
+	Value string `json:"value"`
+}
+
 func TestConn_Read(t *testing.T) {
 	req := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
 	input := fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(req), req)
@@ -255,4 +259,55 @@ func TestConn_RequestContextCancel(t *testing.T) {
 
 	conn.Close()
 	conn.Wait()
+}
+
+func TestDispatchProcessesNotificationsBeforeFollowingRequests(t *testing.T) {
+	notifMethod := "test/dispatch-order/notification"
+	reqMethod := "test/dispatch-order/request"
+
+	notifStarted := make(chan struct{})
+	releaseNotif := make(chan struct{})
+	requestRan := make(chan bool, 1)
+
+	RegisterNotification(notifMethod, AdaptNotification(func(p *dispatchOrderParams) {
+		close(notifStarted)
+		<-releaseNotif
+	}))
+	RegisterRequest(reqMethod, AdaptRequest(func(p *dispatchOrderParams) (map[string]any, *Error) {
+		select {
+		case <-notifStarted:
+			requestRan <- true
+		default:
+			requestRan <- false
+		}
+		return map[string]any{"ok": true}, nil
+	}))
+
+	conn := NewConn(bufio.NewReader(bytes.NewBuffer(nil)), bufio.NewWriter(&bytes.Buffer{}), func() error { return nil })
+	go Dispatch(conn)
+
+	conn.incoming <- &Notification{JSONRPC: "2.0", Method: notifMethod, Params: json.RawMessage(`{"value":"open"}`)}
+	<-notifStarted
+	conn.incoming <- &Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: reqMethod, Params: json.RawMessage(`{"value":"tokens"}`)}
+
+	select {
+	case ran := <-requestRan:
+		if ran {
+			t.Fatal("expected request to wait for notification completion")
+		}
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseNotif)
+
+	select {
+	case ran := <-requestRan:
+		if !ran {
+			t.Fatal("expected request to run after notification completion")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request after notification")
+	}
+
+	close(conn.incoming)
 }

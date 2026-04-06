@@ -22,7 +22,7 @@ func Dispatch(conn *Conn) {
 
 		case *Notification:
 			log.Printf("DISPATCH: notification %s", m.Method)
-			go dispatchNotification(conn, m)
+			dispatchNotification(conn, m)
 
 		default:
 			log.Printf("DISPATCH: unknown message %+v", msg)
