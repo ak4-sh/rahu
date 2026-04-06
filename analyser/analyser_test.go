@@ -194,6 +194,72 @@ func TestResolve_KeywordArgValueOnly(t *testing.T) {
 	}
 }
 
+func TestResolve_StarAndKwStarArgValuesOnly(t *testing.T) {
+	src := "items = [1]\nkwargs = {}\nfoo = print\nfoo(*items, **kwargs)\n"
+	tree := parser.New(src).Parse()
+
+	global, _ := BuildScopes(tree, src)
+	if _, errs := Resolve(tree, global); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+}
+
+func TestResolveFStringAssignsStrTypeAndResolvesInnerNames(t *testing.T) {
+	src := "name = 'x'\nvalue = f\"hello {name}\"\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fstring := findNodeByKind(t, tree, ast.NodeFString)
+	fstringType := resolver.ExprTypes[fstring]
+	if fstringType == nil || fstringType.Kind != TypeBuiltin || fstringType.Symbol == nil || fstringType.Symbol.Name != "str" {
+		t.Fatalf("expected f-string expr type str, got %+v", fstringType)
+	}
+	valueSym := defs[mustNameNode(t, tree, "value")]
+	if valueSym == nil || valueSym.Inferred == nil || valueSym.Inferred.Symbol == nil || valueSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected inferred str on value, got %+v", valueSym)
+	}
+}
+
+func TestResolveDictComprehensionAssignsDictTypeAndScopesTarget(t *testing.T) {
+	src := "HOOKS = [1]\nvalue = {event: [] for event in HOOKS if event}\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	valueSym := defs[mustNameNode(t, tree, "value")]
+	if valueSym == nil || valueSym.Inferred == nil || valueSym.Inferred.Kind != TypeDict {
+		t.Fatalf("expected dict type on value, got %+v", valueSym)
+	}
+	comp := findNodeByKind(t, tree, ast.NodeDictComp)
+	keyExpr, valueExpr, clauses := tree.DictCompParts(comp)
+	if len(clauses) != 1 {
+		t.Fatalf("unexpected clauses: %+v", clauses)
+	}
+	target, _, filters := tree.ComprehensionParts(clauses[0])
+	if resolver.Resolved[keyExpr] == nil || resolver.Resolved[keyExpr].Name != "event" {
+		t.Fatalf("expected dict comp key to resolve to event, got %+v", resolver.Resolved[keyExpr])
+	}
+	if resolver.Resolved[target] == nil || resolver.Resolved[target].Name != "event" {
+		t.Fatalf("expected dict comp target to resolve to event, got %+v", resolver.Resolved[target])
+	}
+	if len(filters) != 1 || resolver.Resolved[filters[0]] == nil || resolver.Resolved[filters[0]].Name != "event" {
+		t.Fatalf("expected dict comp filter to resolve to event, got %+v", filters)
+	}
+	if resolver.ExprTypes[comp] == nil || resolver.ExprTypes[comp].Kind != TypeDict {
+		t.Fatalf("expected dict comp expr type dict, got %+v", resolver.ExprTypes[comp])
+	}
+	if resolver.ExprTypes[valueExpr] == nil || resolver.ExprTypes[valueExpr].Kind != TypeList {
+		t.Fatalf("expected dict comp value expr type list, got %+v", resolver.ExprTypes[valueExpr])
+	}
+}
+
 func TestResolveConstructorCallAssignsInferredInstanceType(t *testing.T) {
 	src := "class Foo:\n    def method(self):\n        pass\n\nx = Foo()\n"
 	tree := parser.New(src).Parse()
@@ -228,6 +294,24 @@ func TestResolveParameterAnnotationAssignsType(t *testing.T) {
 	xSym := fnSym.Inner.Symbols["x"]
 	if xSym == nil || xSym.Inferred == nil || xSym.Inferred.Kind != TypeInstance || xSym.Inferred.Symbol == nil || xSym.Inferred.Symbol.Name != "Foo" {
 		t.Fatalf("expected annotated Foo type on x, got %+v", xSym)
+	}
+}
+
+func TestBuildScopes_VarArgsAndKwArgsAreParameters(t *testing.T) {
+	src := "def f(*args, **kwargs):\n    pass\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+	fnSym := global.Symbols["f"]
+	if fnSym == nil || fnSym.Inner == nil {
+		t.Fatal("missing function symbol f")
+	}
+	argsSym := fnSym.Inner.Symbols["args"]
+	if argsSym == nil || !argsSym.IsVarArg || argsSym.IsKwArg {
+		t.Fatalf("expected args to be vararg parameter, got %+v", argsSym)
+	}
+	kwargsSym := fnSym.Inner.Symbols["kwargs"]
+	if kwargsSym == nil || kwargsSym.IsVarArg || !kwargsSym.IsKwArg {
+		t.Fatalf("expected kwargs to be kwarg parameter, got %+v", kwargsSym)
 	}
 }
 
@@ -619,6 +703,80 @@ func TestResolveSpecialBuiltinNamePropagatesStrType(t *testing.T) {
 	xSym := defs[mustNameNode(t, tree, "x")]
 	if xSym == nil || xSym.Inferred == nil || xSym.Inferred.Kind != TypeBuiltin || xSym.Inferred.Symbol == nil || xSym.Inferred.Symbol.Name != "str" {
 		t.Fatalf("expected inferred str type on x, got %+v", xSym)
+	}
+}
+
+func TestResolveComparisonAssignsBoolType(t *testing.T) {
+	src := "items = [1]\nvalue = 1\nresult = value in items\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	compare := findNodeByKind(t, tree, ast.NodeCompare)
+	compareType := resolver.ExprTypes[compare]
+	if compareType == nil || compareType.Kind != TypeBuiltin || compareType.Symbol == nil || compareType.Symbol.Name != "bool" {
+		t.Fatalf("expected bool type on comparison expr, got %+v", compareType)
+	}
+
+	resultSym := defs[mustNameNode(t, tree, "result")]
+	if resultSym == nil || resultSym.Inferred == nil || resultSym.Inferred.Kind != TypeBuiltin || resultSym.Inferred.Symbol == nil || resultSym.Inferred.Symbol.Name != "bool" {
+		t.Fatalf("expected inferred bool type on result, got %+v", resultSym)
+	}
+}
+
+func TestResolveWithAsBindsTargetInBody(t *testing.T) {
+	src := "resource = open\nwith resource as handle:\n    value = handle\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	handleDef := mustNameNode(t, tree, "handle")
+	if defs[handleDef] == nil {
+		t.Fatal("expected with-as target to define a symbol")
+	}
+
+	valueUse := ast.NoNode
+	for id := ast.NodeID(1); int(id) < len(tree.Nodes); id++ {
+		if tree.Node(id).Kind != ast.NodeName {
+			continue
+		}
+		if text, ok := tree.NameText(id); ok && text == "handle" && id != handleDef {
+			valueUse = id
+			break
+		}
+	}
+	if valueUse == ast.NoNode {
+		t.Fatal("expected handle use inside with body")
+	}
+	if resolver.Resolved[valueUse] == nil || resolver.Resolved[valueUse] != defs[handleDef] {
+		t.Fatalf("expected handle use to resolve to with-as target, got %+v", resolver.Resolved[valueUse])
+	}
+}
+
+func TestResolveDecoratorExpressionAndDecoratedFunction(t *testing.T) {
+	src := "dec = print\n@dec\ndef f():\n    pass\n"
+	tree := parser.New(src).Parse()
+	global, defs := BuildScopes(tree, src)
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	fnName := mustNameNode(t, tree, "f")
+	if defs[fnName] == nil || defs[fnName].Kind != SymFunction {
+		t.Fatalf("expected decorated function symbol, got %+v", defs[fnName])
+	}
+
+	decorator := findNodeByKind(t, tree, ast.NodeDecorator)
+	decoratorExpr := tree.DecoratorExpr(decorator)
+	if resolver.Resolved[decoratorExpr] == nil || resolver.Resolved[decoratorExpr].Name != "dec" {
+		t.Fatalf("expected decorator expr to resolve to dec, got %+v", resolver.Resolved[decoratorExpr])
 	}
 }
 
