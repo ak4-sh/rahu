@@ -202,14 +202,14 @@ func computeExportHash(exports map[string]*analyser.Symbol) uint64 {
 	for _, name := range names {
 		writeHashString(h, name)
 		writeHashByte(h, 0)
-		writeSymbolSignature(h, exports[name])
+		writeSymbolSignature(h, exports[name], visitedSymbols, visitedTypes)
 		writeHashByte(h, 0xff)
 	}
 
 	return h.Sum64()
 }
 
-func writeSymbolSignature(h hash.Hash64, sym *analyser.Symbol) {
+func writeSymbolSignature(h hash.Hash64, sym *analyser.Symbol, visitedSymbols map[analyser.SymbolID]struct{}, visitedTypes map[*analyser.Type]struct{}) {
 	if sym == nil {
 		writeHashString(h, "<nil>")
 		return
@@ -222,19 +222,23 @@ func writeSymbolSignature(h hash.Hash64, sym *analyser.Symbol) {
 
 	switch sym.Kind {
 	case analyser.SymFunction:
-		writeFunctionSignature(h, sym)
+		writeFunctionSignature(h, sym, visitedSymbols, visitedTypes)
 	case analyser.SymClass:
-		writeClassSignature(h, sym)
+		writeClassSignature(h, sym, visitedSymbols, visitedTypes)
 	default:
-		writeTypeSignature(h, sym.Inferred)
+		writeTypeSignature(h, sym.Inferred, visitedSymbols, visitedTypes)
+	visitedSymbols := make(map[analyser.SymbolID]struct{}, len(exports))
+	visitedTypes := map[*analyser.Type]struct{}{}
 	}
 }
 
-func writeFunctionSignature(h hash.Hash64, sym *analyser.Symbol) {
+func writeFunctionSignature(h hash.Hash64, sym *analyser.Symbol, visitedSymbols map[analyser.SymbolID]struct{}, visitedTypes map[*analyser.Type]struct{}) {
 	if sym == nil || sym.Inner == nil {
 		writeHashString(h, "fn")
 		writeHashByte(h, 0)
-		writeTypeSignature(h, sym.Returns)
+		if sym != nil {
+			writeTypeSignature(h, sym.Returns, visitedSymbols, visitedTypes)
+		}
 		return
 	}
 
@@ -242,6 +246,18 @@ func writeFunctionSignature(h hash.Hash64, sym *analyser.Symbol) {
 		name  string
 		start uint32
 		kind  analyser.SymbolKind
+	if sym.ID != 0 {
+		if _, ok := visitedSymbols[sym.ID]; ok {
+			writeHashString(h, "<cycle>")
+			writeHashByte(h, 0)
+			writeHashString(h, sym.Name)
+			writeHashByte(h, 0)
+			writeHashInt(h, int(sym.Kind))
+			return
+		}
+		visitedSymbols[sym.ID] = struct{}{}
+		defer delete(visitedSymbols, sym.ID)
+	}
 		def   string
 		typ   *analyser.Type
 	}
@@ -278,13 +294,13 @@ func writeFunctionSignature(h hash.Hash64, sym *analyser.Symbol) {
 		writeHashByte(h, 0)
 		writeHashString(h, param.def)
 		writeHashByte(h, 0)
-		writeTypeSignature(h, param.typ)
+		writeTypeSignature(h, param.typ, visitedSymbols, visitedTypes)
 		writeHashByte(h, 0xfe)
 	}
-	writeTypeSignature(h, sym.Returns)
+	writeTypeSignature(h, sym.Returns, visitedSymbols, visitedTypes)
 }
 
-func writeClassSignature(h hash.Hash64, sym *analyser.Symbol) {
+func writeClassSignature(h hash.Hash64, sym *analyser.Symbol, visitedSymbols map[analyser.SymbolID]struct{}, visitedTypes map[*analyser.Type]struct{}) {
 	writeHashString(h, "class")
 	writeHashByte(h, 0)
 	writeHashInt(h, len(sym.Bases))
@@ -296,11 +312,11 @@ func writeClassSignature(h hash.Hash64, sym *analyser.Symbol) {
 		}
 		writeHashString(h, base.Name)
 	}
-	writeScopeSignature(h, sym.Attrs)
-	writeScopeSignature(h, sym.Members)
+	writeScopeSignature(h, sym.Attrs, visitedSymbols, visitedTypes)
+	writeScopeSignature(h, sym.Members, visitedSymbols, visitedTypes)
 }
 
-func writeScopeSignature(h hash.Hash64, scope *analyser.Scope) {
+func writeScopeSignature(h hash.Hash64, scope *analyser.Scope, visitedSymbols map[analyser.SymbolID]struct{}, visitedTypes map[*analyser.Type]struct{}) {
 	if scope == nil || len(scope.Symbols) == 0 {
 		writeHashByte(h, 0)
 		return
@@ -316,11 +332,12 @@ func writeScopeSignature(h hash.Hash64, scope *analyser.Scope) {
 		writeHashByte(h, 0)
 		writeHashString(h, name)
 		writeHashByte(h, 0)
-		writeSymbolSignature(h, scope.Symbols[name])
+		writeSymbolSignature(h, scope.Symbols[name], visitedSymbols, visitedTypes)
 	}
 }
 
-func writeTypeSignature(h hash.Hash64, typ *analyser.Type) {
+func writeTypeSignature(h hash.Hash64, typ *analyser.Type, visitedSymbols map[analyser.SymbolID]struct{}, visitedTypes map[*analyser.Type]struct{}) {
+	_ = visitedSymbols
 	if typ == nil {
 		writeHashString(h, "<nil>")
 		return
@@ -333,16 +350,16 @@ func writeTypeSignature(h hash.Hash64, typ *analyser.Type) {
 	}
 	writeHashByte(h, 0)
 	for _, union := range typ.Union {
-		writeTypeSignature(h, union)
+		writeTypeSignature(h, union, visitedSymbols, visitedTypes)
 		writeHashByte(h, 1)
 	}
-	writeTypeSignature(h, typ.Elem)
+	writeTypeSignature(h, typ.Elem, visitedSymbols, visitedTypes)
 	writeHashByte(h, 2)
 	for _, item := range typ.Items {
-		writeTypeSignature(h, item)
+		writeTypeSignature(h, item, visitedSymbols, visitedTypes)
 		writeHashByte(h, 3)
 	}
-	writeTypeSignature(h, typ.Key)
+	writeTypeSignature(h, typ.Key, visitedSymbols, visitedTypes)
 }
 
 func writeHashString(h hash.Hash64, s string) {
@@ -353,6 +370,14 @@ func writeHashByte(h hash.Hash64, b byte) {
 	_, _ = h.Write([]byte{b})
 }
 
+	if _, ok := visitedTypes[typ]; ok {
+		writeHashString(h, "<cycle>")
+		writeHashByte(h, 0)
+		writeHashInt(h, int(typ.Kind))
+		return
+	}
+	visitedTypes[typ] = struct{}{}
+	defer delete(visitedTypes, typ)
 func writeHashInt(h hash.Hash64, n int) {
 	writeHashString(h, strconv.Itoa(n))
 }
