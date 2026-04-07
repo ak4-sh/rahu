@@ -322,7 +322,7 @@ func (s *Server) backgroundIndex(ctx context.Context) {
 	moduleIndexDuration := time.Since(moduleIndexStart)
 
 	workspaceStart := time.Now()
-	if err := s.buildWorkspaceSnapshotsWithPriority(ctx); err != nil {
+	if err := s.buildWorkspaceSnapshotsWithPriority(ctx, s.indexingCancel); err != nil {
 		s.endWorkspaceIndexingProgress()
 		return
 	}
