@@ -366,6 +366,7 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 		reResolveSnapshot(snapshot)
 		snapshot.SemErrs = append(snapshot.SemErrs, importErrs...)
 		snapshot.Exports = extractExports(snapshot.Global)
+		snapshot.Exports = s.augmentExportsFromInterpreter(snapshot)
 		snapshot.ExportHash = computeExportHash(snapshot.Exports)
 		timings.phaseBBindTotal += time.Since(started)
 	}
