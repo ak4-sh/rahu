@@ -29,7 +29,16 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 - Assignments, augmented assignments, annotated assignments, `if` / `elif` / `else`, `for`, `while`, `def`, `class`, `return`, `break`, `continue`, `pass`
 - `try` / `except` / `else` / `finally`
 - `import` / `from ... import ...`, including relative `from` imports
-- Function calls, keyword arguments, attribute access, list/tuple/dict literals, list comprehensions, subscripts, and slices
+- Grouped and parenthesized `from ... import (...)`, including multiline forms
+- Star imports (`from x import *`) with `__all__` awareness and public-name fallback
+- `assert`, `del`, `global`, `nonlocal` statements
+- `yield` and `yield from`
+- Positional-only parameter separator `/` in function signatures
+- `with` statement and context managers
+- Decorators on functions and classes
+- Function calls, keyword arguments, attribute access, list/tuple/dict/set literals, list comprehensions, set comprehensions, dict comprehensions, generator expressions, subscripts, and slices (step slice unsupported)
+- Ellipsis `...` as a primary expression
+- PEP 604 union annotations (`int | None`) in variable/parameter/return annotations
 - Parameter annotations, return annotations, and variable annotations
 - Bare tuple returns like `return a, b`
 - Subscript assignment targets like `a[0] = x`
@@ -53,7 +62,7 @@ The AST is stored in a compact arena with stable `NodeID`s, contiguous node stor
 - Undefined attributes
 - Undefined base classes
 - Unresolved modules
-- Missing imported names
+- Missing imported names from resolved modules
 - `return` outside a function
 - `break` / `continue` outside a loop
 
@@ -84,6 +93,12 @@ Server-side analysis stores AST, definitions, resolved symbols, semantic diagnos
 - Uses LRU module snapshot caching to bound resident analysis state
 - Prefers open-buffer contents over on-disk files
 - Discovers Python environment search roots and lazily resolves external modules outside the workspace when imports require them
+- Prunes irrelevant directories (`.git`, `node_modules`, `vendor`, `.venv`, `venv`, `dist`, `build`, `target`, `.next`, `.turbo`, `.cache`, `coverage`) from workspace walks
+- Prefers `.pyi` stub files over `.py` files for both workspace and external modules
+- Discovers builtin and frozen modules via the selected interpreter's `sys.builtin_module_names`
+- Generates synthetic module snapshots for non-file-backed modules (e.g. `sys`, `_frozen_importlib`)
+- Augments module exports with interpreter-inspected members for modules with incomplete static exports (e.g. extension-backed stdlib like `datetime`, `collections`)
+- Supports package submodule fallback for `from pkg import submodule` resolution
 
 ### JSON-RPC Transport
 
@@ -114,12 +129,12 @@ Server-side analysis stores AST, definitions, resolved symbols, semantic diagnos
 
 ### Language features
 
-- Set literals
-- `*args` / `**kwargs`
-- `with`, `lambda`, decorators
-- Dict/set/generator comprehensions
-- `async` / `await`, `yield`
-- Bitwise operators
+- `lambda` expressions
+- Walrus operator `:=`
+- `async def` / `await` / `async for` / `async with`
+- `match` / `case` statements
+- Remaining bitwise operators (`&`, `^`, `<<`, `>>`, `~`) — `|` is supported
+- Bare `*` keyword-only parameter separator (positional-only `/` is supported)
 - String escape sequences
 - A few Python newline / line-joining edge cases
 
@@ -130,7 +145,9 @@ Server-side analysis stores AST, definitions, resolved symbols, semantic diagnos
 - More mutation typing beyond `list.append(...)`
 - Maybe-undefined member diagnostics on unions
 - Richer `typing` module awareness beyond builtin generic forms like `list[int]` and `dict[str, int]`
-- More complete stdlib modeling and symbol metadata for external packages
+- Namespace package support
+- Dynamic `__all__` resolution
+- Full `global` / `nonlocal` rebinding semantics
 
 ### LSP features
 
