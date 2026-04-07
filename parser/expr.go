@@ -268,6 +268,30 @@ func (p *Parser) parsePrimary() a.NodeID {
 		p.tree.AddChild(ret, expr)
 		return ret
 
+	case l.YIELD:
+		startPos := p.current.Start
+		p.advance()
+		ret := p.tree.NewNode(a.NodeYield, startPos, startPos)
+		if p.current.Type == l.FROM {
+			p.tree.Nodes[ret].Data = 1
+			p.advance()
+		}
+		if p.current.Type == l.NEWLINE || p.current.Type == l.EOF || p.current.Type == l.COMMA || p.current.Type == l.RPAR || p.current.Type == l.RSQB || p.current.Type == l.COLON {
+			return ret
+		}
+		expr := p.parseExpression(LOWEST)
+		if expr == a.NoNode {
+			if p.tree.Nodes[ret].Data == 1 {
+				p.errorCurrent("expected expression after 'yield from'")
+			} else {
+				p.errorCurrent("expected expression after 'yield'")
+			}
+			return ret
+		}
+		p.tree.AddChild(ret, expr)
+		p.tree.Nodes[ret].End = p.tree.Nodes[expr].End
+		return ret
+
 	case l.NONE:
 		startPos := p.current.Start
 		endPos := p.current.End

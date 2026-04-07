@@ -266,6 +266,55 @@ func TestParseFuncReturnUnionAnnotation(t *testing.T) {
 	requireKind(t, tree, parts[1], a.NodeNone)
 }
 
+func TestParseYieldExpr(t *testing.T) {
+	p, tree := parseSource(t, "def f():\n    yield x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, _, body := tree.FunctionPartsWithReturn(fn)
+	stmt := requireChildCount(t, tree, body, 1)[0]
+	requireKind(t, tree, stmt, a.NodeExprStmt)
+	yieldExpr := requireChildCount(t, tree, stmt, 1)[0]
+	requireKind(t, tree, yieldExpr, a.NodeYield)
+	child := requireChildCount(t, tree, yieldExpr, 1)[0]
+	if got := nameText(t, tree, child); got != "x" {
+		t.Fatalf("unexpected yield expression: got %q", got)
+	}
+}
+
+func TestParseYieldFromExpr(t *testing.T) {
+	p, tree := parseSource(t, "def f():\n    yield from xs\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, _, body := tree.FunctionPartsWithReturn(fn)
+	stmt := requireChildCount(t, tree, body, 1)[0]
+	yieldExpr := requireChildCount(t, tree, stmt, 1)[0]
+	requireKind(t, tree, yieldExpr, a.NodeYield)
+	if tree.Node(yieldExpr).Data != 1 {
+		t.Fatalf("expected yield-from flag, got %d", tree.Node(yieldExpr).Data)
+	}
+	child := requireChildCount(t, tree, yieldExpr, 1)[0]
+	if got := nameText(t, tree, child); got != "xs" {
+		t.Fatalf("unexpected yield-from expression: got %q", got)
+	}
+}
+
+func TestParseFuncPositionalOnlyParams(t *testing.T) {
+	p, tree := parseSource(t, "def f(x, /, y):\n    x\n")
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, args, _, _ := tree.FunctionPartsWithReturn(fn)
+	params := requireChildCount(t, tree, args, 2)
+	if got := nameText(t, tree, tree.ChildAt(params[0], 0)); got != "x" {
+		t.Fatalf("unexpected first param: got %q", got)
+	}
+	if got := nameText(t, tree, tree.ChildAt(params[1], 0)); got != "y" {
+		t.Fatalf("unexpected second param: got %q", got)
+	}
+}
+
 func TestParseFuncAnnotationErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1442,6 +1491,7 @@ func TestParseImportErrors(t *testing.T) {
 		{name: "missing imported name in parens", src: "from pkg import ()\n", want: "expected imported name"},
 		{name: "missing closing paren", src: "from pkg import (x, y\n", want: "expected ')' after imported names"},
 		{name: "missing imported alias name", src: "from pkg import x as\n", want: "expected alias name after 'as'"},
+		{name: "invalid positional-only separator", src: "def f(/):\n    pass\n", want: "invalid positional-only parameter separator"},
 	}
 
 	for _, tt := range tests {
@@ -1715,6 +1765,73 @@ func TestParseRaiseCallExpression(t *testing.T) {
 	requireKind(t, tree, exc, a.NodeCall)
 }
 
+func TestParseAssertStatements(t *testing.T) {
+	p, tree := parseSource(t, "assert x\nassert x, 'bad'\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeAssert)
+	test, msg := tree.AssertParts(stmt)
+	if got := nameText(t, tree, test); got != "x" {
+		t.Fatalf("unexpected assert test: got %q", got)
+	}
+	if msg != a.NoNode {
+		t.Fatal("did not expect assert message for first statement")
+	}
+
+	stmt = moduleStmt(t, tree, 1)
+	test, msg = tree.AssertParts(stmt)
+	if got := nameText(t, tree, test); got != "x" {
+		t.Fatalf("unexpected second assert test: got %q", got)
+	}
+	requireKind(t, tree, msg, a.NodeString)
+}
+
+func TestParseDelStatement(t *testing.T) {
+	p, tree := parseSource(t, "del x, obj.attr, items[0]\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeDel)
+	targets := tree.DelTargets(stmt)
+	if len(targets) != 3 {
+		t.Fatalf("unexpected delete target count: got %d want 3", len(targets))
+	}
+	if got := nameText(t, tree, targets[0]); got != "x" {
+		t.Fatalf("unexpected first delete target: got %q", got)
+	}
+	requireKind(t, tree, targets[1], a.NodeAttribute)
+	requireKind(t, tree, targets[2], a.NodeSubScript)
+}
+
+func TestParseGlobalAndNonlocalStatements(t *testing.T) {
+	p, tree := parseSource(t, "global x, y\nnonlocal inner\n")
+	requireNoParseErrors(t, p)
+
+	stmt := moduleStmt(t, tree, 0)
+	requireKind(t, tree, stmt, a.NodeGlobal)
+	names := tree.NameList(stmt)
+	if len(names) != 2 {
+		t.Fatalf("unexpected global name count: got %d want 2", len(names))
+	}
+	if got := nameText(t, tree, names[0]); got != "x" {
+		t.Fatalf("unexpected first global name: got %q", got)
+	}
+	if got := nameText(t, tree, names[1]); got != "y" {
+		t.Fatalf("unexpected second global name: got %q", got)
+	}
+
+	stmt = moduleStmt(t, tree, 1)
+	requireKind(t, tree, stmt, a.NodeNonlocal)
+	names = tree.NameList(stmt)
+	if len(names) != 1 {
+		t.Fatalf("unexpected nonlocal name count: got %d want 1", len(names))
+	}
+	if got := nameText(t, tree, names[0]); got != "inner" {
+		t.Fatalf("unexpected nonlocal name: got %q", got)
+	}
+}
+
 func TestParseRaiseErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1724,6 +1841,11 @@ func TestParseRaiseErrors(t *testing.T) {
 		{name: "missing expr", src: "raise )\n", want: "expected expression after 'raise'"},
 		{name: "missing cause", src: "raise err from\n", want: "expected expression after 'from' in raise"},
 		{name: "bad cause expr", src: "raise err from )\n", want: "expected expression after 'from' in raise"},
+		{name: "missing assert expr", src: "assert\n", want: "expected expression after 'assert'"},
+		{name: "missing del target", src: "del\n", want: "expected delete target after 'del'"},
+		{name: "invalid del target", src: "del 1\n", want: "invalid delete target"},
+		{name: "missing global name", src: "global\n", want: "expected name after 'global'"},
+		{name: "missing nonlocal name", src: "nonlocal\n", want: "expected name after 'nonlocal'"},
 	}
 
 	for _, tt := range tests {

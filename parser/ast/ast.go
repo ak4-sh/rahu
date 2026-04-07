@@ -131,7 +131,12 @@ const (
 	NodeIf
 	NodeFor
 	NodeWhile
+	NodeAssert
+	NodeDel
+	NodeGlobal
+	NodeNonlocal
 	NodeReturn
+	NodeYield
 	NodeRaise
 	NodePass
 	NodeBreak

@@ -23,8 +23,16 @@ func (p *Parser) parseStatement() a.NodeID {
 	switch p.current.Type {
 	case l.IF:
 		return p.parseIf()
+	case l.ASSERT:
+		return p.parseAssert()
+	case l.DEL:
+		return p.parseDel()
+	case l.GLOBAL:
+		return p.parseGlobal()
+	case l.NONLOCAL:
+		return p.parseNonlocal()
 
-	case l.NAME, l.NUMBER, l.STRING, l.FSTRING, l.LPAR, l.LSQB, l.LBRACE, l.MINUS, l.PLUS, l.NOT, l.TRUE, l.FALSE, l.NONE:
+	case l.NAME, l.NUMBER, l.STRING, l.FSTRING, l.LPAR, l.LSQB, l.LBRACE, l.MINUS, l.PLUS, l.NOT, l.TRUE, l.FALSE, l.NONE, l.YIELD:
 		return p.dispatchExprParse()
 
 	case l.DEF:

@@ -312,6 +312,18 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.visitStmt(inner)
 		}
 
+	case ast.NodeAssert:
+		test, msg := r.tree.AssertParts(stmt)
+		r.visitExpr(test, Read)
+		r.visitExpr(msg, Read)
+
+	case ast.NodeDel:
+		for _, target := range r.tree.DelTargets(stmt) {
+			r.visitExpr(target, Read)
+		}
+
+	case ast.NodeGlobal, ast.NodeNonlocal:
+
 	case ast.NodeFor:
 		target := r.tree.Nodes[stmt].FirstChild
 		iter := ast.NoNode
@@ -357,6 +369,11 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.error(r.tree.RangeOf(stmt), "return outside function")
 		}
 
+		if value := r.tree.Nodes[stmt].FirstChild; value != ast.NoNode {
+			r.visitExpr(value, Read)
+		}
+
+	case ast.NodeYield:
 		if value := r.tree.Nodes[stmt].FirstChild; value != ast.NoNode {
 			r.visitExpr(value, Read)
 		}
@@ -563,6 +580,12 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		return
 
 	case ast.NodeNone, ast.NodeErrExp:
+		return
+
+	case ast.NodeYield:
+		if value := r.tree.Nodes[expr].FirstChild; value != ast.NoNode {
+			r.visitExpr(value, Read)
+		}
 		return
 
 	case ast.NodeBinOp:

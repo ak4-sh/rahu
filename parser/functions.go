@@ -39,9 +39,24 @@ func (p *Parser) parseFunc() a.NodeID {
 	seenDefault := false
 	seenVarArg := false
 	seenKwArg := false
+	seenPosOnly := false
 
 	if p.current.Type != l.RPAR {
 		for {
+			if p.current.Type == l.SLASH {
+				if seenPosOnly || args == a.NoNode || seenVarArg || seenKwArg {
+					p.errorCurrent("invalid positional-only parameter separator")
+				} else {
+					seenPosOnly = true
+				}
+				p.advance()
+				if p.current.Type == l.COMMA {
+					p.advance()
+					continue
+				}
+				break
+			}
+
 			param, isVarArg, isKwArg := p.parseParameter()
 			if param == a.NoNode {
 				p.errorCurrent("expected parameter name")

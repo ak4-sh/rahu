@@ -96,6 +96,15 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 		b.visitFor(stmt)
 	case ast.NodeWhile:
 		b.visitWhile(stmt)
+	case ast.NodeAssert:
+		test, msg := b.tree.AssertParts(stmt)
+		b.visitExpr(test)
+		b.visitExpr(msg)
+	case ast.NodeDel:
+		for _, target := range b.tree.DelTargets(stmt) {
+			b.visitExpr(target)
+		}
+	case ast.NodeGlobal, ast.NodeNonlocal:
 	case ast.NodeClassDef:
 		b.visitClassDef(stmt)
 	case ast.NodeTry:
@@ -227,6 +236,12 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 
 	switch b.tree.Node(id).Kind {
 	case ast.NodeName, ast.NodeNumber, ast.NodeString, ast.NodeFStringText, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+		return
+
+	case ast.NodeYield:
+		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
+			b.visitExpr(child)
+		}
 		return
 
 	case ast.NodeFString:

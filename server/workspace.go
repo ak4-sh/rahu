@@ -147,6 +147,20 @@ func shouldPreferModulePath(candidate, existing string) bool {
 	return modulePathPriority(candidate) < modulePathPriority(existing)
 }
 
+func shouldSkipWorkspaceDir(name string) bool {
+	switch name {
+	case ".git", "node_modules", "vendor", ".venv", "venv", "dist", "build", "target", ".next", ".turbo", ".cache", "coverage":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPythonModulePath(path string) bool {
+	ext := filepath.Ext(path)
+	return ext == ".py" || ext == ".pyi"
+}
+
 func (s *Server) buildModuleIndex() {
 	_ = s.buildModuleIndexWithContext(context.Background())
 }
@@ -176,7 +190,16 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 		default:
 		}
 
-		if err != nil || d == nil || d.IsDir() {
+		if err != nil || d == nil {
+			return nil
+		}
+		if d.IsDir() {
+			if shouldSkipWorkspaceDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isPythonModulePath(path) {
 			return nil
 		}
 
