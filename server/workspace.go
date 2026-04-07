@@ -268,10 +268,12 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 }
 
 func (s *Server) buildWorkspaceSnapshots() {
-	_ = s.buildWorkspaceSnapshotsWithPriority(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = s.buildWorkspaceSnapshotsWithPriority(ctx, cancel)
 }
 
-func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error {
+func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context, cancel context.CancelFunc) error {
 	s.indexMu.RLock()
 	mods := make([]ModuleFile, 0, len(s.modulesByName))
 	for _, mod := range s.modulesByName {
@@ -336,10 +338,8 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 	}
 	close(jobs)
 	wg.Wait()
+	cancel()
 	timings.phaseABuild = time.Since(phaseAStart)
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	lookup := func(name string) (*ModuleSnapshot, bool) {
 		baseMu.Lock()
@@ -350,11 +350,6 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context) error 
 
 	phaseBStart := time.Now()
 	for _, mod := range mods {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 		baseMu.Lock()
 		snapshot := baseByName[mod.Name]
 		baseMu.Unlock()

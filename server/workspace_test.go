@@ -244,7 +244,9 @@ func TestBuildWorkspaceSnapshotsWithPriorityParallel(t *testing.T) {
 	s := New(nil)
 	s.rootPath = root
 	s.buildModuleIndex()
-	if err := s.buildWorkspaceSnapshotsWithPriority(context.Background()); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.buildWorkspaceSnapshotsWithPriority(ctx, cancel); err != nil {
 		t.Fatalf("parallel workspace snapshot build failed: %v", err)
 	}
 
