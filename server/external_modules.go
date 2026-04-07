@@ -108,6 +108,25 @@ print(json.dumps(payload))`, name)
 	return info, info.Kind != ""
 }
 
+func inspectPythonModuleMembers(python, name string) ([]string, bool) {
+	if python == "" || name == "" {
+		return nil, false
+	}
+	cmd := exec.Command(python, "-c", `import importlib, json, sys
+name = sys.argv[1]
+module = importlib.import_module(name)
+print(json.dumps(sorted({member for member in dir(module) if isinstance(member, str)})))`, name)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	var members []string
+	if err := json.Unmarshal(output, &members); err != nil {
+		return nil, false
+	}
+	return members, true
+}
+
 func (s *Server) pythonModuleInfo(name string) (pythonModuleInfo, bool) {
 	s.indexMu.RLock()
 	if info, ok := s.pythonModuleInfoByName[name]; ok {
@@ -141,6 +160,29 @@ func (s *Server) pythonModuleInfo(name string) (pythonModuleInfo, bool) {
 	s.pythonModuleInfoByName[name] = info
 	s.indexMu.Unlock()
 	return info, true
+}
+
+func (s *Server) pythonModuleMembers(name string) ([]string, bool) {
+	s.indexMu.RLock()
+	if info, ok := s.pythonModuleInfoByName[name]; ok && info.Members != nil {
+		s.indexMu.RUnlock()
+		return append([]string(nil), info.Members...), true
+	}
+	python := s.pythonExecutable
+	s.indexMu.RUnlock()
+	if python == "" {
+		return nil, false
+	}
+	members, ok := inspectPythonModuleMembers(python, name)
+	if !ok {
+		return nil, false
+	}
+	s.indexMu.Lock()
+	info := s.pythonModuleInfoByName[name]
+	info.Members = append([]string(nil), members...)
+	s.pythonModuleInfoByName[name] = info
+	s.indexMu.Unlock()
+	return members, true
 }
 
 func (s *Server) syntheticModuleSource(mod ModuleFile) (string, *source.LineIndex, bool) {

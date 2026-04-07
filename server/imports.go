@@ -304,6 +304,31 @@ func extractExports(global *analyser.Scope) map[string]*analyser.Symbol {
 	return exports
 }
 
+func (s *Server) augmentExportsFromInterpreter(snapshot *ModuleSnapshot) map[string]*analyser.Symbol {
+	if snapshot == nil {
+		return nil
+	}
+	exports := snapshot.Exports
+	if exports == nil {
+		exports = make(map[string]*analyser.Symbol)
+	}
+	members, ok := s.pythonModuleMembers(snapshot.Name)
+	if !ok {
+		return exports
+	}
+	span := moduleDefSpan(snapshot)
+	for _, name := range members {
+		if !isValidSyntheticIdentifier(name) {
+			continue
+		}
+		if _, exists := exports[name]; exists {
+			continue
+		}
+		exports[name] = &analyser.Symbol{Name: name, Kind: analyser.SymVariable, URI: snapshot.URI, Span: span}
+	}
+	return exports
+}
+
 func (s *Server) buildBaseModuleSnapshot(name string, uri lsp.DocumentURI, path, text string, lineIndex *source.LineIndex) *ModuleSnapshot {
 	p := parser.New(text)
 	tree := p.Parse()
@@ -326,6 +351,7 @@ func (s *Server) buildBaseModuleSnapshot(name string, uri lsp.DocumentURI, path,
 	}
 	snapshot.Imports = s.extractImportsForModule(tree, uri)
 	snapshot.Exports = extractExports(snapshot.Global)
+	snapshot.Exports = s.augmentExportsFromInterpreter(snapshot)
 	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	return snapshot
 }
@@ -579,6 +605,7 @@ func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, tex
 	reResolveSnapshot(snapshot)
 	snapshot.SemErrs = append(snapshot.SemErrs, importErrs...)
 	snapshot.Exports = extractExports(snapshot.Global)
+	snapshot.Exports = s.augmentExportsFromInterpreter(snapshot)
 	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	return snapshot
 }

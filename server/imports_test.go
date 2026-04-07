@@ -614,6 +614,60 @@ func TestFromImportBuiltinModuleMemberSysPathResolves(t *testing.T) {
 	}
 }
 
+func TestFromImportStdlibCollectionsOrderedDictResolves(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from collections import OrderedDict\nOrderedDict\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "cannot import name 'OrderedDict' from 'collections'" {
+			t.Fatalf("unexpected stdlib import diagnostic: %+v", err)
+		}
+	}
+}
+
+func TestFromImportStdlibDatetimeDatetimeResolves(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from datetime import datetime\ndatetime\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "cannot import name 'datetime' from 'datetime'" {
+			t.Fatalf("unexpected stdlib import diagnostic: %+v", err)
+		}
+	}
+}
+
+func TestNewStatementsDoNotProduceUnexpectedDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "flag = True\nitems = [1]\n\ndef outer():\n    value = 1\n    def inner():\n        nonlocal value\n        global flag\n        assert value, 'bad'\n        del items[0]\n        return value\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if strings.Contains(err.Msg, "unexpected token") || strings.Contains(err.Msg, "undefined name") {
+			t.Fatalf("unexpected semantic diagnostic: %+v", err)
+		}
+	}
+}
+
 func TestCompletionFromExternalModuleExports(t *testing.T) {
 	root := t.TempDir()
 	extRoot := filepath.Join(t.TempDir(), "site-packages")
