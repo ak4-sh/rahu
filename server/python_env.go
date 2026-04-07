@@ -10,6 +10,7 @@ import (
 type pythonEnvInfo struct {
 	Executable string
 	Paths      []string `json:"path"`
+	Builtins   []string `json:"builtins"`
 }
 
 func discoverPythonExecutable(rootPath string) string {
@@ -43,7 +44,7 @@ func discoverPythonEnv(rootPath string) pythonEnvInfo {
 	if python == "" {
 		return pythonEnvInfo{}
 	}
-	cmd := exec.Command(python, "-c", `import json, sys; print(json.dumps({"path": sys.path}))`)
+	cmd := exec.Command(python, "-c", `import json, sys; print(json.dumps({"path": sys.path, "builtins": sorted(sys.builtin_module_names)}))`)
 	if rootPath != "" {
 		cmd.Dir = rootPath
 	}

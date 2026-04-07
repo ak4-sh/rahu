@@ -166,6 +166,10 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		}
 
 	case ast.NodeClassDef:
+		for _, decorator := range r.tree.Decorators(stmt) {
+			r.visitExpr(r.tree.DecoratorExpr(decorator), Read)
+		}
+
 		nameID, bases, body := r.tree.ClassParts(stmt)
 		nameText, _ := r.tree.NameText(nameID)
 
@@ -228,6 +232,10 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		r.selfName = prevSelf
 
 	case ast.NodeFunctionDef:
+		for _, decorator := range r.tree.Decorators(stmt) {
+			r.visitExpr(r.tree.DecoratorExpr(decorator), Read)
+		}
+
 		nameID, args, returnAnnotation, body := r.tree.FunctionPartsWithReturn(stmt)
 		nameText, _ := r.tree.NameText(nameID)
 
@@ -304,6 +312,18 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.visitStmt(inner)
 		}
 
+	case ast.NodeAssert:
+		test, msg := r.tree.AssertParts(stmt)
+		r.visitExpr(test, Read)
+		r.visitExpr(msg, Read)
+
+	case ast.NodeDel:
+		for _, target := range r.tree.DelTargets(stmt) {
+			r.visitExpr(target, Read)
+		}
+
+	case ast.NodeGlobal, ast.NodeNonlocal:
+
 	case ast.NodeFor:
 		target := r.tree.Nodes[stmt].FirstChild
 		iter := ast.NoNode
@@ -353,6 +373,16 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.visitExpr(value, Read)
 		}
 
+	case ast.NodeYield:
+		if value := r.tree.Nodes[stmt].FirstChild; value != ast.NoNode {
+			r.visitExpr(value, Read)
+		}
+
+	case ast.NodeRaise:
+		exc, cause := r.tree.RaiseParts(stmt)
+		r.visitExpr(exc, Read)
+		r.visitExpr(cause, Read)
+
 	case ast.NodePass:
 
 	case ast.NodeBreak:
@@ -374,6 +404,17 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 			r.visitStmt(inner)
 		}
 		for inner := r.tree.Nodes[finallyBlock].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
+			r.visitStmt(inner)
+		}
+
+	case ast.NodeWith:
+		items, body := r.tree.WithParts(stmt)
+		for _, item := range items {
+			contextExpr, asTarget := r.tree.WithItemParts(item)
+			r.visitExpr(contextExpr, Read)
+			r.visitExpr(asTarget, Write)
+		}
+		for inner := r.tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
 			r.visitStmt(inner)
 		}
 
@@ -520,11 +561,31 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
 		return
 
+	case ast.NodeFStringText:
+		return
+
+	case ast.NodeFString:
+		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
+			r.visitExpr(child, Read)
+		}
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+		return
+
+	case ast.NodeFStringExpr:
+		r.visitExpr(r.tree.ChildAt(expr, 0), Read)
+		return
+
 	case ast.NodeBoolean:
 		r.setExprType(expr, BuiltinType(BuiltinSymbol("bool")))
 		return
 
 	case ast.NodeNone, ast.NodeErrExp:
+		return
+
+	case ast.NodeYield:
+		if value := r.tree.Nodes[expr].FirstChild; value != ast.NoNode {
+			r.visitExpr(value, Read)
+		}
 		return
 
 	case ast.NodeBinOp:
@@ -553,6 +614,7 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		for cmp := r.tree.Nodes[left].NextSibling; cmp != ast.NoNode; cmp = r.tree.Nodes[cmp].NextSibling {
 			r.visitExpr(r.tree.Nodes[cmp].FirstChild, Read)
 		}
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("bool")))
 
 	case ast.NodeCall:
 		funcID := r.tree.Nodes[expr].FirstChild
@@ -607,6 +669,9 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 	case ast.NodeListComp:
 		r.visitListComp(expr)
 
+	case ast.NodeDictComp:
+		r.visitDictComp(expr)
+
 	case ast.NodeDict:
 		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
 			r.visitExpr(child, Read)
@@ -615,6 +680,9 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 
 	case ast.NodeKeywordArg:
 		r.visitExpr(r.tree.ChildAt(expr, 1), Read)
+
+	case ast.NodeStarArg, ast.NodeKwStarArg:
+		r.visitExpr(r.tree.ChildAt(expr, 0), Read)
 
 	case ast.NodeSubScript:
 		base := r.tree.Nodes[expr].FirstChild
@@ -654,6 +722,20 @@ func (r *Resolver) visitListComp(expr ast.NodeID) {
 	r.visitExpr(resultExpr, Read)
 	r.current = prev
 	r.setExprType(expr, ListType(r.exprType(resultExpr)))
+}
+
+func (r *Resolver) visitDictComp(expr ast.NodeID) {
+	keyExpr, valueExpr, clauses := r.tree.DictCompParts(expr)
+	compScope := NewScope(r.current, ScopeBlock)
+	prev := r.current
+	r.current = compScope
+	for _, clause := range clauses {
+		r.visitComprehension(clause)
+	}
+	r.visitExpr(keyExpr, Read)
+	r.visitExpr(valueExpr, Read)
+	r.current = prev
+	r.setExprType(expr, DictType(r.exprType(keyExpr), r.exprType(valueExpr)))
 }
 
 func (r *Resolver) visitComprehension(id ast.NodeID) {

@@ -17,20 +17,23 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 
 	for {
 		bp := infixBindingPower(p.current.Type)
+		if isCompareOp(p.current.Type, p.peek.Type) {
+			bp = COMPARE
+		}
 		if bp <= minBP {
 			break
 		}
 
 		opTok := p.current
 
-		if isCompareOp(opTok.Type) {
+		if isCompareOp(opTok.Type, p.peek.Type) {
 			startPos := p.tree.Nodes[left].Start
 			leftID := p.tree.NewNode(a.NodeCompare, startPos, p.tree.Nodes[left].End)
 			p.tree.AddChild(leftID, left)
 
-			for isCompareOp(p.current.Type) {
-				op := tokenTypeToCompareOp(p.current.Type)
-				p.advance()
+			for isCompareOp(p.current.Type, p.peek.Type) {
+				op := tokenTypesToCompareOp(p.current.Type, p.peek.Type)
+				p.advanceBy(compareOpTokenWidth(p.current.Type, p.peek.Type))
 
 				right := p.parseExpression(COMPARE + 1)
 				if right == a.NoNode {
@@ -218,6 +221,9 @@ func (p *Parser) parsePrimary() a.NodeID {
 		p.advance()
 		return ret
 
+	case l.FSTRING:
+		return p.parseFString()
+
 	case l.MINUS:
 		startPos := p.current.Start
 		p.advance()
@@ -260,6 +266,30 @@ func (p *Parser) parsePrimary() a.NodeID {
 		ret := p.tree.NewNode(a.NodeUnaryOp, startPos, endpos)
 		p.tree.Nodes[ret].Data = uint32(a.Not)
 		p.tree.AddChild(ret, expr)
+		return ret
+
+	case l.YIELD:
+		startPos := p.current.Start
+		p.advance()
+		ret := p.tree.NewNode(a.NodeYield, startPos, startPos)
+		if p.current.Type == l.FROM {
+			p.tree.Nodes[ret].Data = 1
+			p.advance()
+		}
+		if p.current.Type == l.NEWLINE || p.current.Type == l.EOF || p.current.Type == l.COMMA || p.current.Type == l.RPAR || p.current.Type == l.RSQB || p.current.Type == l.COLON {
+			return ret
+		}
+		expr := p.parseExpression(LOWEST)
+		if expr == a.NoNode {
+			if p.tree.Nodes[ret].Data == 1 {
+				p.errorCurrent("expected expression after 'yield from'")
+			} else {
+				p.errorCurrent("expected expression after 'yield'")
+			}
+			return ret
+		}
+		p.tree.AddChild(ret, expr)
+		p.tree.Nodes[ret].End = p.tree.Nodes[expr].End
 		return ret
 
 	case l.NONE:

@@ -50,6 +50,27 @@ func TestSingleNumber(t *testing.T) {
 	}
 }
 
+func TestFStringToken(t *testing.T) {
+	input := `f"hello {name}"`
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != FSTRING {
+		t.Fatalf("expected FSTRING, got %v", tok.Type)
+	}
+	if tok.Literal != input {
+		t.Fatalf("unexpected f-string literal: got %q", tok.Literal)
+	}
+}
+
+func TestTripleQuotedFStringToken(t *testing.T) {
+	input := "f'''hello {name}'''"
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != FSTRING {
+		t.Fatalf("expected FSTRING, got %v", tok.Type)
+	}
+}
+
 func TestBasicIndent(t *testing.T) {
 	input := "def foo():\n    pass"
 	want := []TokenType{

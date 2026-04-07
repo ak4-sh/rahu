@@ -40,3 +40,35 @@ func TestSemanticTokensIncludeTryExceptFinallyKeywords(t *testing.T) {
 	assertSemanticToken(t, decoded, 2, 0, 6, "keyword")
 	assertSemanticToken(t, decoded, 4, 0, 7, "keyword")
 }
+
+func TestHoverWorksInsideRaiseCause(t *testing.T) {
+	code := "err = ValueError\ncause = RuntimeError\nraise err from cause\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	hov := mustHoverAt(t, s, uri, 2, 15)
+	content, ok := hov.Contents.(lsp.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hov.Contents)
+	}
+	if !strings.Contains(content.Value, "variable(cause") {
+		t.Fatalf("expected hover on raise cause, got %q", content.Value)
+	}
+}
+
+func TestSemanticTokensIncludeRaiseKeyword(t *testing.T) {
+	code := "raise ValueError\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	tokens, err := s.SemanticTokensFull(&lsp.SemanticTokensParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatalf("unexpected semantic tokens error: %v", err)
+	}
+	decoded := decodeSemanticTokens(tokens)
+	assertSemanticToken(t, decoded, 0, 0, 5, "keyword")
+}

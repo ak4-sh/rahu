@@ -58,6 +58,10 @@ const (
 	LtE                    // <=
 	Gt                     // >
 	GtE                    // >=
+	In                     // in
+	NotIn                  // not in
+	Is                     // is
+	IsNot                  // is not
 )
 
 const (
@@ -94,6 +98,7 @@ const (
 	Div
 	FloorDiv
 	Mod
+	BitOr
 	Pow
 )
 
@@ -109,6 +114,9 @@ const (
 	NodeName
 	NodeNumber
 	NodeString
+	NodeFString
+	NodeFStringText
+	NodeFStringExpr
 	NodeBinOp
 	NodeUnaryOp
 	NodeCall
@@ -123,7 +131,13 @@ const (
 	NodeIf
 	NodeFor
 	NodeWhile
+	NodeAssert
+	NodeDel
+	NodeGlobal
+	NodeNonlocal
 	NodeReturn
+	NodeYield
+	NodeRaise
 	NodePass
 	NodeBreak
 	NodeContinue
@@ -142,12 +156,18 @@ const (
 	NodeAlias
 	NodeSlice
 	NodeKeywordArg
+	NodeStarArg
+	NodeKwStarArg
 	NodeDict
 	NodeAnnAssign
 	NodeTry
 	NodeExcept
 	NodeListComp
+	NodeDictComp
 	NodeComprehension
+	NodeWith
+	NodeWithItem
+	NodeDecorator
 )
 
 const NoNode NodeID = 0
@@ -248,6 +268,42 @@ func (a *AST) AddChild(parent, child NodeID) {
 
 	a.Nodes[p.LastChild].NextSibling = child
 	p.LastChild = child
+}
+
+// PrependChildren attaches children before the existing child list in the given order.
+func (a *AST) PrependChildren(parent NodeID, children ...NodeID) {
+	if parent == NoNode || len(children) == 0 {
+		return
+	}
+
+	valid := make([]NodeID, 0, len(children))
+	for _, child := range children {
+		if child != NoNode {
+			valid = append(valid, child)
+		}
+	}
+	if len(valid) == 0 {
+		return
+	}
+
+	p := &a.Nodes[parent]
+	oldFirst := p.FirstChild
+	oldLast := p.LastChild
+
+	for i, child := range valid {
+		if i+1 < len(valid) {
+			a.Nodes[child].NextSibling = valid[i+1]
+		} else {
+			a.Nodes[child].NextSibling = oldFirst
+		}
+	}
+
+	p.FirstChild = valid[0]
+	if oldFirst == NoNode {
+		p.LastChild = valid[len(valid)-1]
+	} else {
+		p.LastChild = oldLast
+	}
 }
 
 func (a *AST) internName(name string) uint32 {

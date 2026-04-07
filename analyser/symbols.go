@@ -68,6 +68,8 @@ type Symbol struct {
 	Returns      *Type
 	DocString    string
 	DefaultValue string // Text representation of default/initial value
+	IsVarArg     bool
+	IsKwArg      bool
 	Def          ast.NodeID
 	ID           SymbolID
 	URI          lsp.DocumentURI
@@ -122,7 +124,7 @@ func NewBuiltinScope() *Scope {
 
 	// types
 	for _, name := range []string{
-		"int", "str", "float", "list", "tuple", "dict", "set",
+		"bool", "int", "str", "float", "list", "tuple", "dict", "set",
 		"frozenset", "bytes", "bytearray", "complex", "object",
 	} {
 		s.Define(&Symbol{

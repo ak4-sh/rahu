@@ -25,6 +25,7 @@ func (p *Parser) parseIndentedBlock(header string) (a.NodeID, uint32, bool) {
 		}
 	}
 	p.advance()
+	p.consumeBlankLinesBeforeIndent()
 
 	if p.current.Type != l.INDENT {
 		p.errorCurrent("expected indent block after '" + header + "'")
@@ -168,6 +169,70 @@ func (p *Parser) parseTry() a.NodeID {
 	return ret
 }
 
+func (p *Parser) parseWith() a.NodeID {
+	startPos := p.current.Start
+	p.advance()
+
+	ret := p.tree.NewNode(a.NodeWith, startPos, startPos)
+	first := p.parseWithItem()
+	if first == a.NoNode {
+		p.errorCurrent("expected expression after 'with'")
+		p.tree.Nodes[ret].End = p.current.Start
+		return ret
+	}
+	p.tree.AddChild(ret, first)
+
+	for p.current.Type == l.COMMA {
+		p.advance()
+		item := p.parseWithItem()
+		if item == a.NoNode {
+			p.errorCurrent("expected expression after ',' in with statement")
+			break
+		}
+		p.tree.AddChild(ret, item)
+	}
+
+	body, endPos, ok := p.parseIndentedBlock("with")
+	if body != a.NoNode {
+		p.tree.AddChild(ret, body)
+	}
+	if ok || p.tree.Nodes[ret].End == startPos {
+		p.tree.Nodes[ret].End = endPos
+	}
+	return ret
+}
+
+func (p *Parser) parseWithItem() a.NodeID {
+	contextExpr := p.parseExpression(LOWEST)
+	if contextExpr == a.NoNode {
+		return a.NoNode
+	}
+
+	item := p.tree.NewNode(a.NodeWithItem, p.tree.Nodes[contextExpr].Start, p.tree.Nodes[contextExpr].End)
+	p.tree.AddChild(item, contextExpr)
+
+	if p.current.Type != l.AS {
+		return item
+	}
+	p.advance()
+
+	asTarget := p.parseExpression(LOWEST)
+	if asTarget == a.NoNode {
+		p.errorCurrent("expected target after 'as' in with item")
+		return item
+	}
+
+	switch p.tree.Node(asTarget).Kind {
+	case a.NodeName, a.NodeTuple, a.NodeList, a.NodeAttribute, a.NodeSubScript:
+	default:
+		p.error(p.tree.RangeOf(asTarget), "invalid with-item target")
+	}
+
+	p.tree.AddChild(item, asTarget)
+	p.tree.Nodes[item].End = p.tree.Nodes[asTarget].End
+	return item
+}
+
 func (p *Parser) parseFor() a.NodeID {
 	startPos := p.current.Start
 	p.advance()
@@ -220,6 +285,7 @@ func (p *Parser) parseFor() a.NodeID {
 		}
 	}
 	p.advance()
+	p.consumeBlankLinesBeforeIndent()
 
 	if p.current.Type != l.INDENT {
 		p.errorCurrent("expected indent after for statement")
@@ -272,6 +338,7 @@ func (p *Parser) parseFor() a.NodeID {
 			}
 		}
 		p.advance()
+		p.consumeBlankLinesBeforeIndent()
 
 		if p.current.Type != l.INDENT {
 			p.errorCurrent("expected indent block after 'else:'")
@@ -369,6 +436,7 @@ func (p *Parser) parseWhile() a.NodeID {
 		}
 	}
 	p.advance()
+	p.consumeBlankLinesBeforeIndent()
 
 	if p.current.Type != l.INDENT {
 		p.errorCurrent("expected indent after while:")
@@ -605,6 +673,45 @@ func (p *Parser) parseReturn() a.NodeID {
 	return ret
 }
 
+func (p *Parser) parseRaise() a.NodeID {
+	startPos := p.current.Start
+	p.advance()
+	if p.current.Type == l.NEWLINE || p.current.Type == l.EOF {
+		endPos := p.current.Start
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+		}
+		return p.tree.NewNode(a.NodeRaise, startPos, endPos)
+	}
+
+	exc := p.parseExpression(LOWEST)
+	if exc == a.NoNode {
+		p.errorCurrent("expected expression after 'raise'")
+		return p.tree.NewNode(a.NodeRaise, startPos, p.current.Start)
+	}
+
+	ret := p.tree.NewNode(a.NodeRaise, startPos, p.tree.Nodes[exc].End)
+	p.tree.AddChild(ret, exc)
+
+	if p.current.Type == l.FROM {
+		p.advance()
+		cause := p.parseExpression(LOWEST)
+		if cause == a.NoNode {
+			p.errorCurrent("expected expression after 'from' in raise")
+			return ret
+		}
+		p.tree.AddChild(ret, cause)
+		p.tree.Nodes[ret].End = p.tree.Nodes[cause].End
+	}
+
+	p.tree.Nodes[ret].End = p.current.Start
+	if p.current.Type == l.NEWLINE {
+		p.advance()
+	}
+
+	return ret
+}
+
 func (p *Parser) parseIf() a.NodeID {
 	startPos := p.current.Start
 	p.advance()
@@ -642,6 +749,7 @@ func (p *Parser) parseIf() a.NodeID {
 	} else {
 		p.advance()
 	}
+	p.consumeBlankLinesBeforeIndent()
 
 	if p.current.Type != l.INDENT {
 		p.errorCurrent("expected indentation block after if condition")
@@ -726,6 +834,7 @@ func (p *Parser) parseIf() a.NodeID {
 		} else {
 			p.advance()
 		}
+		p.consumeBlankLinesBeforeIndent()
 
 		if p.current.Type != l.INDENT {
 			p.errorCurrent("expected indent block after `else:`")

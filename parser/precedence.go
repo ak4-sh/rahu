@@ -11,6 +11,7 @@ const (
 	NOT
 	COMPARE
 	SUM
+	BITOR
 	PRODUCT
 	PREFIX
 	POW
@@ -20,9 +21,11 @@ func infixBindingPower(t lexer.TokenType) int {
 	switch t {
 	case lexer.PLUS, lexer.MINUS:
 		return SUM
+	case lexer.VBAR:
+		return BITOR
 	case lexer.STAR, lexer.SLASH, lexer.DOUBLESLASH, lexer.PERCENT:
 		return PRODUCT
-	case lexer.EQEQUAL, lexer.NOTEQUAL, lexer.LESS, lexer.LESSEQUAL, lexer.GREATER, lexer.GREATEREQUAL:
+	case lexer.EQEQUAL, lexer.NOTEQUAL, lexer.LESS, lexer.LESSEQUAL, lexer.GREATER, lexer.GREATEREQUAL, lexer.IN, lexer.IS:
 		return COMPARE
 	case lexer.OR:
 		return OR
@@ -35,10 +38,14 @@ func infixBindingPower(t lexer.TokenType) int {
 	}
 }
 
-func isCompareOp(t lexer.TokenType) bool {
+func isCompareOp(t lexer.TokenType, peek lexer.TokenType) bool {
 	switch t {
-	case lexer.EQEQUAL, lexer.NOTEQUAL, lexer.LESS, lexer.LESSEQUAL, lexer.GREATER, lexer.GREATEREQUAL:
+	case lexer.EQEQUAL, lexer.NOTEQUAL, lexer.LESS, lexer.LESSEQUAL, lexer.GREATER, lexer.GREATEREQUAL, lexer.IN:
 		return true
+	case lexer.IS:
+		return true
+	case lexer.NOT:
+		return peek == lexer.IN
 	default:
 		return false
 	}

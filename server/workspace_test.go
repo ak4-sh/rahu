@@ -74,6 +74,53 @@ func TestBuildModuleIndex(t *testing.T) {
 	}
 }
 
+func TestBuildModuleIndexSkipsCommonNonPythonDirs(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "pkg", "mod.py"))
+	writeTestFile(t, filepath.Join(root, ".git", "hooks", "ignored.py"))
+	writeTestFile(t, filepath.Join(root, "node_modules", "pkg", "ignored.py"))
+	writeTestFile(t, filepath.Join(root, ".venv", "lib", "ignored.py"))
+	writeTestFile(t, filepath.Join(root, "vendor", "ignored.py"))
+	writeTestFile(t, filepath.Join(root, "build", "ignored.py"))
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+
+	if _, ok := s.LookupModule("pkg.mod"); !ok {
+		t.Fatal("expected python module outside skipped dirs to be indexed")
+	}
+	for _, name := range []string{".git.hooks.ignored", "node_modules.pkg.ignored", ".venv.lib.ignored", "vendor.ignored", "build.ignored"} {
+		if _, ok := s.LookupModule(name); ok {
+			t.Fatalf("did not expect module in skipped dir to be indexed: %s", name)
+		}
+	}
+}
+
+func TestBuildModuleIndexMixedRepoOnlyIndexesPythonModules(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "scripts", "tool.py"))
+	writeWorkspaceSource(t, filepath.Join(root, "main.go"), "package main\n")
+	writeWorkspaceSource(t, filepath.Join(root, "README.md"), "# docs\n")
+	writeWorkspaceSource(t, filepath.Join(root, "frontend", "app.ts"), "export const app = true\n")
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+
+	if got := len(s.modulesByName); got != 1 {
+		t.Fatalf("unexpected module count: got %d want 1", got)
+	}
+	if _, ok := s.LookupModule("scripts.tool"); !ok {
+		t.Fatal("expected only python module to be indexed")
+	}
+	for _, name := range []string{"main", "README", "frontend.app"} {
+		if _, ok := s.LookupModule(name); ok {
+			t.Fatalf("did not expect non-python module to be indexed: %s", name)
+		}
+	}
+}
+
 func TestInitializeBuildsModuleIndex(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "pkg", "mod.py"))

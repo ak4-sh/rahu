@@ -37,10 +37,28 @@ func (p *Parser) parseFunc() a.NodeID {
 
 	args := a.NoNode
 	seenDefault := false
+	seenVarArg := false
+	seenKwArg := false
+	seenPosOnly := false
 
 	if p.current.Type != l.RPAR {
 		for {
-			if p.current.Type != l.NAME {
+			if p.current.Type == l.SLASH {
+				if seenPosOnly || args == a.NoNode || seenVarArg || seenKwArg {
+					p.errorCurrent("invalid positional-only parameter separator")
+				} else {
+					seenPosOnly = true
+				}
+				p.advance()
+				if p.current.Type == l.COMMA {
+					p.advance()
+					continue
+				}
+				break
+			}
+
+			param, isVarArg, isKwArg := p.parseParameter()
+			if param == a.NoNode {
 				p.errorCurrent("expected parameter name")
 				p.syncTo(l.COMMA, l.RPAR, l.EOF)
 				if p.current.Type == l.COMMA {
@@ -50,44 +68,34 @@ func (p *Parser) parseFunc() a.NodeID {
 				break
 			}
 
-			paramName := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
-			param := p.tree.NewNode(a.NodeParam, p.current.Start, p.current.End)
-			p.tree.AddChild(param, paramName)
-			p.advance()
-
-			if p.current.Type == l.COLON {
-				p.advance()
-
-				annotation := p.parseExpression(LOWEST)
-				if annotation == a.NoNode {
-					p.errorCurrent("expected type annotation after ':'")
-					annotation = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
-				}
-
-				p.tree.AddChild(param, annotation)
-				p.tree.Nodes[param].Data |= 1
-				p.tree.Nodes[param].End = p.tree.Nodes[annotation].End
+			if seenKwArg {
+				p.error(a.Range{Start: p.tree.Nodes[param].Start, End: p.tree.Nodes[param].End}, "parameter after **kwargs is not allowed")
 			}
-
-			if p.current.Type == l.EQUAL {
-				seenDefault = true
-				p.advance()
-
-				defaultExpr := p.parseExpression(LOWEST)
-				if defaultExpr == a.NoNode {
-					p.errorCurrent("expected expression after '='")
-					defaultExpr = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+			if isVarArg {
+				if seenVarArg {
+					p.error(a.Range{Start: p.tree.Nodes[param].Start, End: p.tree.Nodes[param].End}, "duplicate *args parameter")
 				}
-
-				p.tree.AddChild(param, defaultExpr)
-				p.tree.Nodes[param].Data |= 2
-				p.tree.Nodes[param].End = p.tree.Nodes[defaultExpr].End
-			} else if seenDefault {
-				p.errorCurrent("non-default argument follows default argument")
-				p.syncTo(l.COMMA, l.RPAR, l.EOF)
-				if p.current.Type == l.COMMA {
-					p.advance()
-					continue
+				seenVarArg = true
+				seenDefault = false
+			}
+			if isKwArg {
+				if seenKwArg {
+					p.error(a.Range{Start: p.tree.Nodes[param].Start, End: p.tree.Nodes[param].End}, "duplicate **kwargs parameter")
+				}
+				seenKwArg = true
+				seenDefault = false
+			}
+			if !isVarArg && !isKwArg {
+				_, _, defaultExpr := p.tree.ParamParts(param)
+				if defaultExpr != a.NoNode {
+					seenDefault = true
+				} else if seenDefault {
+					p.errorCurrent("non-default argument follows default argument")
+					p.syncTo(l.COMMA, l.RPAR, l.EOF)
+					if p.current.Type == l.COMMA {
+						p.advance()
+						continue
+					}
 				}
 			}
 
@@ -229,4 +237,117 @@ func (p *Parser) parseFunc() a.NodeID {
 	p.tree.AddChild(ret, body)
 
 	return ret
+}
+
+func (p *Parser) parseParameter() (param a.NodeID, isVarArg bool, isKwArg bool) {
+	flags := uint32(0)
+	start := p.current.Start
+	if p.current.Type == l.STAR {
+		isVarArg = true
+		flags |= a.ParamFlagIsVarArg
+		start = p.current.Start
+		p.advance()
+		if p.current.Type != l.NAME {
+			p.errorCurrent("expected parameter name after '*'")
+			return a.NoNode, false, false
+		}
+	} else if p.current.Type == l.DOUBLESTAR {
+		isKwArg = true
+		flags |= a.ParamFlagIsKwArg
+		start = p.current.Start
+		p.advance()
+		if p.current.Type != l.NAME {
+			p.errorCurrent("expected parameter name after '**'")
+			return a.NoNode, false, false
+		}
+	} else if p.current.Type != l.NAME {
+		return a.NoNode, false, false
+	}
+
+	paramName := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
+	param = p.tree.NewNode(a.NodeParam, start, p.current.End)
+	p.tree.AddChild(param, paramName)
+	p.advance()
+
+	if p.current.Type == l.COLON {
+		p.advance()
+
+		annotation := p.parseExpression(LOWEST)
+		if annotation == a.NoNode {
+			p.errorCurrent("expected type annotation after ':'")
+			annotation = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+		}
+
+		p.tree.AddChild(param, annotation)
+		flags |= a.ParamFlagHasAnnotation
+		p.tree.Nodes[param].End = p.tree.Nodes[annotation].End
+	}
+
+	if p.current.Type == l.EQUAL {
+		if isVarArg {
+			p.errorCurrent("*args cannot have a default value")
+		} else if isKwArg {
+			p.errorCurrent("**kwargs cannot have a default value")
+		}
+		p.advance()
+
+		defaultExpr := p.parseExpression(LOWEST)
+		if defaultExpr == a.NoNode {
+			p.errorCurrent("expected expression after '='")
+			defaultExpr = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+		}
+
+		if !isVarArg && !isKwArg {
+			p.tree.AddChild(param, defaultExpr)
+			flags |= a.ParamFlagHasDefault
+		}
+		p.tree.Nodes[param].End = p.tree.Nodes[defaultExpr].End
+	}
+
+	p.tree.Nodes[param].Data = flags
+	return param, isVarArg, isKwArg
+}
+
+func (p *Parser) parseDecoratedDef() a.NodeID {
+	decorators := make([]a.NodeID, 0, 2)
+	startPos := p.current.Start
+
+	for p.current.Type == l.AT {
+		decoratorStart := p.current.Start
+		p.advance()
+
+		expr := p.parseExpression(LOWEST)
+		if expr == a.NoNode {
+			p.errorCurrent("expected decorator expression after '@'")
+			return p.tree.NewNode(a.NodeErrStmt, startPos, p.current.End)
+		}
+
+		decorator := p.tree.NewNode(a.NodeDecorator, decoratorStart, p.tree.Nodes[expr].End)
+		p.tree.AddChild(decorator, expr)
+		decorators = append(decorators, decorator)
+
+		if p.current.Type != l.NEWLINE {
+			p.errorCurrent("expected newline after decorator")
+			p.syncTo(l.NEWLINE, l.EOF)
+			if p.current.Type != l.NEWLINE {
+				return p.tree.NewNode(a.NodeErrStmt, startPos, p.current.End)
+			}
+		}
+		p.advance()
+	}
+
+	var def a.NodeID
+	switch p.current.Type {
+	case l.DEF:
+		def = p.parseFunc()
+	case l.CLASS:
+		def = p.parseClass()
+	default:
+		p.errorCurrent("expected function or class definition after decorator")
+		return p.tree.NewNode(a.NodeErrStmt, startPos, p.current.End)
+	}
+
+	p.tree.PrependChildren(def, decorators...)
+	p.tree.Nodes[def].Start = startPos
+	return def
 }

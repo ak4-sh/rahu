@@ -171,6 +171,121 @@ func cloneImportedSymbol(local, target *analyser.Symbol) {
 	}
 }
 
+func cloneSymbolForImport(target *analyser.Symbol) *analyser.Symbol {
+	if target == nil {
+		return nil
+	}
+	clone := *target
+	clone.Scope = nil
+	return &clone
+}
+
+func isStarImportAlias(tree *ast.AST, alias ast.NodeID) bool {
+	if tree == nil || alias == ast.NoNode {
+		return false
+	}
+	target, _ := tree.AliasParts(alias)
+	name, ok := tree.NameText(target)
+	return ok && name == "*"
+}
+
+func reResolveSnapshot(snapshot *ModuleSnapshot) {
+	if snapshot == nil || snapshot.Tree == nil || snapshot.Global == nil {
+		return
+	}
+	resolver, semErrs := analyser.Resolve(snapshot.Tree, snapshot.Global)
+	snapshot.Symbols = resolver.Resolved
+	snapshot.AttrSymbols = resolver.ResolvedAttr
+	snapshot.SemErrs = semErrs
+}
+
+func starImportExports(snapshot *ModuleSnapshot) map[string]*analyser.Symbol {
+	if snapshot == nil || snapshot.Exports == nil {
+		return nil
+	}
+	if explicit := explicitStarImportExports(snapshot); len(explicit) != 0 {
+		return explicit
+	}
+	exports := make(map[string]*analyser.Symbol)
+	for name, sym := range snapshot.Exports {
+		if sym == nil || strings.HasPrefix(name, "_") {
+			continue
+		}
+		exports[name] = sym
+	}
+	return exports
+}
+
+func explicitStarImportExports(snapshot *ModuleSnapshot) map[string]*analyser.Symbol {
+	if snapshot == nil || snapshot.Tree == nil || snapshot.Exports == nil {
+		return nil
+	}
+	names := staticAllNames(snapshot.Tree)
+	if len(names) == 0 {
+		return nil
+	}
+	exports := make(map[string]*analyser.Symbol, len(names))
+	for _, name := range names {
+		sym, ok := snapshot.Exports[name]
+		if !ok || sym == nil {
+			continue
+		}
+		exports[name] = sym
+	}
+	return exports
+}
+
+func staticAllNames(tree *ast.AST) []string {
+	if tree == nil || tree.Root == ast.NoNode {
+		return nil
+	}
+	var names []string
+	for stmt := tree.Node(tree.Root).FirstChild; stmt != ast.NoNode; stmt = tree.Node(stmt).NextSibling {
+		switch tree.Node(stmt).Kind {
+		case ast.NodeAssign:
+			value := tree.Node(stmt).FirstChild
+			for target := tree.Node(value).NextSibling; target != ast.NoNode; target = tree.Node(target).NextSibling {
+				name, ok := tree.NameText(target)
+				if !ok || name != "__all__" {
+					continue
+				}
+				if explicit := stringSequenceLiteralValues(tree, value); len(explicit) != 0 {
+					names = explicit
+				}
+			}
+		case ast.NodeAnnAssign:
+			target, _, value := tree.AnnAssignParts(stmt)
+			name, ok := tree.NameText(target)
+			if !ok || name != "__all__" || value == ast.NoNode {
+				continue
+			}
+			if explicit := stringSequenceLiteralValues(tree, value); len(explicit) != 0 {
+				names = explicit
+			}
+		}
+	}
+	return names
+}
+
+func stringSequenceLiteralValues(tree *ast.AST, id ast.NodeID) []string {
+	if tree == nil || id == ast.NoNode {
+		return nil
+	}
+	kind := tree.Node(id).Kind
+	if kind != ast.NodeList && kind != ast.NodeTuple {
+		return nil
+	}
+	values := make([]string, 0, tree.ChildCount(id))
+	for child := tree.Node(id).FirstChild; child != ast.NoNode; child = tree.Node(child).NextSibling {
+		text, ok := tree.StringText(child)
+		if !ok {
+			return nil
+		}
+		values = append(values, text)
+	}
+	return values
+}
+
 func extractExports(global *analyser.Scope) map[string]*analyser.Symbol {
 	if global == nil {
 		return nil
@@ -185,6 +300,31 @@ func extractExports(global *analyser.Scope) map[string]*analyser.Symbol {
 			continue
 		}
 		exports[name] = sym
+	}
+	return exports
+}
+
+func (s *Server) augmentExportsFromInterpreter(snapshot *ModuleSnapshot) map[string]*analyser.Symbol {
+	if snapshot == nil {
+		return nil
+	}
+	exports := snapshot.Exports
+	if exports == nil {
+		exports = make(map[string]*analyser.Symbol)
+	}
+	members, ok := s.pythonModuleMembers(snapshot.Name)
+	if !ok {
+		return exports
+	}
+	span := moduleDefSpan(snapshot)
+	for _, name := range members {
+		if !isValidSyntheticIdentifier(name) {
+			continue
+		}
+		if _, exists := exports[name]; exists {
+			continue
+		}
+		exports[name] = &analyser.Symbol{Name: name, Kind: analyser.SymVariable, URI: snapshot.URI, Span: span}
 	}
 	return exports
 }
@@ -211,6 +351,7 @@ func (s *Server) buildBaseModuleSnapshot(name string, uri lsp.DocumentURI, path,
 	}
 	snapshot.Imports = s.extractImportsForModule(tree, uri)
 	snapshot.Exports = extractExports(snapshot.Global)
+	snapshot.Exports = s.augmentExportsFromInterpreter(snapshot)
 	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	return snapshot
 }
@@ -460,8 +601,11 @@ func (s *Server) buildModuleSnapshot(name string, uri lsp.DocumentURI, path, tex
 		s.depsMu.Unlock()
 	}
 
-	snapshot.SemErrs = append(snapshot.SemErrs, s.bindWorkspaceImports(snapshot.Tree, snapshot.Defs, uri)...)
+	importErrs := s.bindWorkspaceImports(snapshot.Tree, snapshot.Global, snapshot.Defs, uri)
+	reResolveSnapshot(snapshot)
+	snapshot.SemErrs = append(snapshot.SemErrs, importErrs...)
 	snapshot.Exports = extractExports(snapshot.Global)
+	snapshot.Exports = s.augmentExportsFromInterpreter(snapshot)
 	snapshot.ExportHash = computeExportHash(snapshot.Exports)
 	return snapshot
 }
@@ -479,6 +623,9 @@ func (s *Server) buildBaseSnapshotForModule(mod ModuleFile) (*ModuleSnapshot, bo
 		text = openDoc.Text
 		lineIndex = openDoc.LineIndex
 		openDoc.mu.RUnlock()
+	} else if syntheticText, syntheticLineIndex, ok := s.syntheticModuleSource(mod); ok {
+		text = syntheticText
+		lineIndex = syntheticLineIndex
 	} else {
 		bytes, err := os.ReadFile(mod.Path)
 		if err != nil {
@@ -533,6 +680,9 @@ func (s *Server) analyzeModuleFile(mod ModuleFile) (*ModuleSnapshot, bool) {
 		text = openDoc.Text
 		lineIndex = openDoc.LineIndex
 		openDoc.mu.RUnlock()
+	} else if syntheticText, syntheticLineIndex, ok := s.syntheticModuleSource(mod); ok {
+		text = syntheticText
+		lineIndex = syntheticLineIndex
 	} else {
 		bytes, err := os.ReadFile(mod.Path)
 		if err != nil {
@@ -617,6 +767,9 @@ func (s *Server) rebuildModuleByURI(uri lsp.DocumentURI) (*ModuleSnapshot, bool)
 	if openDoc := s.Get(uri); openDoc != nil {
 		text = openDoc.Text
 		lineIndex = openDoc.LineIndex
+	} else if syntheticText, syntheticLineIndex, ok := s.syntheticModuleSource(mod); ok {
+		text = syntheticText
+		lineIndex = syntheticLineIndex
 	} else {
 		bytes, err := os.ReadFile(mod.Path)
 		if err != nil {
@@ -724,11 +877,11 @@ func missingImportNameError(span ast.Range, moduleName, name string) analyser.Se
 	}
 }
 
-func (s *Server) bindWorkspaceImports(tree *ast.AST, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI) []analyser.SemanticError {
-	return s.bindWorkspaceImportsWithLookup(tree, defs, importerURI, s.analyzeModuleByName)
+func (s *Server) bindWorkspaceImports(tree *ast.AST, global *analyser.Scope, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI) []analyser.SemanticError {
+	return s.bindWorkspaceImportsWithLookup(tree, global, defs, importerURI, s.analyzeModuleByName)
 }
 
-func (s *Server) bindWorkspaceImportsWithLookup(tree *ast.AST, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI, lookup moduleSnapshotLookup) []analyser.SemanticError {
+func (s *Server) bindWorkspaceImportsWithLookup(tree *ast.AST, global *analyser.Scope, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI, lookup moduleSnapshotLookup) []analyser.SemanticError {
 	if tree == nil || tree.Root == ast.NoNode {
 		return nil
 	}
@@ -740,7 +893,7 @@ func (s *Server) bindWorkspaceImportsWithLookup(tree *ast.AST, defs map[ast.Node
 		case ast.NodeImport:
 			errs = append(errs, s.bindImportStmtWithLookup(tree, stmt, defs, lookup)...)
 		case ast.NodeFromImport:
-			errs = append(errs, s.bindFromImportStmtWithLookup(tree, stmt, defs, importerURI, lookup)...)
+			errs = append(errs, s.bindFromImportStmtWithLookup(tree, stmt, global, defs, importerURI, lookup)...)
 		}
 	}
 
@@ -794,11 +947,11 @@ func (s *Server) bindImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, defs m
 	return errs
 }
 
-func (s *Server) bindFromImportStmt(tree *ast.AST, stmt ast.NodeID, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI) []analyser.SemanticError {
-	return s.bindFromImportStmtWithLookup(tree, stmt, defs, importerURI, s.analyzeModuleByName)
+func (s *Server) bindFromImportStmt(tree *ast.AST, stmt ast.NodeID, global *analyser.Scope, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI) []analyser.SemanticError {
+	return s.bindFromImportStmtWithLookup(tree, stmt, global, defs, importerURI, s.analyzeModuleByName)
 }
 
-func (s *Server) bindFromImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI, lookup moduleSnapshotLookup) []analyser.SemanticError {
+func (s *Server) bindFromImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, global *analyser.Scope, defs map[ast.NodeID]*analyser.Symbol, importerURI lsp.DocumentURI, lookup moduleSnapshotLookup) []analyser.SemanticError {
 	module, aliases := tree.FromImportParts(stmt)
 	moduleName, ok := s.resolveImportModuleName(importerURI, tree, module, tree.Node(stmt).Data)
 	if !ok {
@@ -813,6 +966,23 @@ func (s *Server) bindFromImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, de
 	var errs []analyser.SemanticError
 
 	for _, alias := range aliases {
+		if isStarImportAlias(tree, alias) {
+			for name, remote := range starImportExports(snapshot) {
+				if global == nil || remote == nil {
+					continue
+				}
+				if _, exists := global.LookupLocal(name); exists {
+					continue
+				}
+				local := cloneSymbolForImport(remote)
+				if local == nil {
+					continue
+				}
+				local.Name = name
+				_ = global.Define(local)
+			}
+			continue
+		}
 		target, asName := tree.AliasParts(alias)
 		name, ok := tree.NameText(target)
 		if !ok {
@@ -829,11 +999,27 @@ func (s *Server) bindFromImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, de
 		local.Span = ast.Range{}
 		local.URI = ""
 		remote, ok := lookupExport(snapshot, name)
-		if !ok || remote == nil {
+		if ok && remote != nil {
+			cloneImportedSymbol(local, remote)
+			continue
+		}
+
+		submoduleName := moduleName + "." + name
+		submodule, ok := lookup(submoduleName)
+		if !ok || submodule == nil {
 			errs = append(errs, missingImportNameError(tree.RangeOf(target), moduleName, name))
 			continue
 		}
-		cloneImportedSymbol(local, remote)
+
+		local.Kind = analyser.SymModule
+		local.URI = submodule.URI
+		local.Span = moduleDefSpan(submodule)
+		local.DocString = ""
+		local.Inner = nil
+		local.Attrs = nil
+		local.Members = nil
+		local.Bases = nil
+		local.InstanceOf = nil
 	}
 
 	return errs

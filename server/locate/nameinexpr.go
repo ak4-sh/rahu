@@ -33,8 +33,18 @@ func locateInExpr(tree *ast.AST, expr ast.NodeID, pos int, mode locateMode) Resu
 		}
 		return locateInExpr(tree, right, pos, mode)
 
-	case ast.NodeNumber, ast.NodeString, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+	case ast.NodeNumber, ast.NodeString, ast.NodeFStringText, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
 		return Result{}
+
+	case ast.NodeFString:
+		for child := tree.Nodes[expr].FirstChild; child != ast.NoNode; child = tree.Nodes[child].NextSibling {
+			if res := locateInExpr(tree, child, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodeFStringExpr:
+		return locateInExpr(tree, tree.ChildAt(expr, 0), pos, mode)
 
 	case ast.NodeTuple, ast.NodeList, ast.NodeBooleanOp, ast.NodeCall:
 		for child := tree.Nodes[expr].FirstChild; child != ast.NoNode; child = tree.Nodes[child].NextSibling {
@@ -43,9 +53,29 @@ func locateInExpr(tree *ast.AST, expr ast.NodeID, pos int, mode locateMode) Resu
 			}
 		}
 
+	case ast.NodeKeywordArg:
+		return locateInExpr(tree, tree.ChildAt(expr, 1), pos, mode)
+
+	case ast.NodeStarArg, ast.NodeKwStarArg:
+		return locateInExpr(tree, tree.ChildAt(expr, 0), pos, mode)
+
 	case ast.NodeListComp:
 		resultExpr, clauses := tree.ListCompParts(expr)
 		if res := locateInExpr(tree, resultExpr, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		for _, clause := range clauses {
+			if res := locateInExpr(tree, clause, pos, mode); res.Kind != NoResult {
+				return res
+			}
+		}
+
+	case ast.NodeDictComp:
+		keyExpr, valueExpr, clauses := tree.DictCompParts(expr)
+		if res := locateInExpr(tree, keyExpr, pos, mode); res.Kind != NoResult {
+			return res
+		}
+		if res := locateInExpr(tree, valueExpr, pos, mode); res.Kind != NoResult {
 			return res
 		}
 		for _, clause := range clauses {

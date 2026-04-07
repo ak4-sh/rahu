@@ -96,18 +96,33 @@ func (b *ScopeBuilder) visitStmt(stmt ast.NodeID) {
 		b.visitFor(stmt)
 	case ast.NodeWhile:
 		b.visitWhile(stmt)
+	case ast.NodeAssert:
+		test, msg := b.tree.AssertParts(stmt)
+		b.visitExpr(test)
+		b.visitExpr(msg)
+	case ast.NodeDel:
+		for _, target := range b.tree.DelTargets(stmt) {
+			b.visitExpr(target)
+		}
+	case ast.NodeGlobal, ast.NodeNonlocal:
 	case ast.NodeClassDef:
 		b.visitClassDef(stmt)
 	case ast.NodeTry:
 		b.visitTry(stmt)
 	case ast.NodeExcept:
 		b.visitExcept(stmt)
+	case ast.NodeWith:
+		b.visitWith(stmt)
 	case ast.NodeExprStmt:
 		b.visitExpr(b.tree.Nodes[stmt].FirstChild)
 	case ast.NodeReturn:
 		if value := b.tree.Nodes[stmt].FirstChild; value != ast.NoNode {
 			b.visitExpr(value)
 		}
+	case ast.NodeRaise:
+		exc, cause := b.tree.RaiseParts(stmt)
+		b.visitExpr(exc)
+		b.visitExpr(cause)
 	case ast.NodeAugAssign:
 		b.visitAugAssign(stmt)
 	case ast.NodeImport:
@@ -158,6 +173,9 @@ func (b *ScopeBuilder) visitFromImport(id ast.NodeID) {
 	_, aliases := b.tree.FromImportParts(id)
 	for _, alias := range aliases {
 		target, asName := b.tree.AliasParts(alias)
+		if name, ok := b.tree.NameText(target); ok && name == "*" {
+			continue
+		}
 		bound := asName
 		if bound == ast.NoNode {
 			bound = target
@@ -217,11 +235,31 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 	}
 
 	switch b.tree.Node(id).Kind {
-	case ast.NodeName, ast.NodeNumber, ast.NodeString, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+	case ast.NodeName, ast.NodeNumber, ast.NodeString, ast.NodeFStringText, ast.NodeBoolean, ast.NodeNone, ast.NodeErrExp:
+		return
+
+	case ast.NodeYield:
+		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
+			b.visitExpr(child)
+		}
+		return
+
+	case ast.NodeFString:
+		for child := b.tree.Nodes[id].FirstChild; child != ast.NoNode; child = b.tree.Nodes[child].NextSibling {
+			b.visitExpr(child)
+		}
+		return
+
+	case ast.NodeFStringExpr:
+		b.visitExpr(b.tree.ChildAt(id, 0))
 		return
 
 	case ast.NodeListComp:
 		b.visitListComp(id)
+		return
+
+	case ast.NodeDictComp:
+		b.visitDictComp(id)
 		return
 
 	case ast.NodeComprehension:
@@ -235,6 +273,9 @@ func (b *ScopeBuilder) visitExpr(id ast.NodeID) {
 
 	case ast.NodeKeywordArg:
 		b.visitExpr(b.tree.ChildAt(id, 1))
+
+	case ast.NodeStarArg, ast.NodeKwStarArg:
+		b.visitExpr(b.tree.ChildAt(id, 0))
 
 	case ast.NodeSubScript:
 		base := b.tree.Nodes[id].FirstChild
@@ -307,6 +348,22 @@ func (b *ScopeBuilder) visitListComp(id ast.NodeID) {
 		b.visitComprehension(clause)
 	}
 	b.visitExpr(expr)
+	b.current = prev
+	b.currentClass = prevClass
+}
+
+func (b *ScopeBuilder) visitDictComp(id ast.NodeID) {
+	key, value, clauses := b.tree.DictCompParts(id)
+	compScope := NewScope(b.current, ScopeBlock)
+	prev := b.current
+	prevClass := b.currentClass
+	b.current = compScope
+	b.currentClass = nil
+	for _, clause := range clauses {
+		b.visitComprehension(clause)
+	}
+	b.visitExpr(key)
+	b.visitExpr(value)
 	b.current = prev
 	b.currentClass = prevClass
 }
@@ -414,6 +471,20 @@ func (b *ScopeBuilder) visitExcept(id ast.NodeID) {
 	}
 }
 
+func (b *ScopeBuilder) visitWith(id ast.NodeID) {
+	items, body := b.tree.WithParts(id)
+	for _, item := range items {
+		contextExpr, asTarget := b.tree.WithItemParts(item)
+		b.visitExpr(contextExpr)
+		b.defineTargetPattern(asTarget)
+	}
+	if body != ast.NoNode {
+		for stmt := b.tree.Node(body).FirstChild; stmt != ast.NoNode; stmt = b.tree.Node(stmt).NextSibling {
+			b.visitStmt(stmt)
+		}
+	}
+}
+
 func (b *ScopeBuilder) visitAssign(id ast.NodeID) {
 	firstValue := b.tree.Nodes[id].FirstChild
 	value := firstValue
@@ -489,6 +560,10 @@ func (b *ScopeBuilder) visitAnnAssign(id ast.NodeID) {
 }
 
 func (b *ScopeBuilder) visitClassDef(id ast.NodeID) {
+	for _, decorator := range b.tree.Decorators(id) {
+		b.visitExpr(b.tree.DecoratorExpr(decorator))
+	}
+
 	name, _, body := b.tree.ClassParts(id)
 	nameText, _ := b.tree.NameText(name)
 	if nameText == "<incomplete>" {
@@ -526,6 +601,10 @@ func (b *ScopeBuilder) visitClassDef(id ast.NodeID) {
 }
 
 func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
+	for _, decorator := range b.tree.Decorators(id) {
+		b.visitExpr(b.tree.DecoratorExpr(decorator))
+	}
+
 	name, args, body := b.tree.FunctionParts(id)
 	nameText, _ := b.tree.NameText(name)
 	if nameText == "<incomplete>" {
@@ -567,6 +646,11 @@ func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
 			sym := b.define(b.current, paramName, SymParameter, b.tree.RangeOf(paramName))
 			if sym != nil && def != ast.NoNode {
 				sym.DefaultValue = b.extractValue(def)
+				sym.IsVarArg = b.tree.ParamIsVarArg(arg)
+				sym.IsKwArg = b.tree.ParamIsKwArg(arg)
+			} else if sym != nil {
+				sym.IsVarArg = b.tree.ParamIsVarArg(arg)
+				sym.IsKwArg = b.tree.ParamIsKwArg(arg)
 			}
 			if annotation != ast.NoNode {
 				b.visitExpr(annotation)

@@ -16,8 +16,9 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 	p.advance()
 
 	seenKeyword := false
+	seenKwStar := false
 	if p.current.Type != l.RPAR {
-		first := p.parseCallArg(&seenKeyword)
+		first := p.parseCallArg(&seenKeyword, &seenKwStar)
 		if first == a.NoNode {
 			p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
 			end := p.current.End
@@ -38,7 +39,7 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 			if p.current.Type == l.RPAR {
 				break
 			}
-			arg := p.parseCallArg(&seenKeyword)
+			arg := p.parseCallArg(&seenKeyword, &seenKwStar)
 
 			if arg == a.NoNode {
 				p.syncTo(l.RPAR, l.NEWLINE, l.EOF)
@@ -73,8 +74,38 @@ func (p *Parser) parseCall(funcExpr a.NodeID) a.NodeID {
 	return callID
 }
 
-func (p *Parser) parseCallArg(seenKeyword *bool) a.NodeID {
+func (p *Parser) parseCallArg(seenKeyword *bool, seenKwStar *bool) a.NodeID {
+	if p.current.Type == l.STAR {
+		start := p.current.Start
+		p.advance()
+		value := p.parseExpression(LOWEST)
+		if value == a.NoNode {
+			p.errorCurrent("expected expression after '*' in call argument")
+			return a.NoNode
+		}
+		arg := p.tree.NewNode(a.NodeStarArg, start, p.tree.Nodes[value].End)
+		p.tree.AddChild(arg, value)
+		return arg
+	}
+
+	if p.current.Type == l.DOUBLESTAR {
+		start := p.current.Start
+		p.advance()
+		value := p.parseExpression(LOWEST)
+		if value == a.NoNode {
+			p.errorCurrent("expected expression after '**' in call argument")
+			return a.NoNode
+		}
+		arg := p.tree.NewNode(a.NodeKwStarArg, start, p.tree.Nodes[value].End)
+		p.tree.AddChild(arg, value)
+		*seenKwStar = true
+		return arg
+	}
+
 	if p.current.Type == l.NAME && p.peek.Type == l.EQUAL {
+		if *seenKwStar {
+			p.error(a.Range{Start: p.current.Start, End: p.current.End}, "keyword argument follows **kwargs")
+		}
 		keyword := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
 		start := p.current.Start
 		p.advanceBy(2)
@@ -95,6 +126,10 @@ func (p *Parser) parseCallArg(seenKeyword *bool) a.NodeID {
 	arg := p.parseExpression(LOWEST)
 	if arg == a.NoNode {
 		return a.NoNode
+	}
+	if *seenKwStar {
+		p.error(a.Range{Start: p.tree.Nodes[arg].Start, End: p.tree.Nodes[arg].End}, "positional argument follows **kwargs")
+		return arg
 	}
 	if *seenKeyword {
 		p.error(a.Range{Start: p.tree.Nodes[arg].Start, End: p.tree.Nodes[arg].End}, "positional argument follows keyword argument")
