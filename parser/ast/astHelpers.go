@@ -196,6 +196,35 @@ func (a *AST) AnnAssignParts(id NodeID) (target, annotation, value NodeID) {
 	return target, annotation, value
 }
 
+func (a *AST) AssertParts(id NodeID) (test, msg NodeID) {
+	if id == NoNode || a.Nodes[id].Kind != NodeAssert {
+		return NoNode, NoNode
+	}
+	test = a.Nodes[id].FirstChild
+	if test == NoNode {
+		return NoNode, NoNode
+	}
+	msg = a.Nodes[test].NextSibling
+	return test, msg
+}
+
+func (a *AST) DelTargets(id NodeID) []NodeID {
+	if id == NoNode || a.Nodes[id].Kind != NodeDel {
+		return nil
+	}
+	return a.Children(id)
+}
+
+func (a *AST) NameList(id NodeID) []NodeID {
+	if id == NoNode {
+		return nil
+	}
+	if a.Nodes[id].Kind != NodeGlobal && a.Nodes[id].Kind != NodeNonlocal {
+		return nil
+	}
+	return a.Children(id)
+}
+
 // FunctionParts returns the typed children of a function node.
 func (a *AST) FunctionParts(id NodeID) (name, args, body NodeID) {
 	name, args, _, body = a.FunctionPartsWithReturn(id)
