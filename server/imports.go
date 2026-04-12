@@ -939,7 +939,7 @@ func (s *Server) bindImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, defs m
 		local.DocString = ""
 		local.Inner = nil
 		local.Attrs = nil
-		local.Members = nil
+		local.Members = snapshot.Global
 		local.Bases = nil
 		local.InstanceOf = nil
 	}
@@ -1017,7 +1017,7 @@ func (s *Server) bindFromImportStmtWithLookup(tree *ast.AST, stmt ast.NodeID, gl
 		local.DocString = ""
 		local.Inner = nil
 		local.Attrs = nil
-		local.Members = nil
+		local.Members = submodule.Global
 		local.Bases = nil
 		local.InstanceOf = nil
 	}

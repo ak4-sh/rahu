@@ -265,6 +265,84 @@ func TestHoverImportPackageUsesInitModule(t *testing.T) {
 	}
 }
 
+func TestCompletionInheritedMembersFromImportedBase(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "class Bar:\n    def base(self):\n        pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg.mod import Bar\n\nclass Foo(Bar):\n    pass\n\nitem = Foo()\nitem.\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 6, Character: 5}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "base")
+}
+
+func TestCompletionInheritedMembersFromImportedQualifiedBase(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "mod.py"), "class Bar:\n    def base(self):\n        pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "import pkg.mod as mod\n\nclass Foo(mod.Bar):\n    pass\n\nitem = Foo()\nitem.\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 6, Character: 5}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "base")
+}
+
+func TestCompletionInheritedMembersFromImportedSubmoduleBase(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "__init__.py"), "")
+	writeWorkspaceFile(t, filepath.Join(root, "pkg", "submod.py"), "class Bar:\n    def base(self):\n        pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from pkg import submod\n\nclass Foo(submod.Bar):\n    pass\n\nitem = Foo()\nitem.\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 6, Character: 5}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "base")
+}
+
+func TestCompletionInheritedMembersFromExternalQualifiedBase(t *testing.T) {
+	root := t.TempDir()
+	extRoot := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(extRoot, "extpkg", "mod.py"), "class Bar:\n    def base(self):\n        pass\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "import extpkg.mod as mod\n\nclass Foo(mod.Bar):\n    pass\n\nitem = Foo()\nitem.\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	items, err := s.Completion(&lsp.CompletionParams{TextDocument: lsp.TextDocumentIdentifier{URI: mainURI}, Position: lsp.Position{Line: 6, Character: 5}})
+	if err != nil {
+		t.Fatalf("unexpected completion error: %v", err)
+	}
+	assertCompletionLabel(t, items, "base")
+}
+
 func TestHoverShowsInferredInstanceType(t *testing.T) {
 	code := "class Foo:\n    pass\n\nx = Foo()\nx\n"
 	s := New(nil)
@@ -646,6 +724,26 @@ func TestFromImportStdlibDatetimeDatetimeResolves(t *testing.T) {
 	for _, err := range s.Get(mainURI).SemErrs {
 		if err.Msg == "cannot import name 'datetime' from 'datetime'" {
 			t.Fatalf("unexpected stdlib import diagnostic: %+v", err)
+		}
+	}
+}
+
+func TestImportedVersionStringSplitDoesNotReportUndefinedAttribute(t *testing.T) {
+	root := t.TempDir()
+	extRoot := filepath.Join(t.TempDir(), "site-packages")
+	writeWorkspaceFile(t, filepath.Join(extRoot, "urllib3", "__init__.py"), "__version__ = \"1.26.0\"\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from urllib3 import __version__ as urllib3_version\n\nis_urllib3_1 = int(urllib3_version.split(\".\")[0]) == 1\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServerWithExternalRoots(t, root, extRoot)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	for _, err := range s.Get(mainURI).SemErrs {
+		if err.Msg == "undefined attribute: split" || err.Msg == "undefined name: urllib3_version" {
+			t.Fatalf("unexpected imported version diagnostic: %+v", err)
 		}
 	}
 }

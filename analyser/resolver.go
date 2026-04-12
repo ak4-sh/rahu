@@ -184,24 +184,8 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		r.Resolved[nameID] = classSym
 
 		for baseExpr := r.tree.Nodes[bases].FirstChild; baseExpr != ast.NoNode; baseExpr = r.tree.Nodes[baseExpr].NextSibling {
-			if baseExpr == ast.NoNode {
-				continue
-			}
-
-			if r.tree.Node(baseExpr).Kind != ast.NodeName {
-				r.error(r.tree.RangeOf(baseExpr), "unsupported base class expression")
-				continue
-			}
-
-			baseName, _ := r.tree.NameText(baseExpr)
-			baseSym, ok := r.current.Lookup(baseName)
-			if !ok || baseSym == nil {
-				r.error(r.tree.RangeOf(baseExpr), "undefined base class: "+baseName)
-				continue
-			}
-
-			if baseSym.Kind != SymClass {
-				r.error(r.tree.RangeOf(baseExpr), baseName+" is not a class")
+			baseSym, ok := r.resolveBaseClassSymbol(baseExpr)
+			if !ok {
 				continue
 			}
 
@@ -430,6 +414,103 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 func (r *Resolver) checkLoopContext(pos ast.Range, keyword string) {
 	if r.loopDepth == 0 {
 		r.error(pos, keyword+" outside loop")
+	}
+}
+
+func (r *Resolver) resolveBaseClassSymbol(baseExpr ast.NodeID) (*Symbol, bool) {
+	if baseExpr == ast.NoNode {
+		return nil, false
+	}
+
+	var baseSym *Symbol
+	var ok bool
+	switch r.tree.Node(baseExpr).Kind {
+	case ast.NodeName:
+		baseSym = r.Resolved[baseExpr]
+		ok = baseSym != nil
+	case ast.NodeAttribute:
+		baseSym, ok = r.resolveAttributeExpr(baseExpr)
+	default:
+		r.error(r.tree.RangeOf(baseExpr), "unsupported base class expression")
+		return nil, false
+	}
+
+	baseName := r.baseExprName(baseExpr)
+	if !ok || baseSym == nil {
+		r.error(r.tree.RangeOf(baseExpr), "undefined base class: "+baseName)
+		return nil, false
+	}
+	if baseSym.Kind != SymClass {
+		r.error(r.tree.RangeOf(baseExpr), baseName+" is not a class")
+		return nil, false
+	}
+	return baseSym, true
+}
+
+func (r *Resolver) resolveAttributeExpr(expr ast.NodeID) (*Symbol, bool) {
+	if expr == ast.NoNode || r.tree.Node(expr).Kind != ast.NodeAttribute {
+		return nil, false
+	}
+	if sym := r.ResolvedAttr[expr]; sym != nil {
+		return sym, true
+	}
+
+	base := r.tree.ChildAt(expr, 0)
+	attrNameNode := r.tree.ChildAt(expr, 1)
+	if base == ast.NoNode || attrNameNode == ast.NoNode {
+		return nil, false
+	}
+	attrName, ok := r.tree.NameText(attrNameNode)
+	if !ok {
+		return nil, false
+	}
+
+	if baseType := r.exprType(base); baseType != nil {
+		if sym, ok := LookupMemberOnType(baseType, attrName); ok {
+			r.ResolvedAttr[expr] = sym
+			if typ := SymbolType(sym); !IsUnknownType(typ) {
+				r.setExprType(expr, typ)
+			}
+			return sym, true
+		}
+	}
+
+	baseSym := r.Resolved[base]
+	if baseSym != nil && baseSym.InstanceOf != nil && baseSym.InstanceOf.Members != nil {
+		if sym, ok := baseSym.InstanceOf.Members.Lookup(attrName); ok {
+			r.ResolvedAttr[expr] = sym
+			if typ := SymbolType(sym); !IsUnknownType(typ) {
+				r.setExprType(expr, typ)
+			}
+			return sym, true
+		}
+	}
+
+	return nil, false
+}
+
+func (r *Resolver) baseExprName(expr ast.NodeID) string {
+	if expr == ast.NoNode {
+		return ""
+	}
+	switch r.tree.Node(expr).Kind {
+	case ast.NodeName:
+		name, _ := r.tree.NameText(expr)
+		return name
+	case ast.NodeAttribute:
+		base := r.tree.ChildAt(expr, 0)
+		attr := r.tree.ChildAt(expr, 1)
+		baseName := r.baseExprName(base)
+		attrName, _ := r.tree.NameText(attr)
+		if baseName == "" {
+			return attrName
+		}
+		if attrName == "" {
+			return baseName
+		}
+		return baseName + "." + attrName
+	default:
+		return ""
 	}
 }
 
@@ -703,6 +784,14 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 
 	case ast.NodeAttribute:
 		r.visitExpr(r.tree.Nodes[expr].FirstChild, Read)
+		if ctx == Read {
+			if sym, ok := r.resolveAttributeExpr(expr); ok {
+				if typ := SymbolType(sym); !IsUnknownType(typ) {
+					r.setExprType(expr, typ)
+				}
+				return
+			}
+		}
 		r.PendingAttrs = append(r.PendingAttrs, PendingAttr{
 			Node:     expr,
 			Class:    r.currentClass,
