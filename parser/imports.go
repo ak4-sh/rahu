@@ -70,7 +70,7 @@ func (p *Parser) parseFromImportAlias() a.NodeID {
 	return p.parseImportAlias()
 }
 
-func (p *Parser) finishSimpleStatement(start uint32, end uint32, msg string) uint32 {
+func (p *Parser) finishSimpleStatement(end uint32, msg string) uint32 {
 	if p.current.Type == l.NEWLINE {
 		end = p.current.Start
 		p.advance()
@@ -116,7 +116,10 @@ func (p *Parser) parseImport() a.NodeID {
 		p.tree.Nodes[ret].End = p.tree.Nodes[alias].End
 	}
 
-	p.tree.Nodes[ret].End = p.finishSimpleStatement(start, p.tree.Nodes[ret].End, "expected newline after import statement")
+	p.tree.Nodes[ret].End = func() uint32 {
+		end := p.tree.Nodes[ret].End
+		return p.finishSimpleStatement(end, "expected newline after import statement")
+	}()
 	return ret
 }
 
@@ -201,7 +204,10 @@ func (p *Parser) parseFromImport() a.NodeID {
 			p.advance()
 		}
 
-		p.tree.Nodes[ret].End = p.finishSimpleStatement(start, p.tree.Nodes[ret].End, "expected newline after from-import statement")
+		p.tree.Nodes[ret].End = func() uint32 {
+			end := p.tree.Nodes[ret].End
+			return p.finishSimpleStatement(end, "expected newline after from-import statement")
+		}()
 		return ret
 	}
 
@@ -229,6 +235,9 @@ func (p *Parser) parseFromImport() a.NodeID {
 		p.tree.Nodes[ret].End = p.tree.Nodes[alias].End
 	}
 
-	p.tree.Nodes[ret].End = p.finishSimpleStatement(start, p.tree.Nodes[ret].End, "expected newline after from-import statement")
+	p.tree.Nodes[ret].End = func() uint32 {
+		end := p.tree.Nodes[ret].End
+		return p.finishSimpleStatement(end, "expected newline after from-import statement")
+	}()
 	return ret
 }
