@@ -111,6 +111,40 @@ func NewScope(parent *Scope, kind ScopeKind) *Scope {
 
 func NewBuiltinScope() *Scope {
 	s := NewScope(nil, ScopeBuiltin)
+	defineBuiltinType := func(name string) *Symbol {
+		sym := &Symbol{
+			Name: name,
+			Kind: SymType,
+			Span: ast.Range{},
+		}
+		_ = s.Define(sym)
+		return sym
+	}
+	defineBuiltinClass := func(name string) *Symbol {
+		sym := &Symbol{
+			Name: name,
+			Kind: SymClass,
+			Span: ast.Range{},
+		}
+		_ = s.Define(sym)
+		return sym
+	}
+	defineMember := func(owner *Symbol, name string) *Symbol {
+		if owner == nil {
+			return nil
+		}
+		if owner.Members == nil {
+			owner.Members = NewScope(nil, ScopeMember)
+		}
+		sym := &Symbol{
+			Name:  name,
+			Kind:  SymFunction,
+			Scope: owner.Members,
+			Span:  ast.Range{},
+		}
+		_ = owner.Members.Define(sym)
+		return sym
+	}
 
 	// populating constants
 	for _, name := range []string{"True", "False", "None", "__name__"} {
@@ -127,21 +161,24 @@ func NewBuiltinScope() *Scope {
 		"bool", "int", "str", "float", "list", "tuple", "dict", "set",
 		"frozenset", "bytes", "bytearray", "complex", "object",
 	} {
-		s.Define(&Symbol{
-			Name: name,
-			Kind: SymType,
-			Span: ast.Range{},
-		})
+		defineBuiltinType(name)
 	}
 
 	if listSym, ok := s.LookupLocal("list"); ok {
-		listSym.Members = NewScope(nil, ScopeMember)
-		listSym.Members.Define(&Symbol{
-			Name:  "append",
-			Kind:  SymFunction,
-			Scope: listSym.Members,
-			Span:  ast.Range{},
-		})
+		defineMember(listSym, "append")
+	}
+	if strSym, ok := s.LookupLocal("str"); ok {
+		for _, name := range []string{"split", "join", "lower", "upper", "strip"} {
+			defineMember(strSym, name)
+		}
+	}
+
+	for _, name := range []string{
+		"BaseException", "Exception", "TypeError", "AttributeError", "ValueError",
+		"KeyError", "IndexError", "RuntimeError", "ImportError", "NameError",
+		"OSError", "LookupError",
+	} {
+		defineBuiltinClass(name)
 	}
 
 	// populating pure funcs
@@ -432,6 +469,30 @@ func MemberScopeForType(t *Type) *Scope {
 	}
 	switch t.Kind {
 	case TypeInstance, TypeClass:
+		if t.Symbol.Members != nil {
+			return t.Symbol.Members
+		}
+		if t.Symbol.Inner == nil && t.Symbol.Attrs == nil {
+			return nil
+		}
+		merged := NewScope(nil, ScopeMember)
+		if t.Symbol.Inner != nil {
+			for name, sym := range t.Symbol.Inner.Symbols {
+				merged.Symbols[name] = sym
+			}
+		}
+		if t.Symbol.Attrs != nil {
+			for name, sym := range t.Symbol.Attrs.Symbols {
+				if _, exists := merged.Symbols[name]; !exists {
+					merged.Symbols[name] = sym
+				}
+			}
+		}
+		if len(merged.Symbols) == 0 {
+			return nil
+		}
+		return merged
+	case TypeModule:
 		return t.Symbol.Members
 	case TypeBuiltin:
 		return t.Symbol.Members

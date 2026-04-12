@@ -119,6 +119,47 @@ func TestBuildScopes_AllowsPartialClassHeader(t *testing.T) {
 	}
 }
 
+func TestResolve_QualifiedClassBasePromotesInheritedMembers(t *testing.T) {
+	src := "class Outer:\n    class Inner:\n        def base(self):\n            pass\n\nclass Foo(Outer.Inner):\n    pass\n\nitem = Foo()\nitem.base\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	outer := global.Symbols["Outer"]
+	if outer == nil || outer.Inner == nil {
+		t.Fatal("missing outer class scope")
+	}
+	inner, ok := outer.Inner.LookupLocal("Inner")
+	if !ok || inner == nil {
+		t.Fatal("missing nested class symbol Inner")
+	}
+	foo := global.Symbols["Foo"]
+	if foo == nil {
+		t.Fatal("missing class symbol Foo")
+	}
+	if len(foo.Bases) != 1 || foo.Bases[0] != inner {
+		t.Fatalf("expected Foo to inherit from Outer.Inner, got %+v", foo.Bases)
+	}
+	if foo.Members == nil {
+		t.Fatal("expected promoted class members")
+	}
+	if _, ok := foo.Members.Lookup("base"); !ok {
+		t.Fatal("expected inherited member base to be promoted onto Foo")
+	}
+
+	use := mustNameNode(t, tree, "item")
+	if resolver.Resolved[use] == nil || resolver.Resolved[use].Name != "item" {
+		t.Fatalf("expected item use to resolve, got %+v", resolver.Resolved[use])
+	}
+	if attr := mustAttributeNode(t, tree, "base"); resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != "base" {
+		t.Fatalf("expected inherited attribute base to resolve, got %+v", resolver.ResolvedAttr[attr])
+	}
+}
+
 func TestBuildScopes_AllowsExceptPass(t *testing.T) {
 	src := "try:\n    risky\nexcept TypeError:\n    pass\n"
 	tree := parser.New(src).Parse()
@@ -167,6 +208,19 @@ func TestResolve_AllowsExceptPass(t *testing.T) {
 	_, errs := Resolve(tree, global)
 	if len(errs) == 0 {
 		// risky is unresolved in this fixture; the important part is that analysis stays alive.
+	}
+}
+
+func TestResolve_BuiltinExceptionNamesDoNotReportUndefined(t *testing.T) {
+	src := "try:\n    risky\nexcept (TypeError, AttributeError):\n    pass\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	_, errs := Resolve(tree, global)
+	for _, err := range errs {
+		if err.Msg == "undefined name: TypeError" || err.Msg == "undefined name: AttributeError" {
+			t.Fatalf("unexpected builtin exception diagnostic: %+v", err)
+		}
 	}
 }
 
@@ -868,6 +922,22 @@ func TestResolveListAppendBuildsUnionElementType(t *testing.T) {
 	}
 }
 
+func TestResolveStringSplitDoesNotReportUndefinedAttribute(t *testing.T) {
+	src := "value = \"1.2.3\"\nparts = value.split(\".\")\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	attr := mustAttributeNode(t, tree, "split")
+	if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != "split" {
+		t.Fatalf("expected split attribute to resolve, got %+v", resolver.ResolvedAttr[attr])
+	}
+}
+
 func mustNameNode(t *testing.T, tree *ast.AST, name string) ast.NodeID {
 	t.Helper()
 	var found ast.NodeID
@@ -889,6 +959,32 @@ func mustNameNode(t *testing.T, tree *ast.AST, name string) ast.NodeID {
 	walk(tree.Root)
 	if found == ast.NoNode {
 		t.Fatalf("missing name node %q", name)
+	}
+	return found
+}
+
+func mustAttributeNode(t *testing.T, tree *ast.AST, attrName string) ast.NodeID {
+	t.Helper()
+	var found ast.NodeID
+	var walk func(ast.NodeID)
+	walk = func(id ast.NodeID) {
+		if id == ast.NoNode || found != ast.NoNode {
+			return
+		}
+		if tree.Node(id).Kind == ast.NodeAttribute {
+			attr := tree.ChildAt(id, 1)
+			if text, ok := tree.NameText(attr); ok && text == attrName {
+				found = id
+				return
+			}
+		}
+		for _, child := range tree.Children(id) {
+			walk(child)
+		}
+	}
+	walk(tree.Root)
+	if found == ast.NoNode {
+		t.Fatalf("missing attribute node %q", attrName)
 	}
 	return found
 }
