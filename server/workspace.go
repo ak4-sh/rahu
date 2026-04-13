@@ -21,7 +21,7 @@ type startupIndexTimings struct {
 	phaseABuild      time.Duration
 	phaseABuildTotal atomic.Int64
 	phaseBBind       time.Duration
-	phaseBBindTotal  time.Duration
+	phaseBBindTotal  atomic.Int64
 	refIndexBuild    time.Duration
 	reverseDeps      time.Duration
 }
@@ -36,7 +36,7 @@ func (t *startupIndexTimings) log() {
 		t.phaseABuild,
 		totalDurationFromAtomic(&t.phaseABuildTotal),
 		t.phaseBBind,
-		t.phaseBBindTotal,
+		totalDurationFromAtomic(&t.phaseBBindTotal),
 		t.refIndexBuild,
 		t.reverseDeps,
 	)
@@ -294,7 +294,7 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context, cancel
 	jobs := make(chan ModuleFile)
 	var wg sync.WaitGroup
 	var completed atomic.Int32
-	baseByName := make(map[string]*ModuleSnapshot, len(mods))
+	baseByName := make(map[string]*StartupModuleBase, len(mods))
 	var baseMu sync.Mutex
 
 	phaseAStart := time.Now()
@@ -311,11 +311,11 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context, cancel
 						return
 					}
 					started := time.Now()
-					snapshot, ok := s.buildBaseSnapshotForModule(mod)
+					base, ok := s.buildStartupBaseForModule(mod)
 					addDurationAtomic(&timings.phaseABuildTotal, time.Since(started))
-					if ok && snapshot != nil {
+					if ok && base != nil {
 						baseMu.Lock()
-						baseByName[mod.Name] = snapshot
+						baseByName[mod.Name] = base
 						baseMu.Unlock()
 					}
 					current := int(completed.Add(1))
@@ -341,38 +341,107 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context, cancel
 	cancel()
 	timings.phaseABuild = time.Since(phaseAStart)
 
-	lookup := func(name string) (*ModuleSnapshot, bool) {
-		baseMu.Lock()
-		snapshot := baseByName[name]
-		baseMu.Unlock()
-		return snapshot, snapshot != nil
+	surfaceByName := make(map[string]*ModuleImportSurface, len(mods))
+	var surfaceMu sync.RWMutex
+	finalByName := make(map[string]*ModuleSnapshot, len(mods))
+	var finalMu sync.Mutex
+
+	lookup := func(name string) (*ModuleImportSurface, bool) {
+		surfaceMu.RLock()
+		surface := surfaceByName[name]
+		surfaceMu.RUnlock()
+		return surface, surface != nil
 	}
 
 	phaseBStart := time.Now()
+	for round := 0; round <= len(mods); round++ {
+		nextByName := make(map[string]*ModuleImportSurface, len(mods))
+		var nextMu sync.Mutex
+		jobs := make(chan *StartupModuleBase, len(mods))
+		var wg sync.WaitGroup
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for base := range jobs {
+					started := time.Now()
+					surface := s.buildImportSurfaceFromBaseWithLookup(base, lookup)
+					if surface != nil {
+						nextMu.Lock()
+						nextByName[base.Name] = surface
+						nextMu.Unlock()
+					}
+					addDurationAtomic(&timings.phaseBBindTotal, time.Since(started))
+				}
+			}()
+		}
+		for _, mod := range mods {
+			baseMu.Lock()
+			base := baseByName[mod.Name]
+			baseMu.Unlock()
+			if base != nil {
+				jobs <- base
+			}
+		}
+		close(jobs)
+		wg.Wait()
+
+		changed := round == 0
+		if !changed {
+			for _, mod := range mods {
+				prev := surfaceByName[mod.Name]
+				next := nextByName[mod.Name]
+				if prev == nil || next == nil || prev.ExportHash != next.ExportHash {
+					changed = true
+					break
+				}
+			}
+		}
+
+		surfaceMu.Lock()
+		surfaceByName = nextByName
+		surfaceMu.Unlock()
+		if !changed {
+			break
+		}
+	}
+
+	cJobs := make(chan *StartupModuleBase, len(mods))
+	var cWg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		cWg.Add(1)
+		go func() {
+			defer cWg.Done()
+			for base := range cJobs {
+				started := time.Now()
+				snapshot := s.buildFinalSnapshotFromBase(base, lookup)
+				if snapshot != nil {
+					finalMu.Lock()
+					finalByName[base.Name] = snapshot
+					finalMu.Unlock()
+				}
+				addDurationAtomic(&timings.phaseBBindTotal, time.Since(started))
+			}
+		}()
+	}
 	for _, mod := range mods {
 		baseMu.Lock()
-		snapshot := baseByName[mod.Name]
+		base := baseByName[mod.Name]
 		baseMu.Unlock()
-		if snapshot == nil {
-			continue
+		if base != nil {
+			cJobs <- base
 		}
-		started := time.Now()
-		importErrs := s.bindWorkspaceImportsWithLookup(snapshot.Tree, snapshot.Global, snapshot.Defs, snapshot.URI, lookup)
-		reResolveSnapshot(snapshot)
-		snapshot.SemErrs = append(snapshot.SemErrs, importErrs...)
-		snapshot.Exports = extractExports(snapshot.Global)
-		snapshot.Exports = s.augmentExportsFromInterpreter(snapshot)
-		snapshot.ExportHash = computeExportHash(snapshot.Exports)
-		timings.phaseBBindTotal += time.Since(started)
 	}
+	close(cJobs)
+	cWg.Wait()
 	timings.phaseBBind = time.Since(phaseBStart)
 
 	s.refIndex.Clear()
 	phaseRefStart := time.Now()
 	for _, mod := range mods {
-		baseMu.Lock()
-		snapshot := baseByName[mod.Name]
-		baseMu.Unlock()
+		finalMu.Lock()
+		snapshot := finalByName[mod.Name]
+		finalMu.Unlock()
 		if snapshot == nil {
 			continue
 		}
@@ -462,12 +531,15 @@ func (s *Server) refreshModuleAndDependents(uri lsp.DocumentURI) {
 		oldRootHash = oldRoot.ExportHash
 	}
 
-	rootSnapshot, ok := s.rebuildModuleByURI(uri)
+	rootSnapshot, ok := s.rebuildModuleSnapshotOnly(uri)
 	if !ok || rootSnapshot == nil {
 		return
 	}
 	s.applySnapshotToOpenDocument(rootSnapshot)
 	if oldRootHash != 0 && oldRootHash == rootSnapshot.ExportHash {
+		// Exports unchanged: no dependents need rebuilding, but root's import
+		// list may have changed (e.g. user added "import os"), so update revdeps.
+		s.rebuildReverseDeps()
 		return
 	}
 
@@ -499,7 +571,7 @@ func (s *Server) refreshModuleAndDependents(uri lsp.DocumentURI) {
 				oldHash = oldSnapshot.ExportHash
 			}
 
-			snapshot, ok := s.rebuildModuleByURI(depURI)
+			snapshot, ok := s.rebuildModuleSnapshotOnly(depURI)
 			if !ok || snapshot == nil {
 				continue
 			}
@@ -515,6 +587,10 @@ func (s *Server) refreshModuleAndDependents(uri lsp.DocumentURI) {
 			}
 		}
 	}
+
+	// Rebuild reverse deps once after all snapshots are updated, capturing any
+	// import-list changes in the root module.
+	s.rebuildReverseDeps()
 }
 
 func (s *Server) LookupModule(name string) (ModuleFile, bool) {

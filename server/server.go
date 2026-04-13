@@ -72,6 +72,27 @@ type ModuleFile struct {
 	Kind string
 }
 
+type StartupModuleBase struct {
+	Name      string
+	URI       lsp.DocumentURI
+	Path      string
+	Text      string
+	LineIndex *source.LineIndex
+	Tree      *ast.AST
+	ParseErrs []parser.Error
+	Imports   []string
+}
+
+type ModuleImportSurface struct {
+	Name        string
+	URI         lsp.DocumentURI
+	Path        string
+	Tree        *ast.AST
+	Exports     map[string]*analyser.Symbol
+	MemberScope *analyser.Scope
+	ExportHash  uint64
+}
+
 type ModuleSnapshot struct {
 	Name        string
 	URI         lsp.DocumentURI
@@ -84,6 +105,7 @@ type ModuleSnapshot struct {
 	Defs        map[ast.NodeID]*analyser.Symbol
 	SemErrs     []analyser.SemanticError
 	Global      *analyser.Scope
+	MemberScope *analyser.Scope // Global + augmented dir() members; use for import binding
 	Exports     map[string]*analyser.Symbol
 	ExportHash  uint64
 	Imports     []string

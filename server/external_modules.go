@@ -16,6 +16,7 @@ import (
 type pythonModuleInfo struct {
 	Kind    string   `json:"kind"`
 	Members []string `json:"members"`
+	Origin  string   `json:"origin"` // file path when kind == "source"
 }
 
 func pythonSyntheticModuleURI(kind, name string) lsp.DocumentURI {
@@ -83,14 +84,17 @@ func inspectPythonModuleInfo(python, name string) (pythonModuleInfo, bool) {
 	cmd := exec.Command(python, "-c", `import importlib, importlib.util, json, sys
 name = sys.argv[1]
 spec = importlib.util.find_spec(name)
-payload = {"kind": "", "members": []}
+payload = {"kind": "", "members": [], "origin": ""}
 if spec is not None:
     origin = spec.origin or ""
     if origin == "built-in":
         payload["kind"] = "builtin"
     elif origin == "frozen":
         payload["kind"] = "frozen"
-    if payload["kind"]:
+    elif origin.endswith((".py", ".pyi")):
+        payload["kind"] = "source"
+        payload["origin"] = origin
+    if payload["kind"] in ("builtin", "frozen"):
         try:
             module = importlib.import_module(name)
             payload["members"] = sorted({member for member in dir(module) if isinstance(member, str)})
@@ -204,6 +208,7 @@ func (s *Server) resolveExternalModule(name string) (ModuleFile, bool) {
 		return mod, true
 	}
 	roots := append([]string(nil), s.externalSearchRoots...)
+	python := s.pythonExecutable
 	s.indexMu.RUnlock()
 
 	for _, root := range roots {
@@ -228,11 +233,27 @@ func (s *Server) resolveExternalModule(name string) (ModuleFile, bool) {
 		}
 	}
 
-	info, ok := s.pythonModuleInfo(name)
-	if !ok {
+	// Fall back to Python introspection for modules that don't have a file at
+	// the expected path — e.g. `os.path` which is an alias for `posixpath`.
+	inspected, ok := inspectPythonModuleInfo(python, name)
+	if !ok || inspected.Kind == "" {
 		return ModuleFile{}, false
 	}
-	mod := ModuleFile{Name: name, URI: pythonSyntheticModuleURI(info.Kind, name), Kind: info.Kind}
+
+	var mod ModuleFile
+	switch inspected.Kind {
+	case "source":
+		if inspected.Origin == "" {
+			return ModuleFile{}, false
+		}
+		mod = ModuleFile{Name: name, URI: pathToURI(inspected.Origin), Path: inspected.Origin}
+	default: // "builtin" or "frozen"
+		s.indexMu.Lock()
+		s.pythonModuleInfoByName[name] = inspected
+		s.indexMu.Unlock()
+		mod = ModuleFile{Name: name, URI: pythonSyntheticModuleURI(inspected.Kind, name), Kind: inspected.Kind}
+	}
+
 	s.indexMu.Lock()
 	if existing, ok := s.modulesByName[name]; ok {
 		s.indexMu.Unlock()
