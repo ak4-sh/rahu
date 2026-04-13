@@ -1,21 +1,17 @@
 # rahu
 
-A Python Language Server built in Go from scratch — no LSP libraries, no Python runtime, just static analysis end-to-end.
+Rahu is a Python language server implemented in Go. The repository contains the lexer, parser, semantic analyser, workspace indexer, JSON-RPC transport, and LSP server.
 
-## Why?
+Core parsing and analysis are implemented in Go. The server can also invoke a Python interpreter to discover environment search roots and inspect builtin, frozen, or extension-backed modules when static workspace data is not enough.
 
-Most language servers are powerful but hard to reason about. Rahu exists to make the core mechanics visible: tokenization, parsing, scoping, name resolution, and LSP wiring.
-
-It's not trying to replace Pyright or pylsp. It's trying to be **understandable**. Every stage should be inspectable, every data structure traceable, and every feature grounded in clear compiler-style passes.
-
-All internal source locations are stored as **byte offsets**. Line/column translation happens only at the LSP boundary.
+All internal source locations are stored as byte offsets. Line/column translation happens only at the LSP boundary.
 
 
 <img src="assets/demo.gif" alt="LSP Demo" width="600">
 
 ## Current Status
 
-### Lexer — robust tokenization
+### Lexer
 
 - Single and multi-character operators (`+`, `==`, `//`, `**`, `>>=`, `:=`, etc.)
 - String literals (single-line and triple-quoted)
@@ -24,7 +20,7 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 - INDENT/DEDENT with tab/space consistency enforcement
 - Positions stored as half-open byte ranges `[start, end)`
 
-### Parser — recursive descent + Pratt over an arena-backed AST
+### Parser
 
 - Assignments, augmented assignments, annotated assignments, `if` / `elif` / `else`, `for`, `while`, `def`, `class`, `return`, `break`, `continue`, `pass`
 - `try` / `except` / `else` / `finally`
@@ -46,16 +42,16 @@ All internal source locations are stored as **byte offsets**. Line/column transl
 
 The AST is stored in a compact arena with stable `NodeID`s, contiguous node storage, sibling-linked children, and side tables for names/strings/numbers.
 
-### Semantic Analyser — LEGB scopes, imports, classes, and lightweight types
+### Semantic Analyser
 
 - LEGB name resolution with definition tracking and resolved name/attribute maps keyed by `NodeID`
-- Builtin constants, builtin types, and a useful slice of builtin functions
+- Builtin constants, builtin types, and a subset of builtin functions
 - Import binding against indexed workspace modules, including relative `from` imports
 - Class inheritance, member promotion, and `self.x = ...` instance attribute discovery
 - Except-alias binding and comprehension-local scope handling
 - Lightweight explicit type model with inferred instances, unions, annotation-driven list/tuple/dict/set typing, subscript result typing, and `list.append(...)` mutation typing
 - Captures default values for parameters and simple assignments so hover/signature help can surface them
-- Typed hover, signature help, and smarter completion built on top of inferred values
+- Typed hover, signature help, and completion data built on top of inferred values
 
 **Catches today:**
 - Undefined names
@@ -66,20 +62,20 @@ The AST is stored in a compact arena with stable `NodeID`s, contiguous node stor
 - `return` outside a function
 - `break` / `continue` outside a loop
 
-### LSP Server — JSON-RPC 2.0 over stdio
+### LSP Server
 
 - Initialize/shutdown lifecycle
 - Document lifecycle (`didOpen`, `didChange`, `didClose`)
-- Full document sync is advertised to clients; the server can also apply ranged edits internally
+- Incremental document sync is advertised to clients; the server also applies ranged edits internally
 - Publishes diagnostics (syntax + semantic errors)
-- **Go-to-definition**
-- **Hover**
-- **Completion**
-- **Signature help**
-- **Semantic tokens**
-- **References**
-- **Rename** + **prepare rename**
-- **Document symbols** + **workspace symbols**
+- Go-to-definition
+- Hover
+- Completion
+- Signature help
+- Semantic tokens
+- References
+- Rename and prepare rename
+- Document symbols and workspace symbols
 - Startup indexing progress via LSP work-done progress
 
 Server-side analysis stores AST, definitions, resolved symbols, semantic diagnostics, inferred types, and indexed lookup structures for fast editor features. Re-analysis is debounced on document changes, and dependent modules are refreshed through the workspace graph.
@@ -109,12 +105,8 @@ Server-side analysis stores AST, definitions, resolved symbols, semantic diagnos
 
 ### Testing
 
-- JSON-RPC transport/frame tests are consolidated in `jsonrpc/jsonrpc_test.go`
-- Parser coverage lives in `parser/parser_test.go`
-- Semantic analysis coverage lives in `analyser/analyser_test.go`
-- LSP/editor behavior is covered in focused suites such as `server/signature_help_test.go`, `server/semantic_tokens_test.go`, `server/references_test.go`, `server/rename_test.go`, and `server/prepare_rename_test.go`
-- Workspace/import/indexing behavior is covered in `server/imports_test.go`, `server/workspace_test.go`, and `server/lru_test.go`
-- Indexed lookup behavior is covered in `server/locate/posindex_test.go`
+- Coverage includes lexer, parser, semantic analysis, JSON-RPC framing/dispatch, line-index updates, indexed lookup, and LSP/editor behavior
+- Server tests cover features such as completion, hover, references, rename, prepare rename, semantic tokens, document symbols, workspace symbols, imports, indexing, and cache behavior
 - CI runs `go build ./...` and `go test ./...`
 
 ### Performance
@@ -233,7 +225,7 @@ Everything still runs on byte offsets internally. Line/column is only used for p
 
 ## Sample Output
 
-The debug dump below is intentionally a low-level example of the analyser internals. It still shows the class/member model well, but it does not try to demonstrate newer editor-facing features like signature help, semantic tokens, external-module resolution, or cached workspace indexing.
+The debug dump below shows the analyser's class and member model. It does not try to demonstrate newer editor-facing features such as signature help, semantic tokens, external-module resolution, or cached workspace indexing.
 
 ```python
 class Animal:
@@ -363,13 +355,13 @@ Class GuideDog
   ...
 ```
 
-Notice how:
+Notes:
 - `GuideDog` inherits from `Dog`, which inherits from `Animal`
 - Members are properly promoted up the chain
 - Overridden methods (`speak`) are correctly tagged
 - Instance attributes via `self.x = ...` are tracked separately
 
-Rahu still models inheritance, promoted members, and instance attributes the same way, but it now does a much better job with constructor-based instance typing, container element typing, and workspace-aware editor features.
+The current analyser still models inheritance, promoted members, and instance attributes in the same general way, but editor-facing features now also rely on constructor-based instance typing, container element typing, and workspace-aware indexing.
 
 ## Getting Started
 
@@ -392,13 +384,13 @@ go test -bench=. ./server
 # Point your editor's Python language server to: go run ./cmd/lsp
 ```
 
-Tip: run `go test ./...` before wiring Rahu into an editor config so parser/analyser/server changes are validated first.
+Run `go test ./...` before wiring Rahu into an editor config so parser, analyser, and server changes are validated first.
 
 ## Tech Stack
 
-- **Go 1.26** - one runtime, minimal dependencies.
+- Go 1.26
 - No external LSP libraries
-- No Python interpreter — pure static analysis
+- Python interpreter integration for environment discovery and external-module inspection
 
 ## License
 
