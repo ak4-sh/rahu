@@ -176,59 +176,37 @@ func (s *Server) ApplyIncremental(
 	}
 
 	text := doc.Text
+	li := doc.LineIndex
 
 	for _, c := range changes {
 		if c.Range == nil {
 			text = c.Text
+			li = source.NewLineIndex(text)
 			continue
 		}
 
-		text = applyRangeEdit(text, *c.Range, c.Text)
+		startOff := li.PositionToOffset(c.Range.Start.Line, c.Range.Start.Character)
+		endOff := li.PositionToOffset(c.Range.End.Line, c.Range.End.Character)
+		// Clamp to valid text range.
+		if startOff > len(text) {
+			startOff = len(text)
+		}
+		if endOff > len(text) {
+			endOff = len(text)
+		}
+
+		li = li.ApplyEdit(startOff, endOff, c.Text)
+		var b strings.Builder
+		b.Grow(startOff + len(c.Text) + len(text) - endOff)
+		b.WriteString(text[:startOff])
+		b.WriteString(c.Text)
+		b.WriteString(text[endOff:])
+		text = b.String()
 	}
 
 	doc.Text = text
 	doc.Version = version
-	doc.LineIndex = source.NewLineIndex(text)
-}
-
-func applyRangeEdit(old string, r lsp.Range, newText string) string {
-	lines := strings.Split(old, "\n")
-	if r.Start.Line >= len(lines) {
-		return old
-	}
-	startLine := lines[r.Start.Line]
-
-	if r.Start.Character > len(startLine) {
-		r.Start.Character = len(startLine)
-	}
-
-	prefix := startLine[:r.Start.Character]
-
-	endLine := lines[r.End.Line]
-
-	if r.End.Character > len(endLine) {
-		r.End.Character = len(endLine)
-	}
-
-	suffix := endLine[r.End.Character:]
-
-	var out strings.Builder
-
-	for i := 0; i < r.Start.Line; i++ {
-		out.WriteString(lines[i])
-		out.WriteByte('\n')
-	}
-
-	out.WriteString(prefix)
-	out.WriteString(newText)
-	out.WriteString(suffix)
-
-	for i := r.End.Line + 1; i < len(lines); i++ {
-		out.WriteByte('\n')
-		out.WriteString(lines[i])
-	}
-
-	return out.String()
+	doc.LineIndex = li
 }
 
 func (s *Server) Initialize(
@@ -270,7 +248,7 @@ func (s *Server) Initialize(
 
 	return &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
-			TextDocumentSync:      lsp.TDSKFull,
+			TextDocumentSync:      lsp.TDSKIncremental,
 			HoverProvider:         true,
 			CompletionProvider:    map[string]any{"triggerCharacters": []string{"."}},
 			SignatureHelpProvider: map[string]any{"triggerCharacters": []string{"(", ","}},
@@ -339,8 +317,9 @@ func (s *Server) backgroundIndex(ctx context.Context) {
 	}
 }
 
-// reanalyzeOpenDocuments re-analyzes all currently open documents.
-// Called after background indexing completes to update cross-file imports.
+// reanalyzeOpenDocuments updates all currently open documents after background
+// indexing completes. Workspace modules reuse the snapshot just built; other
+// documents get a fresh analysis.
 func (s *Server) reanalyzeOpenDocuments() {
 	s.docsMu.RLock()
 	docs := make([]*Document, 0, len(s.docs))
@@ -350,9 +329,20 @@ func (s *Server) reanalyzeOpenDocuments() {
 	s.docsMu.RUnlock()
 
 	for _, doc := range docs {
-		if doc != nil {
-			s.analyze(doc)
+		if doc == nil {
+			continue
 		}
+		if _, isModule := s.LookupModuleByURI(doc.URI); isModule {
+			// Snapshot was just built in workspace indexing — apply it directly
+			// instead of rebuilding from scratch. If the user edited the doc
+			// during indexing, the debounce timer already queued a re-analysis.
+			if snapshot, ok := s.getModuleSnapshotByURI(doc.URI); ok {
+				s.applySnapshotToOpenDocument(snapshot)
+				s.publishDiagnostics(doc.URI, toDiagnostics(snapshot.LineIndex, snapshot.ParseErrs, snapshot.SemErrs))
+				continue
+			}
+		}
+		s.analyze(doc)
 	}
 }
 

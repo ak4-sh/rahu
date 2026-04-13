@@ -271,6 +271,52 @@ func TestBuildWorkspaceSnapshotsWithPriorityParallel(t *testing.T) {
 	}
 }
 
+func TestBuildWorkspaceSnapshotsWithPriorityReexportDeterministic(t *testing.T) {
+	root := t.TempDir()
+	aPath := filepath.Join(root, "a.py")
+	bPath := filepath.Join(root, "b.py")
+	cPath := filepath.Join(root, "c.py")
+	writeWorkspaceSource(t, aPath, "value = 1\n")
+	writeWorkspaceSource(t, bPath, "from a import value\n")
+	writeWorkspaceSource(t, cPath, "from b import value\nresult = value\n")
+
+	aURI := pathToURI(aPath)
+	var wantHash uint64
+	for i := 0; i < 3; i++ {
+		s := New(nil)
+		s.rootPath = root
+		s.buildModuleIndex()
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := s.buildWorkspaceSnapshotsWithPriority(ctx, cancel); err != nil {
+			cancel()
+			t.Fatalf("workspace snapshot build failed on run %d: %v", i, err)
+		}
+		cancel()
+
+		snapshot, ok := s.getModuleSnapshotByName("c")
+		if !ok || snapshot == nil {
+			t.Fatalf("expected snapshot for module c on run %d", i)
+		}
+		if len(snapshot.SemErrs) != 0 {
+			t.Fatalf("unexpected semantic errors on run %d: %+v", i, snapshot.SemErrs)
+		}
+		imported := snapshot.Global.Symbols["value"]
+		if imported == nil {
+			t.Fatalf("expected imported symbol in c on run %d", i)
+		}
+		if imported.URI != aURI {
+			t.Fatalf("imported symbol URI on run %d: got %q want %q", i, imported.URI, aURI)
+		}
+		if i == 0 {
+			wantHash = snapshot.ExportHash
+			continue
+		}
+		if snapshot.ExportHash != wantHash {
+			t.Fatalf("export hash changed across runs: got %d want %d", snapshot.ExportHash, wantHash)
+		}
+	}
+}
+
 func writeTestFile(t *testing.T, path string) {
 	t.Helper()
 

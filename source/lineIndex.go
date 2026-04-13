@@ -54,3 +54,63 @@ func (li *LineIndex) PositionToOffset(line int, col int) int {
 	}
 	return off
 }
+
+// lineForOffset returns the line number containing the given byte offset.
+func (li *LineIndex) lineForOffset(off int) int {
+	lo, hi := 0, len(li.lineStarts)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if li.lineStarts[mid] <= off {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return max(lo-1, 0)
+}
+
+// ApplyEdit returns a new LineIndex reflecting a text replacement from startOffset to
+// endOffset with newText, without rescanning the entire file.
+func (li *LineIndex) ApplyEdit(startOffset, endOffset int, newText string) *LineIndex {
+	startLine := li.lineForOffset(startOffset)
+	endLine := li.lineForOffset(endOffset)
+	delta := len(newText) - (endOffset - startOffset)
+
+	// Count newlines in newText to know how many new line-start entries to add.
+	newLineCount := 0
+	for i := 0; i < len(newText); i++ {
+		if newText[i] == '\n' {
+			newLineCount++
+		}
+	}
+
+	// Layout of new lineStarts:
+	//   [0 .. startLine]           unchanged prefix (startLine+1 entries)
+	//   [startLine+1 .. startLine+newLineCount]  new lines inside newText
+	//   [startLine+newLineCount+1 ..]            shifted tail (lines after endLine)
+	oldStarts := li.lineStarts
+	tailStart := endLine + 1
+	tailCount := len(oldStarts) - tailStart
+	newStarts := make([]int, startLine+1+newLineCount+tailCount)
+
+	// Unchanged prefix.
+	copy(newStarts[:startLine+1], oldStarts[:startLine+1])
+
+	// New line starts inside newText.
+	pos := startOffset
+	idx := startLine + 1
+	for i := 0; i < len(newText); i++ {
+		pos++
+		if newText[i] == '\n' {
+			newStarts[idx] = pos
+			idx++
+		}
+	}
+
+	// Shifted tail.
+	for i, s := range oldStarts[tailStart:] {
+		newStarts[idx+i] = s + delta
+	}
+
+	return &LineIndex{lineStarts: newStarts}
+}
