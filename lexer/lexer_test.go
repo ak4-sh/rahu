@@ -71,6 +71,42 @@ func TestTripleQuotedFStringToken(t *testing.T) {
 	}
 }
 
+func TestRawStringToken(t *testing.T) {
+	input := `r"hello\nworld"`
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != STRING {
+		t.Fatalf("expected STRING, got %v", tok.Type)
+	}
+	if tok.Literal != `hello\nworld` {
+		t.Fatalf("unexpected raw string literal: got %q", tok.Literal)
+	}
+}
+
+func TestRawFStringToken(t *testing.T) {
+	input := `rf"hello {name}\n"`
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != FSTRING {
+		t.Fatalf("expected FSTRING, got %v", tok.Type)
+	}
+	if tok.Literal != input {
+		t.Fatalf("unexpected raw f-string literal: got %q", tok.Literal)
+	}
+}
+
+func TestTripleQuotedRawStringToken(t *testing.T) {
+	input := "r'''hello\\nworld'''"
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != STRING {
+		t.Fatalf("expected STRING, got %v", tok.Type)
+	}
+	if tok.Literal != `hello\nworld` {
+		t.Fatalf("unexpected triple raw string literal: got %q", tok.Literal)
+	}
+}
+
 func TestBasicIndent(t *testing.T) {
 	input := "def foo():\n    pass"
 	want := []TokenType{

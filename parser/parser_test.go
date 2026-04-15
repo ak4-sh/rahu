@@ -419,6 +419,27 @@ func TestParseFStringEscapedBraces(t *testing.T) {
 	}
 }
 
+func TestParseFStringConversionAndFormatSpec(t *testing.T) {
+	tests := []string{
+		"f\"{username!r}\"\n",
+		"f\"{value:.2f}\"\n",
+		"f\"{value!r:>10}\"\n",
+	}
+
+	for _, src := range tests {
+		p, tree := parseSource(t, src)
+		requireNoParseErrors(t, p)
+
+		exprStmt := moduleStmt(t, tree, 0)
+		fstring := requireChildCount(t, tree, exprStmt, 1)[0]
+		kids := tree.Children(fstring)
+		if len(kids) == 0 {
+			t.Fatalf("expected f-string children for %q", src)
+		}
+		requireKind(t, tree, kids[0], a.NodeFStringExpr)
+	}
+}
+
 func TestParseFStringErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -428,6 +449,7 @@ func TestParseFStringErrors(t *testing.T) {
 		{name: "unterminated expr", src: "f\"{name\"\n", want: "unterminated f-string expression"},
 		{name: "empty expr", src: "f\"{}\"\n", want: "empty f-string expression"},
 		{name: "single closing brace", src: "f\"}\"\n", want: "single '}' is not allowed in f-string"},
+		{name: "invalid conversion", src: "f\"{value!x}\"\n", want: "invalid f-string conversion"},
 	}
 
 	for _, tt := range tests {
@@ -436,6 +458,69 @@ func TestParseFStringErrors(t *testing.T) {
 			requireParseErrorContains(t, p, tt.want)
 		})
 	}
+}
+
+func TestParseAdjacentFStringsInsideParens(t *testing.T) {
+	src := "base = (\n    f'username=\"{self.username}\", realm=\"{realm}\", nonce=\"{nonce}\", ' \n    f'uri=\"{path}\", response=\"{respdig}\"'\n)\n"
+	p, tree := parseSource(t, src)
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeFString)
+	if len(tree.Children(value)) < 4 {
+		t.Fatalf("expected merged f-string children, got %d", len(tree.Children(value)))
+	}
+}
+
+func TestParseRawStringLiteral(t *testing.T) {
+	p, tree := parseSource(t, "x = r\"\\w+\\s+\"\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeString)
+	if got, _ := tree.StringText(value); got != `\w+\s+` {
+		t.Fatalf("unexpected raw string text: got %q", got)
+	}
+}
+
+func TestParseRawFStringLiteral(t *testing.T) {
+	p, tree := parseSource(t, "x = rf\"{name}\\n\"\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeFString)
+	kids := tree.Children(value)
+	if len(kids) != 2 {
+		t.Fatalf("unexpected raw f-string child count: %d", len(kids))
+	}
+	if got, _ := tree.StringText(kids[1]); got != `\n` {
+		t.Fatalf("unexpected raw f-string trailing text: got %q", got)
+	}
+}
+
+func TestParseNestedForWithBlankLineBeforeReturn(t *testing.T) {
+	src := "def f():\n    if header:\n        for link in links:\n            key = link.get(\"rel\")\n            resolved_links[key] = link\n\n    return resolved_links\n"
+	p, tree := parseSource(t, src)
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, body := tree.FunctionParts(fn)
+	bodyKids := requireChildCount(t, tree, body, 2)
+	requireKind(t, tree, bodyKids[1], a.NodeReturn)
+}
+
+func TestParseAdjacentWarningMessageWithFStringConversion(t *testing.T) {
+	src := "msg = (\n    \"Non-string usernames will no longer be supported in Requests \"\n    f\"3.0.0. Please convert the object you've passed in ({username!r}) to \"\n    \"a string or bytes object in the near future to avoid \"\n    \"problems.\"\n)\n"
+	p, tree := parseSource(t, src)
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeFString)
 }
 
 func TestParseDictComprehensionShape(t *testing.T) {

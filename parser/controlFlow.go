@@ -299,6 +299,10 @@ func (p *Parser) parseFor() a.NodeID {
 
 	bodyBlock := p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
 	for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
+		if p.current.Type == l.NEWLINE {
+			p.advance()
+			continue
+		}
 		stmt := p.parseStatement()
 		if stmt != a.NoNode {
 			p.tree.AddChild(bodyBlock, stmt)
@@ -352,6 +356,10 @@ func (p *Parser) parseFor() a.NodeID {
 		elseBlock = p.tree.NewNode(a.NodeBlock, p.current.Start, p.current.Start)
 
 		for p.current.Type != l.DEDENT && p.current.Type != l.EOF {
+			if p.current.Type == l.NEWLINE {
+				p.advance()
+				continue
+			}
 			stmt := p.parseStatement()
 			if stmt != a.NoNode {
 				p.tree.AddChild(elseBlock, stmt)

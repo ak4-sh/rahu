@@ -8,6 +8,7 @@ import (
 
 	"rahu/analyser"
 	"rahu/lsp"
+	ast "rahu/parser/ast"
 	"rahu/source"
 )
 
@@ -766,6 +767,82 @@ func TestNewStatementsDoNotProduceUnexpectedDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAdjacentParenthesizedFStringsDoNotProduceDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "class Auth:\n    def __init__(self, username):\n        self.username = username\n\n    def build(self, realm, nonce, path, respdig):\n        base = (\n            f'username=\"{self.username}\", realm=\"{realm}\", nonce=\"{nonce}\", ' \n            f'uri=\"{path}\", response=\"{respdig}\"'\n        )\n        return base\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	if doc == nil {
+		t.Fatal("expected open document")
+	}
+	if len(doc.SemErrs) != 0 {
+		t.Fatalf("unexpected semantic diagnostics: %+v", doc.SemErrs)
+	}
+	if doc.Tree == nil {
+		t.Fatal("expected parsed tree")
+	}
+
+	classNode := doc.Tree.Children(doc.Tree.Root)[0]
+	_, _, classBody := doc.Tree.ClassParts(classNode)
+	fn := doc.Tree.Children(classBody)[1]
+	_, _, body := doc.Tree.FunctionParts(fn)
+	bodyStmt := doc.Tree.Children(body)[0]
+	assignKids := doc.Tree.Children(bodyStmt)
+	if len(assignKids) != 2 {
+		t.Fatalf("unexpected assignment children: %d", len(assignKids))
+	}
+	if doc.Tree.Node(assignKids[0]).Kind != ast.NodeFString {
+		t.Fatalf("expected merged f-string assignment value, got %s", doc.Tree.Node(assignKids[0]).Kind)
+	}
+}
+
+func TestResponseLinksStyleMethodWithBlankLineBeforeReturnDoesNotProduceDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "class Response:\n    @property\n    def links(self):\n        header = self.headers.get(\"link\")\n\n        resolved_links = {}\n\n        if header:\n            links = parse_header_links(header)\n\n            for link in links:\n                key = link.get(\"rel\") or link.get(\"url\")\n                resolved_links[key] = link\n\n        return resolved_links\n"
+	writeWorkspaceFile(t, filepath.Join(root, "helpers.py"), "def parse_header_links(value):\n    return []\n")
+	writeWorkspaceFile(t, mainPath, "from helpers import parse_header_links\n\n"+mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: "from helpers import parse_header_links\n\n" + mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	if doc == nil {
+		t.Fatal("expected open document")
+	}
+	for _, err := range doc.SemErrs {
+		if strings.Contains(err.Msg, "unexpected token") {
+			t.Fatalf("unexpected semantic diagnostic: %+v", err)
+		}
+	}
+}
+
+func TestWarningMessageFStringConversionDoesNotProduceParseErrors(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "def build_warning(username):\n    return (\n        \"Non-string usernames will no longer be supported in Requests \"\n        f\"3.0.0. Please convert the object you've passed in ({username!r}) to \"\n        \"a string or bytes object in the near future to avoid \"\n        \"problems.\"\n    )\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	snapshot := s.buildBaseModuleSnapshot("main", mainURI, mainPath, mainCode, source.NewLineIndex(mainCode))
+	if snapshot == nil {
+		t.Fatal("expected module snapshot")
+	}
+	if len(snapshot.ParseErrs) != 0 {
+		t.Fatalf("unexpected parse errors: %+v", snapshot.ParseErrs)
+	}
+}
+
 func TestCompletionFromExternalModuleExports(t *testing.T) {
 	root := t.TempDir()
 	extRoot := filepath.Join(t.TempDir(), "site-packages")
@@ -1470,7 +1547,7 @@ func writeWorkspaceFile(t *testing.T, path, content string) {
 	}
 }
 
-func mustDefinitionAt(t *testing.T, s *Server, uri lsp.DocumentURI, code string, line, char int) *lsp.Location {
+func mustDefinitionAt(t *testing.T, s *Server, uri lsp.DocumentURI, _ string, line, char int) *lsp.Location {
 	t.Helper()
 
 	loc, err := s.Definition(&lsp.DefinitionParams{

@@ -12,6 +12,7 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 	if left == a.NoNode {
 		return a.NoNode
 	}
+	left = p.parseAdjacentStringLiterals(left)
 
 	left = p.postfixParseLoop(left)
 
@@ -101,6 +102,20 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 		p.tree.AddChild(binOpID, left)
 		p.tree.AddChild(binOpID, right)
 		left = binOpID
+	}
+	return left
+}
+
+func (p *Parser) parseAdjacentStringLiterals(left a.NodeID) a.NodeID {
+	for left != a.NoNode && (p.tree.Node(left).Kind == a.NodeString || p.tree.Node(left).Kind == a.NodeFString) {
+		if p.current.Type != l.STRING && p.current.Type != l.FSTRING {
+			return left
+		}
+		right := p.parsePrimary()
+		if right == a.NoNode {
+			return left
+		}
+		left = p.mergeStringLiterals(left, right)
 	}
 	return left
 }

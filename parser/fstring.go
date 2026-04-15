@@ -29,15 +29,21 @@ func (p *Parser) parseFString() a.NodeID {
 				continue
 			}
 			p.addFStringText(ret, content[textStart:i], start+contentOffset+uint32(textStart), uint32(i-textStart))
-			exprEnd, ok := scanFStringExpr(content, i+1)
+			field, ok := scanFStringField(content, i+1)
 			if !ok {
 				p.error(a.Range{Start: start + contentOffset + uint32(i), End: end}, "unterminated f-string expression")
 				return ret
 			}
-			exprSrc := content[i+1 : exprEnd]
-			exprNode := p.parseFStringExpr(exprSrc, start+contentOffset+uint32(i+1), start+contentOffset+uint32(exprEnd+1))
+			exprSrc := content[field.exprStart:field.exprEnd]
+			exprNode := p.parseFStringExpr(exprSrc, start+contentOffset+uint32(field.exprStart), start+contentOffset+uint32(field.close+1))
+			if field.hasConversion {
+				conv := content[field.conversion]
+				if conv != 'r' && conv != 'R' && conv != 's' && conv != 'S' && conv != 'a' && conv != 'A' {
+					p.error(a.Range{Start: start + contentOffset + uint32(field.conversion-1), End: start + contentOffset + uint32(field.conversion+1)}, "invalid f-string conversion")
+				}
+			}
 			p.tree.AddChild(ret, exprNode)
-			i = exprEnd + 1
+			i = field.close + 1
 			textStart = i
 
 		case '}':
@@ -56,6 +62,69 @@ func (p *Parser) parseFString() a.NodeID {
 
 	p.addFStringText(ret, content[textStart:], start+contentOffset+uint32(textStart), uint32(len(content)-textStart))
 	return ret
+}
+
+type fStringField struct {
+	exprStart     int
+	exprEnd       int
+	conversion    int
+	formatSpec    int
+	close         int
+	hasConversion bool
+	hasFormatSpec bool
+}
+
+func (p *Parser) stringNodeAsFStringText(id a.NodeID) a.NodeID {
+	if id == a.NoNode || p.tree.Node(id).Kind != a.NodeString {
+		return a.NoNode
+	}
+	text, _ := p.tree.StringText(id)
+	idx := uint32(len(p.tree.Strings))
+	p.tree.Strings = append(p.tree.Strings, text)
+	textNode := p.tree.NewNode(a.NodeFStringText, p.tree.Node(id).Start, p.tree.Node(id).End)
+	p.tree.Nodes[textNode].Data = idx
+	return textNode
+}
+
+func (p *Parser) mergeStringLiterals(left, right a.NodeID) a.NodeID {
+	if left == a.NoNode || right == a.NoNode {
+		return left
+	}
+	leftKind := p.tree.Node(left).Kind
+	rightKind := p.tree.Node(right).Kind
+	if leftKind == a.NodeString && rightKind == a.NodeString {
+		leftText, _ := p.tree.StringText(left)
+		rightText, _ := p.tree.StringText(right)
+		idx := uint32(len(p.tree.Strings))
+		p.tree.Strings = append(p.tree.Strings, leftText+rightText)
+		p.tree.Nodes[left].Data = idx
+		p.tree.Nodes[left].End = p.tree.Node(right).End
+		return left
+	}
+
+	var merged a.NodeID
+	if leftKind == a.NodeFString {
+		merged = left
+	} else {
+		merged = p.tree.NewNode(a.NodeFString, p.tree.Node(left).Start, p.tree.Node(right).End)
+		if textNode := p.stringNodeAsFStringText(left); textNode != a.NoNode {
+			p.tree.AddChild(merged, textNode)
+		}
+	}
+	if rightKind == a.NodeString {
+		if textNode := p.stringNodeAsFStringText(right); textNode != a.NoNode {
+			p.tree.AddChild(merged, textNode)
+		}
+	} else {
+		for child := p.tree.Node(right).FirstChild; child != a.NoNode; {
+			next := p.tree.Node(child).NextSibling
+			p.tree.Nodes[child].NextSibling = a.NoNode
+			p.tree.AddChild(merged, child)
+			child = next
+		}
+	}
+	p.tree.Nodes[merged].End = p.tree.Node(right).End
+	return merged
 }
 
 func (p *Parser) addFStringText(parent a.NodeID, text string, start, rawLen uint32) {
@@ -132,23 +201,33 @@ func cloneSubtree(dst, src *a.AST, id a.NodeID, delta uint32) a.NodeID {
 }
 
 func parseFStringLexeme(lexeme string) (string, uint32, bool) {
-	if len(lexeme) < 3 {
+	prefixLen := 0
+	for prefixLen < len(lexeme) {
+		ch := lexeme[prefixLen]
+		if ch == 'f' || ch == 'F' || ch == 'r' || ch == 'R' {
+			prefixLen++
+			continue
+		}
+		break
+	}
+	if prefixLen == 0 || prefixLen > 2 || len(lexeme) < prefixLen+2 {
 		return "", 0, false
 	}
-	quote := lexeme[1]
+	quote := lexeme[prefixLen]
 	if quote != '\'' && quote != '"' {
 		return "", 0, false
 	}
-	if len(lexeme) >= 8 && lexeme[2] == quote && lexeme[3] == quote {
-		return lexeme[4 : len(lexeme)-3], 4, true
+	if len(lexeme) >= prefixLen+6 && lexeme[prefixLen+1] == quote && lexeme[prefixLen+2] == quote {
+		return lexeme[prefixLen+3 : len(lexeme)-3], uint32(prefixLen + 3), true
 	}
 	if len(lexeme) < 3 || lexeme[len(lexeme)-1] != quote {
 		return "", 0, false
 	}
-	return lexeme[2 : len(lexeme)-1], 2, true
+	return lexeme[prefixLen+1 : len(lexeme)-1], uint32(prefixLen + 1), true
 }
 
-func scanFStringExpr(content string, start int) (int, bool) {
+func scanFStringField(content string, start int) (fStringField, bool) {
+	field := fStringField{exprStart: start, exprEnd: -1, conversion: -1, formatSpec: -1, close: -1}
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0
@@ -188,6 +267,24 @@ func scanFStringExpr(content string, start int) (int, bool) {
 			if triple {
 				i += 2
 			}
+		case '!':
+			if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && !field.hasConversion && !field.hasFormatSpec {
+				field.exprEnd = i
+				if i+1 >= len(content) {
+					return field, false
+				}
+				field.hasConversion = true
+				field.conversion = i + 1
+				i++
+			}
+		case ':':
+			if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && !field.hasFormatSpec {
+				if field.exprEnd < 0 {
+					field.exprEnd = i
+				}
+				field.hasFormatSpec = true
+				field.formatSpec = i + 1
+			}
 		case '(':
 			parenDepth++
 		case ')':
@@ -204,7 +301,11 @@ func scanFStringExpr(content string, start int) (int, bool) {
 			braceDepth++
 		case '}':
 			if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
-				return i, true
+				if field.exprEnd < 0 {
+					field.exprEnd = i
+				}
+				field.close = i
+				return field, true
 			}
 			if braceDepth > 0 {
 				braceDepth--
@@ -212,5 +313,5 @@ func scanFStringExpr(content string, start int) (int, bool) {
 		}
 	}
 
-	return 0, false
+	return field, false
 }

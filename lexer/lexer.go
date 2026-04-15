@@ -396,6 +396,26 @@ func (l *Lexer) readString(quoteType byte) (string, TokenType) {
 	return sb.String(), STRING
 }
 
+func (l *Lexer) readRawString(quoteType byte) (string, TokenType) {
+	var sb strings.Builder
+	l.readChar() // Skip opening quote
+
+	for l.ch != 0 {
+		if l.ch == quoteType {
+			break
+		}
+		sb.WriteByte(l.ch)
+		l.readChar()
+	}
+
+	if l.ch != quoteType {
+		return sb.String(), UNTERMINATED_STRING
+	}
+
+	l.readChar()
+	return sb.String(), STRING
+}
+
 func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
 	var sb strings.Builder
 	// skipping all quotes
@@ -421,12 +441,38 @@ func (l *Lexer) readMultilineString(quoteType byte) (string, TokenType) {
 	}
 }
 
-func (l *Lexer) readFString() (string, TokenType) {
-	start := l.position
-	quoteType := l.peek()
-	isTriple := l.peekAhead(1) == quoteType && l.peekAhead(2) == quoteType
+func (l *Lexer) readRawMultilineString(quoteType byte) (string, TokenType) {
+	var sb strings.Builder
+	for range 3 {
+		l.readChar()
+	}
 
-	l.readChar() // consume prefix
+	for {
+		if l.ch == 0 {
+			return sb.String(), UNTERMINATED_STRING
+		}
+
+		if l.ch == quoteType && l.peek() == quoteType && l.peekAhead(1) == quoteType {
+			for range 3 {
+				l.readChar()
+			}
+			return sb.String(), STRING
+		}
+
+		sb.WriteByte(l.ch)
+		l.readChar()
+	}
+}
+
+func (l *Lexer) readFString(prefixLen uint32, raw bool) (string, TokenType) {
+	start := l.position
+	quoteType := l.input[l.position+prefixLen]
+	tripleStart := l.position + prefixLen + 1
+	isTriple := tripleStart+1 < uint32(len(l.input)) && l.input[tripleStart] == quoteType && l.input[tripleStart+1] == quoteType
+
+	for range prefixLen {
+		l.readChar()
+	}
 	if isTriple {
 		for range 3 {
 			l.readChar()
@@ -441,7 +487,7 @@ func (l *Lexer) readFString() (string, TokenType) {
 				}
 				return l.input[start:l.position], FSTRING
 			}
-			if l.ch == '\\' {
+			if !raw && l.ch == '\\' {
 				l.readChar()
 				if l.ch == 0 {
 					return l.input[start:l.position], UNTERMINATED_STRING
@@ -453,7 +499,7 @@ func (l *Lexer) readFString() (string, TokenType) {
 
 	l.readChar() // consume opening quote
 	for l.ch != 0 {
-		if l.ch == '\\' {
+		if !raw && l.ch == '\\' {
 			l.readChar()
 			if l.ch == 0 {
 				return l.input[start:l.position], UNTERMINATED_STRING
@@ -469,6 +515,21 @@ func (l *Lexer) readFString() (string, TokenType) {
 	}
 
 	return l.input[start:l.position], UNTERMINATED_STRING
+}
+
+func stringPrefixLength(ch, next byte) (prefixLen uint32, raw bool, fstring bool) {
+	switch {
+	case (ch == 'f' || ch == 'F') && (next == '\'' || next == '"'):
+		return 1, false, true
+	case (ch == 'r' || ch == 'R') && (next == '\'' || next == '"'):
+		return 1, true, false
+	case (ch == 'r' || ch == 'R') && (next == 'f' || next == 'F'):
+		return 2, true, true
+	case (ch == 'f' || ch == 'F') && (next == 'r' || next == 'R'):
+		return 2, true, true
+	default:
+		return 0, false, false
+	}
 }
 
 func (l *Lexer) consumeLeadingIndent() (uint32, byte, bool, error) {
@@ -623,11 +684,30 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	if l.isChar() || l.ch == '_' {
-		if (l.ch == 'f' || l.ch == 'F') && (l.peek() == '"' || l.peek() == '\'') {
+		if prefixLen, raw, fstring := stringPrefixLength(l.ch, l.peek()); prefixLen != 0 {
+			quotePos := l.position + prefixLen
+			if quotePos >= uint32(len(l.input)) || (l.input[quotePos] != '"' && l.input[quotePos] != '\'') {
+				goto identifier
+			}
 			start := l.position
-			lit, typ := l.readFString()
+			var lit string
+			var typ TokenType
+			if fstring {
+				lit, typ = l.readFString(prefixLen, raw)
+			} else {
+				quote := l.input[quotePos]
+				for range prefixLen {
+					l.readChar()
+				}
+				if quotePos+2 < uint32(len(l.input)) && l.input[quotePos+1] == quote && l.input[quotePos+2] == quote {
+					lit, typ = l.readRawMultilineString(quote)
+				} else {
+					lit, typ = l.readRawString(quote)
+				}
+			}
 			return Token{Type: typ, Literal: lit, Start: start, End: l.position}
 		}
+	identifier:
 		start := l.position
 		lit := l.readIdentifier()
 		typ := NAME
