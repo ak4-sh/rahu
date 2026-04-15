@@ -421,6 +421,43 @@ func buildMemberScope(exports map[string]*analyser.Symbol) *analyser.Scope {
 	return scope
 }
 
+func importSurfaceFromSnapshot(snapshot *ModuleSnapshot) *ModuleImportSurface {
+	if snapshot == nil {
+		return nil
+	}
+	return &ModuleImportSurface{
+		Name:        snapshot.Name,
+		URI:         snapshot.URI,
+		Path:        snapshot.Path,
+		Tree:        snapshot.Tree,
+		Exports:     snapshot.Exports,
+		MemberScope: snapshot.MemberScope,
+		ExportHash:  snapshot.ExportHash,
+	}
+}
+
+func (s *Server) lookupImportSurface(name string, lookup moduleImportSurfaceLookup) (*ModuleImportSurface, bool) {
+	if name == "" {
+		return nil, false
+	}
+	if lookup != nil {
+		if surface, ok := lookup(name); ok && surface != nil {
+			return surface, true
+		}
+	}
+	s.indexMu.RLock()
+	_, workspaceModule := s.modulesByName[name]
+	s.indexMu.RUnlock()
+	if workspaceModule {
+		return nil, false
+	}
+	snapshot, ok := s.analyzeModuleByName(name)
+	if !ok || snapshot == nil {
+		return nil, false
+	}
+	return importSurfaceFromSnapshot(snapshot), true
+}
+
 func (s *Server) buildImportSurfaceFromBase(base *StartupModuleBase) *ModuleImportSurface {
 	return s.buildImportSurfaceFromBaseWithLookup(base, nil)
 }
@@ -1166,7 +1203,7 @@ func (s *Server) bindImportStmtWithSurfaceLookup(tree *ast.AST, stmt ast.NodeID,
 		local.Span = ast.Range{}
 		local.URI = ""
 
-		surface, ok := lookup(moduleToBind)
+		surface, ok := s.lookupImportSurface(moduleToBind, lookup)
 		if !ok {
 			errs = append(errs, unresolvedModuleError(tree.RangeOf(target), moduleToBind))
 			continue
@@ -1244,7 +1281,7 @@ func (s *Server) bindSubmoduleChainFromSurface(root *analyser.Symbol, rootName, 
 
 	for _, seg := range segments[1:] {
 		prefix = prefix + "." + seg
-		surface, ok := lookup(prefix)
+		surface, ok := s.lookupImportSurface(prefix, lookup)
 		if !ok {
 			return
 		}
@@ -1361,7 +1398,7 @@ func (s *Server) bindFromImportStmtWithSurfaceLookup(tree *ast.AST, stmt ast.Nod
 		return nil
 	}
 
-	surface, ok := lookup(moduleName)
+	surface, ok := s.lookupImportSurface(moduleName, lookup)
 	if !ok {
 		return []analyser.SemanticError{unresolvedModuleError(fromImportModuleSpan(tree, stmt, module), moduleName)}
 	}
@@ -1411,7 +1448,7 @@ func (s *Server) bindFromImportStmtWithSurfaceLookup(tree *ast.AST, stmt ast.Nod
 		}
 
 		submoduleName := moduleName + "." + name
-		submodule, ok := lookup(submoduleName)
+		submodule, ok := s.lookupImportSurface(submoduleName, lookup)
 		if !ok || submodule == nil {
 			errs = append(errs, missingImportNameError(tree.RangeOf(target), moduleName, name))
 			continue

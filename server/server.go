@@ -30,6 +30,7 @@ type Server struct {
 	externalModulesByURI   map[lsp.DocumentURI]ModuleFile
 	pythonBuiltinNames     map[string]struct{}
 	pythonModuleInfoByName map[string]pythonModuleInfo
+	pythonProjectRoots     []PythonProjectRoot
 	externalSearchRoots    []string
 	pythonExecutable       string
 
@@ -59,11 +60,26 @@ type Server struct {
 	indexingCancel           context.CancelFunc
 	indexingDone             chan struct{}
 	startup                  *startupReadiness
+	scheduleAsync            func(func())
 
 	// Reference index for fast O(1) reference lookups
 	refIndex *RefIndex
 
+	// Method introspection cache for synthetic module methods (lazy hover)
+	methodCacheMu     sync.RWMutex
+	pythonMethodCache map[string]pythonMethodInfo // key: "module.class.method"
+
 	conn *jsonrpc.Conn
+}
+
+// pythonMethodInfo stores cached introspection results for methods
+type pythonMethodInfo struct {
+	Module    string
+	Class     string
+	Method    string
+	Signature string
+	Docstring string
+	CachedAt  time.Time
 }
 
 type startupReadiness struct {
@@ -82,6 +98,11 @@ type ModuleFile struct {
 	URI  lsp.DocumentURI
 	Path string
 	Kind string
+}
+
+type PythonProjectRoot struct {
+	ProjectRoot string
+	ImportRoot  string
 }
 
 type StartupModuleBase struct {
@@ -145,6 +166,10 @@ func New(conn *jsonrpc.Conn) *Server {
 		snapshotLRU:            newSnapshotLRU(),
 		maxCachedModules:       defaultMaxCachedModules,
 		refIndex:               NewRefIndex(),
+		pythonMethodCache:      make(map[string]pythonMethodInfo),
+		scheduleAsync: func(fn func()) {
+			go fn()
+		},
 		startup: &startupReadiness{
 			priorityModuleNames: make(map[string]struct{}),
 			priorityOpenURIs:    make(map[lsp.DocumentURI]struct{}),

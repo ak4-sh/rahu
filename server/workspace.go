@@ -6,6 +6,7 @@ import (
 	"log"
 	"maps"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -96,12 +97,16 @@ func pathToURI(path string) lsp.DocumentURI {
 }
 
 func moduleNameFromPath(rootPath, filePath string) (string, bool) {
+	return moduleNameFromImportRoot(rootPath, filePath)
+}
+
+func moduleNameFromImportRoot(importRoot, filePath string) (string, bool) {
 	ext := filepath.Ext(filePath)
-	if rootPath == "" || (ext != ".py" && ext != ".pyi") {
+	if importRoot == "" || (ext != ".py" && ext != ".pyi") {
 		return "", false
 	}
 
-	rootAbs, err := filepath.Abs(rootPath)
+	rootAbs, err := filepath.Abs(importRoot)
 	if err != nil {
 		return "", false
 	}
@@ -135,6 +140,125 @@ func moduleNameFromPath(rootPath, filePath string) (string, bool) {
 	}
 
 	return strings.Join(parts, "."), true
+}
+
+func hasPythonProjectMarker(path string) bool {
+	for _, name := range []string{"pyproject.toml", "setup.py", "setup.cfg"} {
+		info, err := os.Stat(filepath.Join(path, name))
+		if err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func hasImportablePythonModule(path string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			if strings.HasPrefix(name, ".") || shouldSkipWorkspaceDir(name) {
+				continue
+			}
+			if _, ok := moduleNameFromImportRoot(path, filepath.Join(path, name, "__init__.py")); ok {
+				return true
+			}
+			if _, ok := moduleNameFromImportRoot(path, filepath.Join(path, name, "__init__.pyi")); ok {
+				return true
+			}
+			continue
+		}
+		if isPythonModulePath(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func detectImportRoot(projectRoot string) string {
+	if projectRoot == "" {
+		return ""
+	}
+	srcRoot := filepath.Join(projectRoot, "src")
+	if info, err := os.Stat(srcRoot); err == nil && info.IsDir() && hasImportablePythonModule(srcRoot) {
+		return srcRoot
+	}
+	return projectRoot
+}
+
+func appendPythonProjectRoot(roots []PythonProjectRoot, projectRoot string) []PythonProjectRoot {
+	if projectRoot == "" {
+		return roots
+	}
+	projectAbs, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return roots
+	}
+	for _, root := range roots {
+		if root.ProjectRoot == projectAbs {
+			return roots
+		}
+	}
+	return append(roots, PythonProjectRoot{ProjectRoot: projectAbs, ImportRoot: detectImportRoot(projectAbs)})
+}
+
+func findPythonProjectRoots(rootPath string) []PythonProjectRoot {
+	if rootPath == "" {
+		return nil
+	}
+	rootAbs, err := filepath.Abs(rootPath)
+	if err != nil {
+		return []PythonProjectRoot{{ProjectRoot: rootPath, ImportRoot: rootPath}}
+	}
+	roots := []PythonProjectRoot{{ProjectRoot: rootAbs, ImportRoot: rootAbs}}
+	_ = filepath.WalkDir(rootAbs, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if path != rootAbs && shouldSkipWorkspaceDir(d.Name()) {
+			return filepath.SkipDir
+		}
+		if path != rootAbs && hasPythonProjectMarker(path) {
+			roots = appendPythonProjectRoot(roots, path)
+		}
+		return nil
+	})
+	sort.Slice(roots, func(i, j int) bool {
+		if len(roots[i].ImportRoot) == len(roots[j].ImportRoot) {
+			return roots[i].ImportRoot < roots[j].ImportRoot
+		}
+		return len(roots[i].ImportRoot) > len(roots[j].ImportRoot)
+	})
+	return roots
+}
+
+func moduleNameForPath(filePath string, roots []PythonProjectRoot) (string, bool) {
+	fileAbs, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", false
+	}
+	for _, root := range roots {
+		importRoot := root.ImportRoot
+		if importRoot == "" {
+			continue
+		}
+		importAbs, err := filepath.Abs(importRoot)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(importAbs, fileAbs)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		return moduleNameFromImportRoot(importAbs, fileAbs)
+	}
+	return "", false
 }
 
 func modulePathPriority(path string) int {
@@ -185,10 +309,12 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 
 	modulesByName := make(map[string]ModuleFile)
 	modulesByURI := make(map[lsp.DocumentURI]ModuleFile)
+	projectRoots := findPythonProjectRoots(rootPath)
 	if rootPath == "" {
 		s.indexMu.Lock()
 		s.modulesByName = modulesByName
 		s.modulesByURI = modulesByURI
+		s.pythonProjectRoots = nil
 		s.indexMu.Unlock()
 		return nil
 	}
@@ -216,7 +342,7 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 			return nil
 		}
 
-		name, ok := moduleNameFromPath(rootPath, path)
+		name, ok := moduleNameForPath(path, projectRoots)
 		if !ok {
 			return nil
 		}
@@ -243,6 +369,7 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 	s.indexMu.Lock()
 	s.modulesByName = modulesByName
 	s.modulesByURI = modulesByURI
+	s.pythonProjectRoots = projectRoots
 	s.externalModulesByName = make(map[string]ModuleFile)
 	s.externalModulesByURI = make(map[lsp.DocumentURI]ModuleFile)
 	s.indexMu.Unlock()

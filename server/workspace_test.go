@@ -121,6 +121,66 @@ func TestBuildModuleIndexMixedRepoOnlyIndexesPythonModules(t *testing.T) {
 	}
 }
 
+func TestFindPythonProjectRootsPrefersSrcImportRoot(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "__init__.py"), "")
+
+	roots := findPythonProjectRoots(root)
+	for _, got := range roots {
+		if got.ProjectRoot == requestsRoot {
+			wantImportRoot := filepath.Join(requestsRoot, "src")
+			if got.ImportRoot != wantImportRoot {
+				t.Fatalf("unexpected import root: got %q want %q", got.ImportRoot, wantImportRoot)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected nested requests project root in %+v", roots)
+}
+
+func TestModuleNameForPathNestedSrcLayout(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	structuresPath := filepath.Join(requestsRoot, "src", "requests", "structures.py")
+	writeWorkspaceSource(t, structuresPath, "value = 1\n")
+
+	roots := findPythonProjectRoots(root)
+	got, ok := moduleNameForPath(structuresPath, roots)
+	if !ok {
+		t.Fatal("expected module name for nested src path")
+	}
+	if got != "requests.structures" {
+		t.Fatalf("unexpected module name: got %q want %q", got, "requests.structures")
+	}
+}
+
+func TestBuildModuleIndexNestedSrcProjectUsesImportRootNames(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "__init__.py"), "")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "compat.py"), "value = 1\n")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "structures.py"), "from .compat import value\n")
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+
+	for _, name := range []string{"requests", "requests.compat", "requests.structures"} {
+		if _, ok := s.LookupModule(name); !ok {
+			t.Fatalf("expected indexed module %q", name)
+		}
+	}
+	for _, name := range []string{"pythonLibs.requests.src.requests", "pythonLibs.requests.src.requests.compat", "pythonLibs.requests.src.requests.structures"} {
+		if _, ok := s.LookupModule(name); ok {
+			t.Fatalf("did not expect workspace-root-style module %q", name)
+		}
+	}
+}
+
 func TestInitializeBuildsModuleIndex(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "pkg", "mod.py"))
