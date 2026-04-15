@@ -169,8 +169,20 @@ func NewBuiltinScope() *Scope {
 		defineMember(listSym, "append")
 	}
 	if strSym, ok := s.LookupLocal("str"); ok {
-		for _, name := range []string{"split", "join", "lower", "upper", "strip"} {
+		for _, name := range []string{
+			"split", "join", "lower", "upper", "strip",
+			"encode", "decode", "startswith", "endswith", "replace",
+			"find", "rfind", "index", "rindex", "count",
+			"format", "isalpha", "isdigit", "isspace", "isalnum",
+		} {
 			defineMember(strSym, name)
+		}
+	}
+	if intSym, ok := s.LookupLocal("int"); ok {
+		for _, name := range []string{
+			"bit_length", "to_bytes", "from_bytes",
+		} {
+			defineMember(intSym, name)
 		}
 	}
 	if dictSym, ok := s.LookupLocal("dict"); ok {
