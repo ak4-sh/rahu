@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"rahu"
 	"rahu/lsp"
 	"rahu/source"
 )
@@ -26,13 +28,21 @@ func pythonSyntheticModuleURI(kind, name string) lsp.DocumentURI {
 	return lsp.DocumentURI(kind + ":///" + strings.ReplaceAll(name, ".", "/"))
 }
 
+func typeshedStubURI(stubPath string) lsp.DocumentURI {
+	return lsp.DocumentURI("typeshed:///" + stubPath)
+}
+
+func isTypeshedURI(uri lsp.DocumentURI) bool {
+	return strings.HasPrefix(string(uri), "typeshed:///")
+}
+
 func isSyntheticModule(mod ModuleFile) bool {
-	return mod.Kind == "builtin" || mod.Kind == "frozen"
+	return mod.Kind == "builtin" || mod.Kind == "frozen" || isTypeshedURI(mod.URI)
 }
 
 func isSyntheticURI(uri lsp.DocumentURI) bool {
 	s := string(uri)
-	return strings.HasPrefix(s, "builtin:///") || strings.HasPrefix(s, "frozen:///")
+	return strings.HasPrefix(s, "builtin:///") || strings.HasPrefix(s, "frozen:///") || strings.HasPrefix(s, "typeshed:///")
 }
 
 func isValidSyntheticIdentifier(name string) bool {
@@ -243,11 +253,45 @@ func (s *Server) syntheticModuleSource(mod ModuleFile) (string, *source.LineInde
 	if !isSyntheticModule(mod) {
 		return "", nil, false
 	}
+
+	// Handle typeshed stubs
+	if isTypeshedURI(mod.URI) {
+		return s.typeshedStubSource(mod)
+	}
+
+	// Handle builtin/frozen modules
 	info, ok := s.pythonModuleInfo(mod.Name)
 	if !ok {
 		return "", nil, false
 	}
 	text := syntheticModuleText(info)
+	return text, source.NewLineIndex(text), true
+}
+
+// typeshedStubSource reads a typeshed stub from the embedded filesystem.
+func (s *Server) typeshedStubSource(mod ModuleFile) (string, *source.LineIndex, bool) {
+	if s.typeshedLoader == nil {
+		return "", nil, false
+	}
+
+	// Extract the stub path from the URI
+	uri := string(mod.URI)
+	if !strings.HasPrefix(uri, "typeshed:///") {
+		return "", nil, false
+	}
+	stubPath := strings.TrimPrefix(uri, "typeshed:///")
+
+	// Read from embedded FS
+	data, err := fs.ReadFile(rahu.TypeshedFS(), stubPath+".pyi")
+	if err != nil {
+		// Try as a package __init__.pyi
+		data, err = fs.ReadFile(rahu.TypeshedFS(), stubPath+"/__init__.pyi")
+		if err != nil {
+			return "", nil, false
+		}
+	}
+
+	text := string(data)
 	return text, source.NewLineIndex(text), true
 }
 
@@ -257,6 +301,31 @@ func (s *Server) resolveExternalModule(name string) (ModuleFile, bool) {
 		s.indexMu.RUnlock()
 		return mod, true
 	}
+
+	// Try typeshed first
+	if s.typeshedLoader != nil && !s.typeshedLoader.IsDisabled() {
+		if f, ok := s.typeshedLoader.FindStub(name); ok {
+			s.indexMu.RUnlock()
+			defer f.Close()
+
+			// Read stub content to determine the path for URI
+			// The typeshed loader returns a file from the embedded FS
+			// We create a virtual URI for it
+			stubPath := s.typeshedLoader.GetStubPath(name)
+			uri := typeshedStubURI(stubPath)
+			mod := ModuleFile{
+				Name: name,
+				URI:  uri,
+				Path: "", // Typeshed stubs don't have a real filesystem path
+				Kind: "typeshed",
+			}
+			s.indexMu.Lock()
+			s.cacheExternalModuleLocked(mod)
+			s.indexMu.Unlock()
+			return mod, true
+		}
+	}
+
 	roots := append([]string(nil), s.externalSearchRoots...)
 	python := s.pythonExecutable
 	s.indexMu.RUnlock()

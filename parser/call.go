@@ -103,9 +103,6 @@ func (p *Parser) parseCallArg(seenKeyword *bool, seenKwStar *bool) a.NodeID {
 	}
 
 	if p.current.Type == l.NAME && p.peek.Type == l.EQUAL {
-		if *seenKwStar {
-			p.error(a.Range{Start: p.current.Start, End: p.current.End}, "keyword argument follows **kwargs")
-		}
 		keyword := p.tree.NewNameNode(p.current.Start, p.current.End, p.current.Literal)
 		start := p.current.Start
 		p.advanceBy(2)

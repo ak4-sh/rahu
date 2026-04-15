@@ -33,6 +33,7 @@ type Server struct {
 	pythonProjectRoots     []PythonProjectRoot
 	externalSearchRoots    []string
 	pythonExecutable       string
+	typeshedLoader         *TypeshedLoader
 
 	// Snapshots lock - protects module analysis cache (read-heavy)
 	snapshotsMu           sync.RWMutex

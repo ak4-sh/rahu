@@ -242,6 +242,21 @@ func (s *Server) Initialize(
 	s.externalSearchRoots = roots
 	s.pythonBuiltinNames = builtins
 	s.pythonModuleInfoByName = make(map[string]pythonModuleInfo)
+
+	// Initialize typeshed loader based on Python version
+	pyVersion := GetPythonVersion(env.Executable)
+	typeshedLoader, err := NewTypeshedLoader(pyVersion)
+	if err != nil {
+		log.Printf("[typeshed] Failed to initialize: %v", err)
+	} else {
+		s.typeshedLoader = typeshedLoader
+		if typeshedLoader.IsDisabled() {
+			log.Printf("[typeshed] Disabled for Python %d.%d", pyVersion.Major, pyVersion.Minor)
+		} else {
+			log.Printf("[typeshed] Enabled for Python %d.%d", pyVersion.Major, pyVersion.Minor)
+		}
+	}
+	_ = pyVersion // Silence unused warning if typeshed fails
 	s.indexMu.Unlock()
 
 	// Indexing will start in backgroundIndex() triggered by Initialized

@@ -95,6 +95,7 @@ Server-side analysis stores AST, definitions, resolved symbols, semantic diagnos
 - Generates synthetic module snapshots for non-file-backed modules (e.g. `sys`, `_frozen_importlib`)
 - Augments module exports with interpreter-inspected members for modules with incomplete static exports (e.g. extension-backed stdlib like `datetime`, `collections`)
 - Supports package submodule fallback for `from pkg import submodule` resolution
+- **Embedded typeshed stubs** for standard library and third-party packages with Python version filtering
 
 ### JSON-RPC Transport
 
@@ -362,6 +363,43 @@ Notes:
 - Instance attributes via `self.x = ...` are tracked separately
 
 The current analyser still models inheritance, promoted members, and instance attributes in the same general way, but editor-facing features now also rely on constructor-based instance typing, container element typing, and workspace-aware indexing.
+
+## Typeshed Integration
+
+Rahu embeds [typeshed](https://github.com/python/typeshed) stubs directly into the binary for accurate type information without external dependencies.
+
+### How It Works
+
+1. **Zero Setup**: Typeshed stubs are embedded at build time and ship with rahu
+2. **Python Version Filtering**: Automatically uses stubs appropriate for your Python version (3.10-3.14 supported)
+3. **Resolution Order**:
+   - Workspace stubs (`.pyi` files in your project)
+   - Embedded typeshed stubs (stdlib and third-party)
+   - Runtime Python introspection (fallback)
+
+### Example: `urllib3.util.parse_url`
+
+With typeshed integration, rahu can resolve:
+```python
+from urllib3.util import parse_url
+proxy_url = parse_url(proxy)
+print(proxy_url.host)  # ✅ Resolved: Url class has .host attribute
+```
+
+### Python Version Support
+
+Typeshed is automatically disabled if your Python version exceeds the maximum supported (currently 3.14), falling back to introspection only.
+
+### Updating Typeshed
+
+To update the bundled typeshed:
+```bash
+cd third_party/typeshed
+git fetch origin
+git checkout 2024.1.5  # Or latest release
+cd ../..
+go build ./...
+```
 
 ## Getting Started
 

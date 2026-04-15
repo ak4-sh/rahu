@@ -1337,7 +1337,6 @@ func TestParseCallKeywordArgErrors(t *testing.T) {
 		{name: "missing star expr", src: "foo(*)\n", want: "expected expression after '*' in call argument"},
 		{name: "missing kwstar expr", src: "foo(**)\n", want: "expected expression after '**' in call argument"},
 		{name: "positional after kwstar", src: "foo(**kw, x)\n", want: "positional argument follows **kwargs"},
-		{name: "keyword after kwstar", src: "foo(**kw, x=1)\n", want: "keyword argument follows **kwargs"},
 	}
 
 	for _, tt := range tests {
@@ -1366,6 +1365,57 @@ func TestParseCallStarAndKwStarArguments(t *testing.T) {
 	requireKind(t, tree, callKids[4], a.NodeKwStarArg)
 	if got := nameText(t, tree, tree.ChildAt(callKids[4], 0)); got != "kw" {
 		t.Fatalf("unexpected kwstar arg expr: got %q", got)
+	}
+}
+
+func TestParseCallKeywordArgAfterKwStar(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "single keyword after **kwargs",
+			src:  "foo(**kw, x=1)\n",
+			want: []string{"foo", "kw", "x", "1"},
+		},
+		{
+			name: "multiple keywords after **kwargs",
+			src:  "foo(**kw, x=1, y=2)\n",
+			want: []string{"foo", "kw", "x", "1", "y", "2"},
+		},
+		{
+			name: "keyword after **kwargs with earlier args",
+			src:  "foo(a, *xs, **kw, x=1)\n",
+			want: []string{"foo", "a", "xs", "kw", "x", "1"},
+		},
+		{
+			name: "**kwargs followed by keyword with complex expr",
+			src:  "foo(**kw, x=a+b)\n",
+			want: []string{"foo", "kw", "x"},
+		},
+		{
+			name: "nested call with keyword after **kwargs",
+			src:  "foo(**bar(), x=1)\n",
+			want: []string{"foo", "bar", "x", "1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+
+			exprStmt := moduleStmt(t, tree, 0)
+			call := requireChildCount(t, tree, exprStmt, 1)[0]
+			requireKind(t, tree, call, a.NodeCall)
+
+			// Verify we have the expected number of children (func + args)
+			kids := tree.Children(call)
+			if len(kids) < 2 {
+				t.Fatalf("expected at least 2 children, got %d", len(kids))
+			}
+		})
 	}
 }
 
