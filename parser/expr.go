@@ -236,6 +236,14 @@ func (p *Parser) parsePrimary() a.NodeID {
 		p.advance()
 		return ret
 
+	case l.BSTRING:
+		idx := uint32(len(p.tree.Bytes))
+		p.tree.Bytes = append(p.tree.Bytes, p.current.Literal)
+		ret := p.tree.NewNode(a.NodeBytes, p.current.Start, p.current.End)
+		p.tree.Nodes[ret].Data = idx
+		p.advance()
+		return ret
+
 	case l.FSTRING:
 		return p.parseFString()
 
