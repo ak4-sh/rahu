@@ -286,8 +286,75 @@ func (s *Server) Initialized(_ *struct{}) {
 	go s.backgroundIndex(ctx)
 }
 
+func newStartupReadiness() *startupReadiness {
+	return &startupReadiness{
+		priorityModuleNames: make(map[string]struct{}),
+		priorityOpenURIs:    make(map[lsp.DocumentURI]struct{}),
+		firstDiagAtByURI:    make(map[lsp.DocumentURI]time.Time),
+		firstApplyAtByURI:   make(map[lsp.DocumentURI]time.Time),
+	}
+}
+
+func (s *Server) resetStartupReadiness() {
+	s.miscMu.Lock()
+	s.startup = newStartupReadiness()
+	s.miscMu.Unlock()
+}
+
+func (s *Server) markOpenDocumentSnapshotApplied(uri lsp.DocumentURI) {
+	s.miscMu.Lock()
+	defer s.miscMu.Unlock()
+	if s.startup == nil {
+		return
+	}
+	if _, ok := s.startup.priorityOpenURIs[uri]; !ok {
+		return
+	}
+	if s.startup.firstApplyAtByURI[uri].IsZero() {
+		s.startup.firstApplyAtByURI[uri] = time.Now()
+	}
+	s.markPriorityReadyIfSatisfiedLocked()
+}
+
+func (s *Server) markOpenDocumentDiagnosticsPublished(uri lsp.DocumentURI) {
+	s.miscMu.Lock()
+	defer s.miscMu.Unlock()
+	if s.startup == nil {
+		return
+	}
+	if _, ok := s.startup.priorityOpenURIs[uri]; !ok {
+		return
+	}
+	if s.startup.firstDiagAtByURI[uri].IsZero() {
+		s.startup.firstDiagAtByURI[uri] = time.Now()
+	}
+	s.markPriorityReadyIfSatisfiedLocked()
+}
+
+func (s *Server) markPriorityReadyIfSatisfied() {
+	s.miscMu.Lock()
+	defer s.miscMu.Unlock()
+	s.markPriorityReadyIfSatisfiedLocked()
+}
+
+func (s *Server) markPriorityReadyIfSatisfiedLocked() {
+	if s.startup == nil || !s.startup.allOpenFilesReadyAt.IsZero() {
+		return
+	}
+	if len(s.startup.priorityOpenURIs) == 0 {
+		return
+	}
+	for uri := range s.startup.priorityOpenURIs {
+		if s.startup.firstApplyAtByURI[uri].IsZero() || s.startup.firstDiagAtByURI[uri].IsZero() {
+			return
+		}
+	}
+	s.startup.allOpenFilesReadyAt = time.Now()
+}
+
 func (s *Server) backgroundIndex(ctx context.Context) {
 	defer close(s.indexingDone)
+	s.resetStartupReadiness()
 
 	s.createWorkspaceIndexingProgress()
 	s.beginWorkspaceIndexingProgress()
@@ -313,7 +380,28 @@ func (s *Server) backgroundIndex(ctx context.Context) {
 	s.reanalyzeOpenDocuments()
 	reanalyzeDuration := time.Since(reanalyzeStart)
 	if s.conn != nil {
-		log.Printf("INDEX: module_index=%s workspace=%s reanalyze_open_docs=%s", moduleIndexDuration, workspaceDuration, reanalyzeDuration)
+		s.miscMu.Lock()
+		startup := s.startup
+		priorityReadyAt := time.Time{}
+		allOpenReadyAt := time.Time{}
+		priorityCount := 0
+		priorityRounds := 0
+		if startup != nil {
+			priorityReadyAt = startup.priorityReadyAt
+			allOpenReadyAt = startup.allOpenFilesReadyAt
+			priorityCount = startup.priorityModuleCount
+			priorityRounds = startup.prioritySurfaceRounds
+		}
+		s.miscMu.Unlock()
+		priorityReadyDuration := time.Duration(0)
+		allOpenReadyDuration := time.Duration(0)
+		if !priorityReadyAt.IsZero() {
+			priorityReadyDuration = priorityReadyAt.Sub(workspaceStart)
+		}
+		if !allOpenReadyAt.IsZero() {
+			allOpenReadyDuration = allOpenReadyAt.Sub(workspaceStart)
+		}
+		log.Printf("INDEX: module_index=%s workspace=%s priority_ready=%s all_open_ready=%s priority_modules=%d priority_rounds=%d reanalyze_open_docs=%s", moduleIndexDuration, workspaceDuration, priorityReadyDuration, allOpenReadyDuration, priorityCount, priorityRounds, reanalyzeDuration)
 	}
 }
 

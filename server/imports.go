@@ -3,6 +3,7 @@ package server
 import (
 	"hash"
 	"hash/fnv"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +21,12 @@ import (
 type moduleSnapshotLookup func(string) (*ModuleSnapshot, bool)
 
 type moduleImportSurfaceLookup func(string) (*ModuleImportSurface, bool)
+
+func computeTextHash(text string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(text))
+	return h.Sum64()
+}
 
 func stampSymbolURIs(uri lsp.DocumentURI, maps ...map[ast.NodeID]*analyser.Symbol) {
 	for _, m := range maps {
@@ -110,8 +117,8 @@ func (s *Server) resolveImportModuleName(importerURI lsp.DocumentURI, tree *ast.
 }
 
 func firstModuleSegment(name string) string {
-	if idx := strings.IndexByte(name, '.'); idx >= 0 {
-		return name[:idx]
+	if before, _, ok := strings.Cut(name, "."); ok {
+		return before
 	}
 	return name
 }
@@ -350,6 +357,7 @@ func (s *Server) buildBaseModuleSnapshot(name string, uri lsp.DocumentURI, path,
 		URI:         uri,
 		Path:        path,
 		LineIndex:   lineIndex,
+		TextHash:    computeTextHash(text),
 		Tree:        tree,
 		ParseErrs:   p.Errors(),
 		Symbols:     resolver.Resolved,
@@ -374,6 +382,7 @@ func (s *Server) buildStartupModuleBase(name string, uri lsp.DocumentURI, path, 
 		URI:       uri,
 		Path:      path,
 		Text:      text,
+		TextHash:  computeTextHash(text),
 		LineIndex: lineIndex,
 		Tree:      tree,
 		ParseErrs: p.Errors(),
@@ -408,9 +417,7 @@ func buildMemberScope(exports map[string]*analyser.Symbol) *analyser.Scope {
 		Kind:    analyser.ScopeMember,
 		Symbols: make(map[string]*analyser.Symbol, len(exports)),
 	}
-	for k, v := range exports {
-		scope.Symbols[k] = v
-	}
+	maps.Copy(scope.Symbols, exports)
 	return scope
 }
 
@@ -466,6 +473,7 @@ func (s *Server) buildFinalSnapshotFromBase(base *StartupModuleBase, lookup modu
 		URI:         base.URI,
 		Path:        base.Path,
 		LineIndex:   base.LineIndex,
+		TextHash:    base.TextHash,
 		Tree:        base.Tree,
 		ParseErrs:   append([]parser.Error(nil), base.ParseErrs...),
 		Symbols:     resolver.Resolved,
@@ -1220,9 +1228,7 @@ func (s *Server) bindSubmoduleChain(root *analyser.Symbol, rootName, fullName st
 			Symbols: make(map[string]*analyser.Symbol, cap),
 		}
 		if oldMembers != nil {
-			for k, v := range oldMembers.Symbols {
-				newMembers.Symbols[k] = v
-			}
+			maps.Copy(newMembers.Symbols, oldMembers.Symbols)
 		}
 		newMembers.Symbols[seg] = subSym
 		currentSym.Members = newMembers
@@ -1261,9 +1267,7 @@ func (s *Server) bindSubmoduleChainFromSurface(root *analyser.Symbol, rootName, 
 			Symbols: make(map[string]*analyser.Symbol, cap),
 		}
 		if oldMembers != nil {
-			for k, v := range oldMembers.Symbols {
-				newMembers.Symbols[k] = v
-			}
+			maps.Copy(newMembers.Symbols, oldMembers.Symbols)
 		}
 		newMembers.Symbols[seg] = subSym
 		currentSym.Members = newMembers

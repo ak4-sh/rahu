@@ -58,11 +58,23 @@ type Server struct {
 	indexingCtx              context.Context
 	indexingCancel           context.CancelFunc
 	indexingDone             chan struct{}
+	startup                  *startupReadiness
 
 	// Reference index for fast O(1) reference lookups
 	refIndex *RefIndex
 
 	conn *jsonrpc.Conn
+}
+
+type startupReadiness struct {
+	priorityModuleNames   map[string]struct{}
+	priorityOpenURIs      map[lsp.DocumentURI]struct{}
+	priorityReadyAt       time.Time
+	allOpenFilesReadyAt   time.Time
+	firstDiagAtByURI      map[lsp.DocumentURI]time.Time
+	firstApplyAtByURI     map[lsp.DocumentURI]time.Time
+	priorityModuleCount   int
+	prioritySurfaceRounds int
 }
 
 type ModuleFile struct {
@@ -77,6 +89,7 @@ type StartupModuleBase struct {
 	URI       lsp.DocumentURI
 	Path      string
 	Text      string
+	TextHash  uint64
 	LineIndex *source.LineIndex
 	Tree      *ast.AST
 	ParseErrs []parser.Error
@@ -109,6 +122,7 @@ type ModuleSnapshot struct {
 	Exports     map[string]*analyser.Symbol
 	ExportHash  uint64
 	Imports     []string
+	TextHash    uint64
 }
 
 func New(conn *jsonrpc.Conn) *Server {
@@ -131,6 +145,12 @@ func New(conn *jsonrpc.Conn) *Server {
 		snapshotLRU:            newSnapshotLRU(),
 		maxCachedModules:       defaultMaxCachedModules,
 		refIndex:               NewRefIndex(),
+		startup: &startupReadiness{
+			priorityModuleNames: make(map[string]struct{}),
+			priorityOpenURIs:    make(map[lsp.DocumentURI]struct{}),
+			firstDiagAtByURI:    make(map[lsp.DocumentURI]time.Time),
+			firstApplyAtByURI:   make(map[lsp.DocumentURI]time.Time),
+		},
 	}
 }
 

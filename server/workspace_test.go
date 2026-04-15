@@ -317,6 +317,76 @@ func TestBuildWorkspaceSnapshotsWithPriorityReexportDeterministic(t *testing.T) 
 	}
 }
 
+func TestBuildPriorityModuleSetTransitiveImports(t *testing.T) {
+	baseByName := map[string]*StartupModuleBase{
+		"main": {Name: "main", Imports: []string{"pkg", "ext"}},
+		"pkg":  {Name: "pkg", Imports: []string{"leaf"}},
+		"leaf": {Name: "leaf"},
+	}
+	openMods := []ModuleFile{{Name: "main"}}
+
+	priority := buildPriorityModuleSet(openMods, baseByName)
+
+	for _, name := range []string{"main", "pkg", "leaf"} {
+		if _, ok := priority[name]; !ok {
+			t.Fatalf("expected %q in priority set: %+v", name, priority)
+		}
+	}
+	if _, ok := priority["ext"]; ok {
+		t.Fatalf("did not expect unresolved external import in priority set: %+v", priority)
+	}
+}
+
+func TestBuildWorkspaceSnapshotsWithPriorityMarksOpenFilesReady(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	depPath := filepath.Join(root, "dep.py")
+	otherPath := filepath.Join(root, "other.py")
+	writeWorkspaceSource(t, depPath, "value = 1\n")
+	writeWorkspaceSource(t, mainPath, "from dep import value\nresult = value\n")
+	writeWorkspaceSource(t, otherPath, "other = 3\n")
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Version: 1, Text: "from dep import value\nresult = value\n"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.buildWorkspaceSnapshotsWithPriority(ctx, cancel); err != nil {
+		t.Fatalf("workspace snapshot build failed: %v", err)
+	}
+
+	if s.startup == nil {
+		t.Fatal("expected startup readiness state")
+	}
+	if _, ok := s.startup.priorityModuleNames["main"]; !ok {
+		t.Fatalf("expected open module in priority set: %+v", s.startup.priorityModuleNames)
+	}
+	if _, ok := s.startup.priorityModuleNames["dep"]; !ok {
+		t.Fatalf("expected dependency in priority set: %+v", s.startup.priorityModuleNames)
+	}
+	if _, ok := s.startup.priorityModuleNames["other"]; ok {
+		t.Fatalf("did not expect unrelated module in priority set: %+v", s.startup.priorityModuleNames)
+	}
+	if s.startup.firstApplyAtByURI[mainURI].IsZero() {
+		t.Fatal("expected per-file apply readiness timestamp")
+	}
+	if s.startup.firstDiagAtByURI[mainURI].IsZero() {
+		t.Fatal("expected per-file diagnostic readiness timestamp")
+	}
+	if s.startup.priorityReadyAt.IsZero() {
+		t.Fatal("expected aggregate priority readiness timestamp")
+	}
+	if s.startup.allOpenFilesReadyAt.IsZero() {
+		t.Fatal("expected all-open-files readiness timestamp")
+	}
+	if s.startup.priorityModuleCount != 2 {
+		t.Fatalf("unexpected priority module count: got %d want 2", s.startup.priorityModuleCount)
+	}
+}
+
 func writeTestFile(t *testing.T, path string) {
 	t.Helper()
 

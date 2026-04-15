@@ -387,6 +387,8 @@ func (s *Server) Diagnostic(p *lsp.DocumentDiagnosticParams) (*lsp.DocumentDiagn
 }
 
 func (s *Server) publishDiagnostics(uri lsp.DocumentURI, diags []lsp.Diagnostic) {
+	s.markOpenDocumentDiagnosticsPublished(uri)
+
 	// Skip if no connection available
 	if s.conn == nil {
 		return
