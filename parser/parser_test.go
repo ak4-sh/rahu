@@ -1093,6 +1093,110 @@ func TestParseChainedAssignmentMultiple(t *testing.T) {
 	}
 }
 
+func TestParseGeneratorExpression(t *testing.T) {
+	tests := []struct {
+		name         string
+		src          string
+		expectInCall bool
+	}{
+		{name: "simple generator", src: "(x for x in range(10))\n", expectInCall: false},
+		{name: "generator with condition", src: "(x for x in range(10) if x > 5)\n", expectInCall: false},
+		{name: "generator in function call", src: "sum(x for x in items)\n", expectInCall: true},
+		{name: "nested loops", src: "((x, y) for x in range(5) for y in range(5))\n", expectInCall: false},
+		{name: "complex expression", src: "', '.join(f\"item {n}\" for n in items)\n", expectInCall: true},
+		{name: "generator with multiple conditions", src: "(x for x in range(100) if x > 10 if x < 50)\n", expectInCall: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+
+			exprStmt := moduleStmt(t, tree, 0)
+			node := requireChildCount(t, tree, exprStmt, 1)[0]
+
+			if tt.expectInCall {
+				// Generator is inside a function call
+				requireKind(t, tree, node, a.NodeCall)
+				// Verify it has at least one argument
+				callKids := children(tree, node)
+				if len(callKids) < 2 {
+					t.Fatalf("expected call to have arguments, got %d children", len(callKids))
+				}
+				// First argument should be the generator
+				requireKind(t, tree, callKids[1], a.NodeGeneratorExp)
+			} else {
+				// Generator is the direct expression
+				requireKind(t, tree, node, a.NodeGeneratorExp)
+			}
+		})
+	}
+}
+
+func TestParseConditionalExpression(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{name: "simple conditional", src: "x if y else z\n"},
+		{name: "conditional in assignment", src: "result = a if b > 0 else 0\n"},
+		{name: "nested conditional", src: "a if b else c if d else e\n"},
+		{name: "conditional with complex condition", src: "x if (a > 0 and b < 10) else y\n"},
+		{name: "conditional with arithmetic", src: "(a + b) if c > 0 else (d - e)\n"},
+		{name: "conditional with or", src: "a or b if c else d\n"}, // Should parse as: a or (b if c else d)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+
+			exprStmt := moduleStmt(t, tree, 0)
+			// The conditional should be part of the expression
+			stmtKids := children(tree, exprStmt)
+			if len(stmtKids) == 0 {
+				t.Fatal("expression statement has no children")
+			}
+			node := stmtKids[0]
+			// Could be conditional directly or a parent expression containing it
+			if tree.Node(node).Kind != a.NodeConditional {
+				// Check if it's an assignment containing a conditional
+				if tree.Node(node).Kind == a.NodeAssign {
+					kids := children(tree, node)
+					found := false
+					for _, kid := range kids {
+						if tree.Node(kid).Kind == a.NodeConditional {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("expected to find conditional expression in assignment, got children with kinds: ")
+						for _, kid := range kids {
+							t.Logf("  - %s", tree.Node(kid).Kind)
+						}
+					}
+				} else if tree.Node(node).Kind == a.NodeBooleanOp {
+					// a or (b if c else d) - check children for conditional
+					kids := children(tree, node)
+					found := false
+					for _, kid := range kids {
+						if tree.Node(kid).Kind == a.NodeConditional {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("expected to find conditional expression in boolean op, got %s", tree.Node(node).Kind)
+					}
+				} else {
+					t.Errorf("unexpected node kind: got %s want NodeConditional or container", tree.Node(node).Kind)
+				}
+			}
+		})
+	}
+}
+
 func TestParseChainedAssignmentComplex(t *testing.T) {
 	src := `manager = self.proxy_manager[proxy] = value
 `

@@ -124,6 +124,16 @@ func (p *Parser) parseCallArg(seenKeyword *bool, seenKwStar *bool) a.NodeID {
 	if arg == a.NoNode {
 		return a.NoNode
 	}
+
+	// Check for generator expression without parentheses: func(x for x in items)
+	// This is valid when the generator is the only argument
+	if p.current.Type == l.FOR {
+		// Convert the expression into a generator expression
+		startPos := p.tree.Nodes[arg].Start
+		genExp := p.parseGeneratorExpFromExpr(startPos, arg)
+		return genExp
+	}
+
 	if *seenKwStar {
 		p.error(a.Range{Start: p.tree.Nodes[arg].Start, End: p.tree.Nodes[arg].End}, "positional argument follows **kwargs")
 		return arg
@@ -132,4 +142,20 @@ func (p *Parser) parseCallArg(seenKeyword *bool, seenKwStar *bool) a.NodeID {
 		p.error(a.Range{Start: p.tree.Nodes[arg].Start, End: p.tree.Nodes[arg].End}, "positional argument follows keyword argument")
 	}
 	return arg
+}
+
+// parseGeneratorExpFromExpr parses a generator expression starting from an already-parsed expression.
+// Used for bare generator expressions in function calls (e.g., sum(x for x in items)).
+func (p *Parser) parseGeneratorExpFromExpr(startPos uint32, expr a.NodeID) a.NodeID {
+	ret := p.tree.NewNode(a.NodeGeneratorExp, startPos, p.tree.Nodes[expr].End)
+	p.tree.AddChild(ret, expr)
+	for p.current.Type == l.FOR {
+		clause := p.parseComprehensionClause()
+		if clause == a.NoNode {
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+		p.tree.AddChild(ret, clause)
+		p.tree.Nodes[ret].End = p.tree.Nodes[clause].End
+	}
+	return ret
 }

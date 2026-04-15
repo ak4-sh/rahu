@@ -65,15 +65,17 @@ func _() {
 	_ = x[NodeExcept-54]
 	_ = x[NodeListComp-55]
 	_ = x[NodeDictComp-56]
-	_ = x[NodeComprehension-57]
-	_ = x[NodeWith-58]
-	_ = x[NodeWithItem-59]
-	_ = x[NodeDecorator-60]
+	_ = x[NodeGeneratorExp-57]
+	_ = x[NodeConditional-58]
+	_ = x[NodeComprehension-59]
+	_ = x[NodeWith-60]
+	_ = x[NodeWithItem-61]
+	_ = x[NodeDecorator-62]
 }
 
-const _NodeKind_name = "NodeModuleNodeAssignNodeAugAssignNodeNameNodeNumberNodeStringNodeBytesNodeFStringNodeFStringTextNodeFStringExprNodeBinOpNodeUnaryOpNodeCallNodeAttributeNodeCompareNodeCompareOpNodeBooleanOpNodeBooleanNodeTupleNodeNoneNodeListNodeIfNodeForNodeWhileNodeAssertNodeDelNodeGlobalNodeNonlocalNodeReturnNodeYieldNodeRaiseNodePassNodeBreakNodeContinueNodeFunctionDefNodeClassDefNodeExprStmtNodeBlockNodeArgsNodeErrExpNodeSubScriptNodeBaseListNodeErrStmtNodeParamNodeImportNodeFromImportNodeAliasNodeSliceNodeKeywordArgNodeStarArgNodeKwStarArgNodeDictNodeAnnAssignNodeTryNodeExceptNodeListCompNodeDictCompNodeComprehensionNodeWithNodeWithItemNodeDecorator"
+const _NodeKind_name = "NodeModuleNodeAssignNodeAugAssignNodeNameNodeNumberNodeStringNodeBytesNodeFStringNodeFStringTextNodeFStringExprNodeBinOpNodeUnaryOpNodeCallNodeAttributeNodeCompareNodeCompareOpNodeBooleanOpNodeBooleanNodeTupleNodeNoneNodeListNodeIfNodeForNodeWhileNodeAssertNodeDelNodeGlobalNodeNonlocalNodeReturnNodeYieldNodeRaiseNodePassNodeBreakNodeContinueNodeFunctionDefNodeClassDefNodeExprStmtNodeBlockNodeArgsNodeErrExpNodeSubScriptNodeBaseListNodeErrStmtNodeParamNodeImportNodeFromImportNodeAliasNodeSliceNodeKeywordArgNodeStarArgNodeKwStarArgNodeDictNodeAnnAssignNodeTryNodeExceptNodeListCompNodeDictCompNodeGeneratorExpNodeConditionalNodeComprehensionNodeWithNodeWithItemNodeDecorator"
 
-var _NodeKind_index = [...]uint16{0, 10, 20, 33, 41, 51, 61, 70, 81, 96, 111, 120, 131, 139, 152, 163, 176, 189, 200, 209, 217, 225, 231, 238, 247, 257, 264, 274, 286, 296, 305, 314, 322, 331, 343, 358, 370, 382, 391, 399, 409, 422, 434, 445, 454, 464, 478, 487, 496, 510, 521, 534, 542, 555, 562, 572, 584, 596, 613, 621, 633, 646}
+var _NodeKind_index = [...]uint16{0, 10, 20, 33, 41, 51, 61, 70, 81, 96, 111, 120, 131, 139, 152, 163, 176, 189, 200, 209, 217, 225, 231, 238, 247, 257, 264, 274, 286, 296, 305, 314, 322, 331, 343, 358, 370, 382, 391, 399, 409, 422, 434, 445, 454, 464, 478, 487, 496, 510, 521, 534, 542, 555, 562, 572, 584, 596, 612, 627, 644, 652, 664, 677}
 
 func (i NodeKind) String() string {
 	idx := int(i) - 0

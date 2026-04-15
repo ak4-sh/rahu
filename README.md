@@ -32,7 +32,8 @@ All internal source locations are stored as byte offsets. Line/column translatio
 - Positional-only parameter separator `/` in function signatures
 - `with` statement and context managers
 - Decorators on functions and classes
-- Function calls, keyword arguments, attribute access, list/tuple/dict/set literals, list comprehensions, set comprehensions, dict comprehensions, generator expressions, subscripts, and slices (step slice unsupported)
+- Function calls, keyword arguments, attribute access, list/tuple/dict/set literals, list comprehensions, set comprehensions, dict comprehensions, **generator expressions**, **conditional expressions (ternary `a if b else c`)**, subscripts, and slices (step slice unsupported)
+- PEP 448 extended unpacking: keyword arguments after `**kwargs` in function calls
 - Ellipsis `...` as a primary expression
 - PEP 604 union annotations (`int | None`) in variable/parameter/return annotations
 - Parameter annotations, return annotations, and variable annotations

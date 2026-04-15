@@ -166,6 +166,8 @@ const (
 	NodeExcept
 	NodeListComp
 	NodeDictComp
+	NodeGeneratorExp
+	NodeConditional
 	NodeComprehension
 	NodeWith
 	NodeWithItem
