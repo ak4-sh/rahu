@@ -1100,6 +1100,34 @@ func TestParseSubscriptAugAssignShape(t *testing.T) {
 	}
 }
 
+// Regression test: tuple assignment like a, b = 1, 2 should work
+func TestParseTupleAssignmentWithTupleValue(t *testing.T) {
+	p, tree := parseSource(t, "a, b = 1, 2\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+	kids := requireChildCount(t, tree, assign, 3)
+
+	// First child should be the value (a tuple)
+	requireKind(t, tree, kids[0], a.NodeTuple)
+	valueKids := requireChildCount(t, tree, kids[0], 2)
+	if got := numberValue(t, tree, valueKids[0]); got != "1" {
+		t.Fatalf("unexpected first value: got %q", got)
+	}
+	if got := numberValue(t, tree, valueKids[1]); got != "2" {
+		t.Fatalf("unexpected second value: got %q", got)
+	}
+
+	// Second and third children should be targets
+	if got := nameText(t, tree, kids[1]); got != "a" {
+		t.Fatalf("unexpected first target: got %q", got)
+	}
+	if got := nameText(t, tree, kids[2]); got != "b" {
+		t.Fatalf("unexpected second target: got %q", got)
+	}
+}
+
 func TestParseCallShape(t *testing.T) {
 	p, tree := parseSource(t, "f(x, y)\n")
 	requireNoParseErrors(t, p)
