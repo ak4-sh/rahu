@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -256,7 +257,42 @@ func (s *Server) Initialize(
 			log.Printf("[typeshed] Enabled for Python %d.%d", pyVersion.Major, pyVersion.Minor)
 		}
 	}
-	_ = pyVersion // Silence unused warning if typeshed fails
+
+	// Load builtin cache for accurate builtin symbol resolution
+	pyVersionStr := fmt.Sprintf("%d.%d", pyVersion.Major, pyVersion.Minor)
+	if cache, ok := LoadBuiltinCache(pyVersionStr); ok {
+		// Verify cache is not stale
+		valid, currentHash := cache.VerifySourceHash()
+		if !valid {
+			log.Printf("[builtins] Cache hash mismatch (expected %s, got %s), using fallback",
+				cache.SourceHash[:16], currentHash[:16])
+		} else {
+			// Convert cache symbols to analyser format
+			cacheSymbols := make([]struct {
+				Name  string
+				Kind  string
+				Bases []string
+			}, len(cache.Symbols))
+			for i, sym := range cache.Symbols {
+				cacheSymbols[i] = struct {
+					Name  string
+					Kind  string
+					Bases []string
+				}{
+					Name:  sym.Name,
+					Kind:  sym.Kind,
+					Bases: sym.Bases,
+				}
+			}
+			newScope := analyser.NewBuiltinScopeFromCache(cacheSymbols)
+			analyser.SetBuiltinScope(newScope)
+			log.Printf("[builtins] Loaded %d symbols from cache for Python %s",
+				len(cache.Symbols), pyVersionStr)
+		}
+	} else {
+		log.Printf("[builtins] No cache found for Python %s, using fallback", pyVersionStr)
+	}
+
 	s.indexMu.Unlock()
 
 	// Indexing will start in backgroundIndex() triggered by Initialized

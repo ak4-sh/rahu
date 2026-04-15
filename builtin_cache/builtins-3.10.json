@@ -1,0 +1,2304 @@
+{
+  "python_version": "3.10",
+  "typeshed_version": "unknown",
+  "source_hash": "a1337cf1091ac067bb4bbbaf9565781d350f4d544fae5ca2266d558e4cf212e6",
+  "generated_at": "2026-04-15T05:25:56Z",
+  "symbols": [
+    {
+      "name": "object",
+      "kind": "type"
+    },
+    {
+      "name": "staticmethod",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "classmethod",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "type",
+      "kind": "type"
+    },
+    {
+      "name": "mro",
+      "kind": "function"
+    },
+    {
+      "name": "super",
+      "kind": "class"
+    },
+    {
+      "name": "int",
+      "kind": "type"
+    },
+    {
+      "name": "as_integer_ratio",
+      "kind": "function"
+    },
+    {
+      "name": "real",
+      "kind": "function"
+    },
+    {
+      "name": "imag",
+      "kind": "function"
+    },
+    {
+      "name": "numerator",
+      "kind": "function"
+    },
+    {
+      "name": "denominator",
+      "kind": "function"
+    },
+    {
+      "name": "conjugate",
+      "kind": "function"
+    },
+    {
+      "name": "bit_length",
+      "kind": "function"
+    },
+    {
+      "name": "bit_count",
+      "kind": "function"
+    },
+    {
+      "name": "to_bytes",
+      "kind": "function"
+    },
+    {
+      "name": "from_bytes",
+      "kind": "function"
+    },
+    {
+      "name": "to_bytes",
+      "kind": "function"
+    },
+    {
+      "name": "from_bytes",
+      "kind": "function"
+    },
+    {
+      "name": "is_integer",
+      "kind": "function"
+    },
+    {
+      "name": "float",
+      "kind": "type"
+    },
+    {
+      "name": "as_integer_ratio",
+      "kind": "function"
+    },
+    {
+      "name": "hex",
+      "kind": "function"
+    },
+    {
+      "name": "is_integer",
+      "kind": "function"
+    },
+    {
+      "name": "fromhex",
+      "kind": "function"
+    },
+    {
+      "name": "real",
+      "kind": "function"
+    },
+    {
+      "name": "imag",
+      "kind": "function"
+    },
+    {
+      "name": "conjugate",
+      "kind": "function"
+    },
+    {
+      "name": "from_number",
+      "kind": "function"
+    },
+    {
+      "name": "complex",
+      "kind": "type"
+    },
+    {
+      "name": "real",
+      "kind": "function"
+    },
+    {
+      "name": "imag",
+      "kind": "function"
+    },
+    {
+      "name": "conjugate",
+      "kind": "function"
+    },
+    {
+      "name": "from_number",
+      "kind": "function"
+    },
+    {
+      "name": "_FormatMapMapping",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "_TranslateTable",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "str",
+      "kind": "type",
+      "bases": [
+        "Sequence"
+      ]
+    },
+    {
+      "name": "capitalize",
+      "kind": "function"
+    },
+    {
+      "name": "capitalize",
+      "kind": "function"
+    },
+    {
+      "name": "casefold",
+      "kind": "function"
+    },
+    {
+      "name": "casefold",
+      "kind": "function"
+    },
+    {
+      "name": "center",
+      "kind": "function"
+    },
+    {
+      "name": "center",
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "encode",
+      "kind": "function"
+    },
+    {
+      "name": "endswith",
+      "kind": "function"
+    },
+    {
+      "name": "expandtabs",
+      "kind": "function"
+    },
+    {
+      "name": "expandtabs",
+      "kind": "function"
+    },
+    {
+      "name": "find",
+      "kind": "function"
+    },
+    {
+      "name": "format",
+      "kind": "function"
+    },
+    {
+      "name": "format",
+      "kind": "function"
+    },
+    {
+      "name": "format_map",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "isalnum",
+      "kind": "function"
+    },
+    {
+      "name": "isalpha",
+      "kind": "function"
+    },
+    {
+      "name": "isascii",
+      "kind": "function"
+    },
+    {
+      "name": "isdecimal",
+      "kind": "function"
+    },
+    {
+      "name": "isdigit",
+      "kind": "function"
+    },
+    {
+      "name": "isidentifier",
+      "kind": "function"
+    },
+    {
+      "name": "islower",
+      "kind": "function"
+    },
+    {
+      "name": "isnumeric",
+      "kind": "function"
+    },
+    {
+      "name": "isprintable",
+      "kind": "function"
+    },
+    {
+      "name": "isspace",
+      "kind": "function"
+    },
+    {
+      "name": "istitle",
+      "kind": "function"
+    },
+    {
+      "name": "isupper",
+      "kind": "function"
+    },
+    {
+      "name": "join",
+      "kind": "function"
+    },
+    {
+      "name": "join",
+      "kind": "function"
+    },
+    {
+      "name": "ljust",
+      "kind": "function"
+    },
+    {
+      "name": "ljust",
+      "kind": "function"
+    },
+    {
+      "name": "lower",
+      "kind": "function"
+    },
+    {
+      "name": "lower",
+      "kind": "function"
+    },
+    {
+      "name": "lstrip",
+      "kind": "function"
+    },
+    {
+      "name": "lstrip",
+      "kind": "function"
+    },
+    {
+      "name": "partition",
+      "kind": "function"
+    },
+    {
+      "name": "partition",
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "kind": "function"
+    },
+    {
+      "name": "removeprefix",
+      "kind": "function"
+    },
+    {
+      "name": "removeprefix",
+      "kind": "function"
+    },
+    {
+      "name": "removesuffix",
+      "kind": "function"
+    },
+    {
+      "name": "removesuffix",
+      "kind": "function"
+    },
+    {
+      "name": "rfind",
+      "kind": "function"
+    },
+    {
+      "name": "rindex",
+      "kind": "function"
+    },
+    {
+      "name": "rjust",
+      "kind": "function"
+    },
+    {
+      "name": "rjust",
+      "kind": "function"
+    },
+    {
+      "name": "rpartition",
+      "kind": "function"
+    },
+    {
+      "name": "rpartition",
+      "kind": "function"
+    },
+    {
+      "name": "rsplit",
+      "kind": "function"
+    },
+    {
+      "name": "rsplit",
+      "kind": "function"
+    },
+    {
+      "name": "rstrip",
+      "kind": "function"
+    },
+    {
+      "name": "rstrip",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "splitlines",
+      "kind": "function"
+    },
+    {
+      "name": "splitlines",
+      "kind": "function"
+    },
+    {
+      "name": "startswith",
+      "kind": "function"
+    },
+    {
+      "name": "strip",
+      "kind": "function"
+    },
+    {
+      "name": "strip",
+      "kind": "function"
+    },
+    {
+      "name": "swapcase",
+      "kind": "function"
+    },
+    {
+      "name": "swapcase",
+      "kind": "function"
+    },
+    {
+      "name": "title",
+      "kind": "function"
+    },
+    {
+      "name": "title",
+      "kind": "function"
+    },
+    {
+      "name": "translate",
+      "kind": "function"
+    },
+    {
+      "name": "upper",
+      "kind": "function"
+    },
+    {
+      "name": "upper",
+      "kind": "function"
+    },
+    {
+      "name": "zfill",
+      "kind": "function"
+    },
+    {
+      "name": "zfill",
+      "kind": "function"
+    },
+    {
+      "name": "maketrans",
+      "kind": "function"
+    },
+    {
+      "name": "maketrans",
+      "kind": "function"
+    },
+    {
+      "name": "maketrans",
+      "kind": "function"
+    },
+    {
+      "name": "bytes",
+      "kind": "type",
+      "bases": [
+        "Sequence"
+      ]
+    },
+    {
+      "name": "capitalize",
+      "kind": "function"
+    },
+    {
+      "name": "center",
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "decode",
+      "kind": "function"
+    },
+    {
+      "name": "endswith",
+      "kind": "function"
+    },
+    {
+      "name": "expandtabs",
+      "kind": "function"
+    },
+    {
+      "name": "find",
+      "kind": "function"
+    },
+    {
+      "name": "hex",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "isalnum",
+      "kind": "function"
+    },
+    {
+      "name": "isalpha",
+      "kind": "function"
+    },
+    {
+      "name": "isascii",
+      "kind": "function"
+    },
+    {
+      "name": "isdigit",
+      "kind": "function"
+    },
+    {
+      "name": "islower",
+      "kind": "function"
+    },
+    {
+      "name": "isspace",
+      "kind": "function"
+    },
+    {
+      "name": "istitle",
+      "kind": "function"
+    },
+    {
+      "name": "isupper",
+      "kind": "function"
+    },
+    {
+      "name": "join",
+      "kind": "function"
+    },
+    {
+      "name": "ljust",
+      "kind": "function"
+    },
+    {
+      "name": "lower",
+      "kind": "function"
+    },
+    {
+      "name": "lstrip",
+      "kind": "function"
+    },
+    {
+      "name": "partition",
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "kind": "function"
+    },
+    {
+      "name": "removeprefix",
+      "kind": "function"
+    },
+    {
+      "name": "removesuffix",
+      "kind": "function"
+    },
+    {
+      "name": "rfind",
+      "kind": "function"
+    },
+    {
+      "name": "rindex",
+      "kind": "function"
+    },
+    {
+      "name": "rjust",
+      "kind": "function"
+    },
+    {
+      "name": "rpartition",
+      "kind": "function"
+    },
+    {
+      "name": "rsplit",
+      "kind": "function"
+    },
+    {
+      "name": "rstrip",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "splitlines",
+      "kind": "function"
+    },
+    {
+      "name": "startswith",
+      "kind": "function"
+    },
+    {
+      "name": "strip",
+      "kind": "function"
+    },
+    {
+      "name": "swapcase",
+      "kind": "function"
+    },
+    {
+      "name": "title",
+      "kind": "function"
+    },
+    {
+      "name": "translate",
+      "kind": "function"
+    },
+    {
+      "name": "upper",
+      "kind": "function"
+    },
+    {
+      "name": "zfill",
+      "kind": "function"
+    },
+    {
+      "name": "fromhex",
+      "kind": "function"
+    },
+    {
+      "name": "fromhex",
+      "kind": "function"
+    },
+    {
+      "name": "maketrans",
+      "kind": "function"
+    },
+    {
+      "name": "bytearray",
+      "kind": "type",
+      "bases": [
+        "MutableSequence"
+      ]
+    },
+    {
+      "name": "append",
+      "kind": "function"
+    },
+    {
+      "name": "capitalize",
+      "kind": "function"
+    },
+    {
+      "name": "center",
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "copy",
+      "kind": "function"
+    },
+    {
+      "name": "decode",
+      "kind": "function"
+    },
+    {
+      "name": "endswith",
+      "kind": "function"
+    },
+    {
+      "name": "expandtabs",
+      "kind": "function"
+    },
+    {
+      "name": "extend",
+      "kind": "function"
+    },
+    {
+      "name": "find",
+      "kind": "function"
+    },
+    {
+      "name": "hex",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "insert",
+      "kind": "function"
+    },
+    {
+      "name": "isalnum",
+      "kind": "function"
+    },
+    {
+      "name": "isalpha",
+      "kind": "function"
+    },
+    {
+      "name": "isascii",
+      "kind": "function"
+    },
+    {
+      "name": "isdigit",
+      "kind": "function"
+    },
+    {
+      "name": "islower",
+      "kind": "function"
+    },
+    {
+      "name": "isspace",
+      "kind": "function"
+    },
+    {
+      "name": "istitle",
+      "kind": "function"
+    },
+    {
+      "name": "isupper",
+      "kind": "function"
+    },
+    {
+      "name": "join",
+      "kind": "function"
+    },
+    {
+      "name": "ljust",
+      "kind": "function"
+    },
+    {
+      "name": "lower",
+      "kind": "function"
+    },
+    {
+      "name": "lstrip",
+      "kind": "function"
+    },
+    {
+      "name": "partition",
+      "kind": "function"
+    },
+    {
+      "name": "pop",
+      "kind": "function"
+    },
+    {
+      "name": "remove",
+      "kind": "function"
+    },
+    {
+      "name": "removeprefix",
+      "kind": "function"
+    },
+    {
+      "name": "removesuffix",
+      "kind": "function"
+    },
+    {
+      "name": "replace",
+      "kind": "function"
+    },
+    {
+      "name": "rfind",
+      "kind": "function"
+    },
+    {
+      "name": "rindex",
+      "kind": "function"
+    },
+    {
+      "name": "rjust",
+      "kind": "function"
+    },
+    {
+      "name": "rpartition",
+      "kind": "function"
+    },
+    {
+      "name": "rsplit",
+      "kind": "function"
+    },
+    {
+      "name": "rstrip",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "splitlines",
+      "kind": "function"
+    },
+    {
+      "name": "startswith",
+      "kind": "function"
+    },
+    {
+      "name": "strip",
+      "kind": "function"
+    },
+    {
+      "name": "swapcase",
+      "kind": "function"
+    },
+    {
+      "name": "title",
+      "kind": "function"
+    },
+    {
+      "name": "translate",
+      "kind": "function"
+    },
+    {
+      "name": "upper",
+      "kind": "function"
+    },
+    {
+      "name": "zfill",
+      "kind": "function"
+    },
+    {
+      "name": "fromhex",
+      "kind": "function"
+    },
+    {
+      "name": "fromhex",
+      "kind": "function"
+    },
+    {
+      "name": "maketrans",
+      "kind": "function"
+    },
+    {
+      "name": "resize",
+      "kind": "function"
+    },
+    {
+      "name": "memoryview",
+      "kind": "class",
+      "bases": [
+        "Sequence"
+      ]
+    },
+    {
+      "name": "format",
+      "kind": "function"
+    },
+    {
+      "name": "itemsize",
+      "kind": "function"
+    },
+    {
+      "name": "shape",
+      "kind": "function"
+    },
+    {
+      "name": "strides",
+      "kind": "function"
+    },
+    {
+      "name": "suboffsets",
+      "kind": "function"
+    },
+    {
+      "name": "readonly",
+      "kind": "function"
+    },
+    {
+      "name": "ndim",
+      "kind": "function"
+    },
+    {
+      "name": "obj",
+      "kind": "function"
+    },
+    {
+      "name": "c_contiguous",
+      "kind": "function"
+    },
+    {
+      "name": "f_contiguous",
+      "kind": "function"
+    },
+    {
+      "name": "contiguous",
+      "kind": "function"
+    },
+    {
+      "name": "nbytes",
+      "kind": "function"
+    },
+    {
+      "name": "cast",
+      "kind": "function"
+    },
+    {
+      "name": "cast",
+      "kind": "function"
+    },
+    {
+      "name": "cast",
+      "kind": "function"
+    },
+    {
+      "name": "cast",
+      "kind": "function"
+    },
+    {
+      "name": "tobytes",
+      "kind": "function"
+    },
+    {
+      "name": "tobytes",
+      "kind": "function"
+    },
+    {
+      "name": "tolist",
+      "kind": "function"
+    },
+    {
+      "name": "toreadonly",
+      "kind": "function"
+    },
+    {
+      "name": "release",
+      "kind": "function"
+    },
+    {
+      "name": "hex",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "bool",
+      "kind": "type",
+      "bases": [
+        "int"
+      ]
+    },
+    {
+      "name": "slice",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "start",
+      "kind": "function"
+    },
+    {
+      "name": "step",
+      "kind": "function"
+    },
+    {
+      "name": "stop",
+      "kind": "function"
+    },
+    {
+      "name": "indices",
+      "kind": "function"
+    },
+    {
+      "name": "tuple",
+      "kind": "type",
+      "bases": [
+        "Sequence"
+      ]
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "function",
+      "kind": "class"
+    },
+    {
+      "name": "list",
+      "kind": "type",
+      "bases": [
+        "MutableSequence"
+      ]
+    },
+    {
+      "name": "copy",
+      "kind": "function"
+    },
+    {
+      "name": "append",
+      "kind": "function"
+    },
+    {
+      "name": "extend",
+      "kind": "function"
+    },
+    {
+      "name": "pop",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "insert",
+      "kind": "function"
+    },
+    {
+      "name": "remove",
+      "kind": "function"
+    },
+    {
+      "name": "sort",
+      "kind": "function"
+    },
+    {
+      "name": "sort",
+      "kind": "function"
+    },
+    {
+      "name": "dict",
+      "kind": "type",
+      "bases": [
+        "MutableMapping"
+      ]
+    },
+    {
+      "name": "copy",
+      "kind": "function"
+    },
+    {
+      "name": "keys",
+      "kind": "function"
+    },
+    {
+      "name": "values",
+      "kind": "function"
+    },
+    {
+      "name": "items",
+      "kind": "function"
+    },
+    {
+      "name": "fromkeys",
+      "kind": "function"
+    },
+    {
+      "name": "fromkeys",
+      "kind": "function"
+    },
+    {
+      "name": "get",
+      "kind": "function"
+    },
+    {
+      "name": "get",
+      "kind": "function"
+    },
+    {
+      "name": "get",
+      "kind": "function"
+    },
+    {
+      "name": "pop",
+      "kind": "function"
+    },
+    {
+      "name": "pop",
+      "kind": "function"
+    },
+    {
+      "name": "pop",
+      "kind": "function"
+    },
+    {
+      "name": "set",
+      "kind": "type",
+      "bases": [
+        "MutableSet"
+      ]
+    },
+    {
+      "name": "add",
+      "kind": "function"
+    },
+    {
+      "name": "copy",
+      "kind": "function"
+    },
+    {
+      "name": "difference",
+      "kind": "function"
+    },
+    {
+      "name": "difference_update",
+      "kind": "function"
+    },
+    {
+      "name": "discard",
+      "kind": "function"
+    },
+    {
+      "name": "intersection",
+      "kind": "function"
+    },
+    {
+      "name": "intersection_update",
+      "kind": "function"
+    },
+    {
+      "name": "isdisjoint",
+      "kind": "function"
+    },
+    {
+      "name": "issubset",
+      "kind": "function"
+    },
+    {
+      "name": "issuperset",
+      "kind": "function"
+    },
+    {
+      "name": "remove",
+      "kind": "function"
+    },
+    {
+      "name": "symmetric_difference",
+      "kind": "function"
+    },
+    {
+      "name": "symmetric_difference_update",
+      "kind": "function"
+    },
+    {
+      "name": "union",
+      "kind": "function"
+    },
+    {
+      "name": "update",
+      "kind": "function"
+    },
+    {
+      "name": "frozenset",
+      "kind": "type",
+      "bases": [
+        "AbstractSet"
+      ]
+    },
+    {
+      "name": "copy",
+      "kind": "function"
+    },
+    {
+      "name": "difference",
+      "kind": "function"
+    },
+    {
+      "name": "intersection",
+      "kind": "function"
+    },
+    {
+      "name": "isdisjoint",
+      "kind": "function"
+    },
+    {
+      "name": "issubset",
+      "kind": "function"
+    },
+    {
+      "name": "issuperset",
+      "kind": "function"
+    },
+    {
+      "name": "symmetric_difference",
+      "kind": "function"
+    },
+    {
+      "name": "union",
+      "kind": "function"
+    },
+    {
+      "name": "enumerate",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "range",
+      "kind": "class",
+      "bases": [
+        "Sequence"
+      ]
+    },
+    {
+      "name": "start",
+      "kind": "function"
+    },
+    {
+      "name": "stop",
+      "kind": "function"
+    },
+    {
+      "name": "step",
+      "kind": "function"
+    },
+    {
+      "name": "count",
+      "kind": "function"
+    },
+    {
+      "name": "index",
+      "kind": "function"
+    },
+    {
+      "name": "property",
+      "kind": "class"
+    },
+    {
+      "name": "getter",
+      "kind": "function"
+    },
+    {
+      "name": "setter",
+      "kind": "function"
+    },
+    {
+      "name": "deleter",
+      "kind": "function"
+    },
+    {
+      "name": "abs",
+      "kind": "function"
+    },
+    {
+      "name": "all",
+      "kind": "function"
+    },
+    {
+      "name": "any",
+      "kind": "function"
+    },
+    {
+      "name": "ascii",
+      "kind": "function"
+    },
+    {
+      "name": "bin",
+      "kind": "function"
+    },
+    {
+      "name": "breakpoint",
+      "kind": "function"
+    },
+    {
+      "name": "callable",
+      "kind": "function"
+    },
+    {
+      "name": "chr",
+      "kind": "function"
+    },
+    {
+      "name": "aiter",
+      "kind": "function"
+    },
+    {
+      "name": "_SupportsSynchronousAnext",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "anext",
+      "kind": "function"
+    },
+    {
+      "name": "compile",
+      "kind": "function"
+    },
+    {
+      "name": "compile",
+      "kind": "function"
+    },
+    {
+      "name": "compile",
+      "kind": "function"
+    },
+    {
+      "name": "compile",
+      "kind": "function"
+    },
+    {
+      "name": "delattr",
+      "kind": "function"
+    },
+    {
+      "name": "dir",
+      "kind": "function"
+    },
+    {
+      "name": "divmod",
+      "kind": "function"
+    },
+    {
+      "name": "divmod",
+      "kind": "function"
+    },
+    {
+      "name": "eval",
+      "kind": "function"
+    },
+    {
+      "name": "eval",
+      "kind": "function"
+    },
+    {
+      "name": "exec",
+      "kind": "function"
+    },
+    {
+      "name": "exec",
+      "kind": "function"
+    },
+    {
+      "name": "exec",
+      "kind": "function"
+    },
+    {
+      "name": "filter",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "format",
+      "kind": "function"
+    },
+    {
+      "name": "getattr",
+      "kind": "function"
+    },
+    {
+      "name": "getattr",
+      "kind": "function"
+    },
+    {
+      "name": "getattr",
+      "kind": "function"
+    },
+    {
+      "name": "getattr",
+      "kind": "function"
+    },
+    {
+      "name": "getattr",
+      "kind": "function"
+    },
+    {
+      "name": "getattr",
+      "kind": "function"
+    },
+    {
+      "name": "globals",
+      "kind": "function"
+    },
+    {
+      "name": "hasattr",
+      "kind": "function"
+    },
+    {
+      "name": "hash",
+      "kind": "function"
+    },
+    {
+      "name": "hex",
+      "kind": "function"
+    },
+    {
+      "name": "id",
+      "kind": "function"
+    },
+    {
+      "name": "input",
+      "kind": "function"
+    },
+    {
+      "name": "_GetItemIterable",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "iter",
+      "kind": "function"
+    },
+    {
+      "name": "iter",
+      "kind": "function"
+    },
+    {
+      "name": "iter",
+      "kind": "function"
+    },
+    {
+      "name": "iter",
+      "kind": "function"
+    },
+    {
+      "name": "isinstance",
+      "kind": "function"
+    },
+    {
+      "name": "issubclass",
+      "kind": "function"
+    },
+    {
+      "name": "len",
+      "kind": "function"
+    },
+    {
+      "name": "locals",
+      "kind": "function"
+    },
+    {
+      "name": "map",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "max",
+      "kind": "function"
+    },
+    {
+      "name": "max",
+      "kind": "function"
+    },
+    {
+      "name": "max",
+      "kind": "function"
+    },
+    {
+      "name": "max",
+      "kind": "function"
+    },
+    {
+      "name": "max",
+      "kind": "function"
+    },
+    {
+      "name": "max",
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "kind": "function"
+    },
+    {
+      "name": "min",
+      "kind": "function"
+    },
+    {
+      "name": "next",
+      "kind": "function"
+    },
+    {
+      "name": "next",
+      "kind": "function"
+    },
+    {
+      "name": "oct",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "open",
+      "kind": "function"
+    },
+    {
+      "name": "ord",
+      "kind": "function"
+    },
+    {
+      "name": "_SupportsWriteAndFlush",
+      "kind": "class",
+      "bases": [
+        "SupportsWrite"
+      ]
+    },
+    {
+      "name": "print",
+      "kind": "function"
+    },
+    {
+      "name": "print",
+      "kind": "function"
+    },
+    {
+      "name": "_SupportsPow2",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "_SupportsPow3NoneOnly",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "_SupportsPow3",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "pow",
+      "kind": "function"
+    },
+    {
+      "name": "reversed",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "repr",
+      "kind": "function"
+    },
+    {
+      "name": "_SupportsRound1",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "_SupportsRound2",
+      "kind": "class",
+      "bases": [
+        "Protocol"
+      ]
+    },
+    {
+      "name": "round",
+      "kind": "function"
+    },
+    {
+      "name": "round",
+      "kind": "function"
+    },
+    {
+      "name": "setattr",
+      "kind": "function"
+    },
+    {
+      "name": "sorted",
+      "kind": "function"
+    },
+    {
+      "name": "sorted",
+      "kind": "function"
+    },
+    {
+      "name": "_SupportsSumWithNoDefaultGiven",
+      "kind": "class",
+      "bases": [
+        "SupportsAdd"
+      ]
+    },
+    {
+      "name": "sum",
+      "kind": "function"
+    },
+    {
+      "name": "sum",
+      "kind": "function"
+    },
+    {
+      "name": "sum",
+      "kind": "function"
+    },
+    {
+      "name": "vars",
+      "kind": "function"
+    },
+    {
+      "name": "vars",
+      "kind": "function"
+    },
+    {
+      "name": "zip",
+      "kind": "class",
+      "bases": [
+        "Generic"
+      ]
+    },
+    {
+      "name": "ellipsis",
+      "kind": "class"
+    },
+    {
+      "name": "_NotImplementedType",
+      "kind": "class",
+      "bases": [
+        "Any"
+      ]
+    },
+    {
+      "name": "BaseException",
+      "kind": "class"
+    },
+    {
+      "name": "with_traceback",
+      "kind": "function"
+    },
+    {
+      "name": "add_note",
+      "kind": "function"
+    },
+    {
+      "name": "GeneratorExit",
+      "kind": "class",
+      "bases": [
+        "BaseException"
+      ]
+    },
+    {
+      "name": "KeyboardInterrupt",
+      "kind": "class",
+      "bases": [
+        "BaseException"
+      ]
+    },
+    {
+      "name": "SystemExit",
+      "kind": "class",
+      "bases": [
+        "BaseException"
+      ]
+    },
+    {
+      "name": "Exception",
+      "kind": "class",
+      "bases": [
+        "BaseException"
+      ]
+    },
+    {
+      "name": "StopIteration",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "OSError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "ArithmeticError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "AssertionError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "AttributeError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "AttributeError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "BufferError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "EOFError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "ImportError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "LookupError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "MemoryError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "NameError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "NameError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "ReferenceError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "RuntimeError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "StopAsyncIteration",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "SyntaxError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "SystemError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "TypeError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "ValueError",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "FloatingPointError",
+      "kind": "class",
+      "bases": [
+        "ArithmeticError"
+      ]
+    },
+    {
+      "name": "OverflowError",
+      "kind": "class",
+      "bases": [
+        "ArithmeticError"
+      ]
+    },
+    {
+      "name": "ZeroDivisionError",
+      "kind": "class",
+      "bases": [
+        "ArithmeticError"
+      ]
+    },
+    {
+      "name": "ModuleNotFoundError",
+      "kind": "class",
+      "bases": [
+        "ImportError"
+      ]
+    },
+    {
+      "name": "IndexError",
+      "kind": "class",
+      "bases": [
+        "LookupError"
+      ]
+    },
+    {
+      "name": "KeyError",
+      "kind": "class",
+      "bases": [
+        "LookupError"
+      ]
+    },
+    {
+      "name": "UnboundLocalError",
+      "kind": "class",
+      "bases": [
+        "NameError"
+      ]
+    },
+    {
+      "name": "BlockingIOError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "ChildProcessError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "ConnectionError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "BrokenPipeError",
+      "kind": "class",
+      "bases": [
+        "ConnectionError"
+      ]
+    },
+    {
+      "name": "ConnectionAbortedError",
+      "kind": "class",
+      "bases": [
+        "ConnectionError"
+      ]
+    },
+    {
+      "name": "ConnectionRefusedError",
+      "kind": "class",
+      "bases": [
+        "ConnectionError"
+      ]
+    },
+    {
+      "name": "ConnectionResetError",
+      "kind": "class",
+      "bases": [
+        "ConnectionError"
+      ]
+    },
+    {
+      "name": "FileExistsError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "FileNotFoundError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "InterruptedError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "IsADirectoryError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "NotADirectoryError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "PermissionError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "ProcessLookupError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "TimeoutError",
+      "kind": "class",
+      "bases": [
+        "OSError"
+      ]
+    },
+    {
+      "name": "NotImplementedError",
+      "kind": "class",
+      "bases": [
+        "RuntimeError"
+      ]
+    },
+    {
+      "name": "RecursionError",
+      "kind": "class",
+      "bases": [
+        "RuntimeError"
+      ]
+    },
+    {
+      "name": "IndentationError",
+      "kind": "class",
+      "bases": [
+        "SyntaxError"
+      ]
+    },
+    {
+      "name": "TabError",
+      "kind": "class",
+      "bases": [
+        "IndentationError"
+      ]
+    },
+    {
+      "name": "UnicodeError",
+      "kind": "class",
+      "bases": [
+        "ValueError"
+      ]
+    },
+    {
+      "name": "UnicodeDecodeError",
+      "kind": "class",
+      "bases": [
+        "UnicodeError"
+      ]
+    },
+    {
+      "name": "UnicodeEncodeError",
+      "kind": "class",
+      "bases": [
+        "UnicodeError"
+      ]
+    },
+    {
+      "name": "UnicodeTranslateError",
+      "kind": "class",
+      "bases": [
+        "UnicodeError"
+      ]
+    },
+    {
+      "name": "Warning",
+      "kind": "class",
+      "bases": [
+        "Exception"
+      ]
+    },
+    {
+      "name": "UserWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "DeprecationWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "SyntaxWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "RuntimeWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "FutureWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "PendingDeprecationWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "ImportWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "UnicodeWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "BytesWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "ResourceWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "EncodingWarning",
+      "kind": "class",
+      "bases": [
+        "Warning"
+      ]
+    },
+    {
+      "name": "BaseExceptionGroup",
+      "kind": "class",
+      "bases": [
+        "BaseException, Generic"
+      ]
+    },
+    {
+      "name": "message",
+      "kind": "function"
+    },
+    {
+      "name": "exceptions",
+      "kind": "function"
+    },
+    {
+      "name": "subgroup",
+      "kind": "function"
+    },
+    {
+      "name": "subgroup",
+      "kind": "function"
+    },
+    {
+      "name": "subgroup",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "derive",
+      "kind": "function"
+    },
+    {
+      "name": "derive",
+      "kind": "function"
+    },
+    {
+      "name": "ExceptionGroup",
+      "kind": "class",
+      "bases": [
+        "BaseExceptionGroup"
+      ]
+    },
+    {
+      "name": "exceptions",
+      "kind": "function"
+    },
+    {
+      "name": "subgroup",
+      "kind": "function"
+    },
+    {
+      "name": "subgroup",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "split",
+      "kind": "function"
+    },
+    {
+      "name": "PythonFinalizationError",
+      "kind": "class",
+      "bases": [
+        "RuntimeError"
+      ]
+    }
+  ]
+}

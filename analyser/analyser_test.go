@@ -225,6 +225,42 @@ func TestResolve_BuiltinExceptionNamesDoNotReportUndefined(t *testing.T) {
 	}
 }
 
+// TestResolve_DeprecationWarningBuiltin verifies DeprecationWarning is available as builtin
+func TestResolve_DeprecationWarningBuiltin(t *testing.T) {
+	src := "x = DeprecationWarning\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	_, errs := Resolve(tree, global)
+	for _, err := range errs {
+		if err.Msg == "undefined name: DeprecationWarning" {
+			t.Fatalf("DeprecationWarning should be available as builtin: %s", err.Msg)
+		}
+	}
+}
+
+// TestResolve_WarningClassesBuiltin verifies Warning classes are available as builtins
+func TestResolve_WarningClassesBuiltin(t *testing.T) {
+	warningClasses := []string{
+		"Warning", "UserWarning", "DeprecationWarning", "SyntaxWarning",
+		"RuntimeWarning", "FutureWarning", "PendingDeprecationWarning",
+		"ImportWarning", "UnicodeWarning", "BytesWarning", "ResourceWarning",
+	}
+
+	for _, warning := range warningClasses {
+		src := warning + "\n"
+		tree := parser.New(src).Parse()
+		global, _ := BuildScopes(tree, src)
+
+		_, errs := Resolve(tree, global)
+		for _, err := range errs {
+			if err.Msg == "undefined name: "+warning {
+				t.Errorf("%s should be available as builtin: %s", warning, err.Msg)
+			}
+		}
+	}
+}
+
 // Comprehensive test for all builtin exceptions to prevent regression
 func TestResolve_AllBuiltinExceptionsDefined(t *testing.T) {
 	// All builtin exceptions should be defined and not report "undefined name"

@@ -208,6 +208,10 @@ func NewBuiltinScope() *Scope {
 		"ProcessLookupError", "TimeoutError",
 		"EOFError", "IOError", "EnvironmentError",
 		"GeneratorExit", "SystemError", "ReferenceError",
+		// Warning classes
+		"Warning", "UserWarning", "DeprecationWarning", "SyntaxWarning",
+		"RuntimeWarning", "FutureWarning", "PendingDeprecationWarning",
+		"ImportWarning", "UnicodeWarning", "BytesWarning", "ResourceWarning",
 	} {
 		defineBuiltinClass(name)
 	}
@@ -281,6 +285,117 @@ func NewBuiltinScope() *Scope {
 	}
 
 	return s
+}
+
+// NewBuiltinScopeFromCache creates a builtin scope from pre-loaded cache data.
+// This includes all classes, functions, and constants from the builtins.pyi stub.
+func NewBuiltinScopeFromCache(symbols []struct {
+	Name  string
+	Kind  string
+	Bases []string
+}) *Scope {
+	s := NewScope(nil, ScopeBuiltin)
+
+	// First pass: create all symbols
+	symbolMap := make(map[string]*Symbol)
+	for _, sym := range symbols {
+		var symbol *Symbol
+		switch sym.Kind {
+		case "class":
+			symbol = &Symbol{
+				Name: sym.Name,
+				Kind: SymClass,
+				Span: ast.Range{},
+			}
+		case "constant":
+			symbol = &Symbol{
+				Name: sym.Name,
+				Kind: SymConstant,
+				Span: ast.Range{},
+			}
+		case "function":
+			symbol = &Symbol{
+				Name: sym.Name,
+				Kind: SymFunction,
+				Span: ast.Range{},
+			}
+		case "type":
+			symbol = &Symbol{
+				Name: sym.Name,
+				Kind: SymType,
+				Span: ast.Range{},
+			}
+		}
+		if symbol != nil {
+			s.Define(symbol)
+			symbolMap[sym.Name] = symbol
+		}
+	}
+
+	// Second pass: set up inheritance for classes
+	for _, sym := range symbols {
+		if sym.Kind == "class" && len(sym.Bases) > 0 {
+			if symbol, ok := symbolMap[sym.Name]; ok {
+				// Lookup base symbol and inherit members
+				if baseSym, ok := symbolMap[sym.Bases[0]]; ok {
+					if baseSym.Members != nil {
+						symbol.Members = baseSym.Members
+					}
+				}
+			}
+		}
+	}
+
+	// Define members for builtin types (same as hardcoded version)
+	defineMember := func(owner *Symbol, name string) *Symbol {
+		if owner == nil {
+			return nil
+		}
+		if owner.Members == nil {
+			owner.Members = NewScope(nil, ScopeMember)
+		}
+		sym := &Symbol{
+			Name:  name,
+			Kind:  SymFunction,
+			Scope: owner.Members,
+			Span:  ast.Range{},
+		}
+		_ = owner.Members.Define(sym)
+		return sym
+	}
+
+	if listSym, ok := s.LookupLocal("list"); ok {
+		defineMember(listSym, "append")
+	}
+	if strSym, ok := s.LookupLocal("str"); ok {
+		for _, name := range []string{
+			"split", "join", "lower", "upper", "strip",
+			"encode", "decode", "startswith", "endswith", "replace",
+			"find", "rfind", "index", "rindex", "count",
+			"format", "isalpha", "isdigit", "isspace", "isalnum",
+		} {
+			defineMember(strSym, name)
+		}
+	}
+	if intSym, ok := s.LookupLocal("int"); ok {
+		for _, name := range []string{
+			"bit_length", "to_bytes", "from_bytes",
+		} {
+			defineMember(intSym, name)
+		}
+	}
+	if dictSym, ok := s.LookupLocal("dict"); ok {
+		for _, name := range []string{"get", "keys", "values", "items", "update", "pop", "clear"} {
+			defineMember(dictSym, name)
+		}
+	}
+
+	return s
+}
+
+// SetBuiltinScope allows replacing the global builtin scope (e.g., with cache-loaded data)
+func SetBuiltinScope(scope *Scope) {
+	builtinScope = scope
 }
 
 var builtinScope = NewBuiltinScope()
