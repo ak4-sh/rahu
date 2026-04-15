@@ -440,11 +440,23 @@ func (r *Resolver) resolveBaseClassSymbol(baseExpr ast.NodeID) (*Symbol, bool) {
 		r.error(r.tree.RangeOf(baseExpr), "undefined base class: "+baseName)
 		return nil, false
 	}
-	if baseSym.Kind != SymClass {
-		r.error(r.tree.RangeOf(baseExpr), baseName+" is not a class")
-		return nil, false
+	if baseSym.Kind == SymClass {
+		return baseSym, true
 	}
-	return baseSym, true
+	if typ := SymbolType(baseSym); !IsUnknownType(typ) {
+		switch typ.Kind {
+		case TypeClass:
+			if typ.Symbol != nil {
+				return typ.Symbol, true
+			}
+		case TypeInstance:
+			if typ.Symbol != nil && typ.Symbol.Kind == SymClass {
+				return typ.Symbol, true
+			}
+		}
+	}
+	r.error(r.tree.RangeOf(baseExpr), baseName+" is not a class")
+	return nil, false
 }
 
 func (r *Resolver) resolveAttributeExpr(expr ast.NodeID) (*Symbol, bool) {

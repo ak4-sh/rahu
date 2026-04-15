@@ -623,7 +623,14 @@ func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
 
 	fnScope.Owner = fnSym
 
-	_ = b.current.Define(fnSym)
+	if err := b.current.Define(fnSym); err != nil {
+		// Allow function definitions to shadow existing symbols in module scope only
+		// This handles fallback patterns like: try: from x import y; except: def y(): ...
+		if b.current.Kind == ScopeGlobal {
+			delete(b.current.Symbols, nameText)
+			_ = b.current.Define(fnSym)
+		}
+	}
 	b.Defs[name] = fnSym
 
 	fnSym.Inner = fnScope

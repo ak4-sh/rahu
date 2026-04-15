@@ -401,7 +401,20 @@ func (l *Lexer) readRawString(quoteType byte) (string, TokenType) {
 	l.readChar() // Skip opening quote
 
 	for l.ch != 0 {
+		// Check for closing quote, but ensure it's not escaped
 		if l.ch == quoteType {
+			// Check if this quote is escaped (preceded by backslash)
+			// Even in raw strings, escaped quotes are part of the content
+			if sb.Len() > 0 {
+				// Check the last character we wrote
+				lastBytes := []byte(sb.String())
+				if len(lastBytes) > 0 && lastBytes[len(lastBytes)-1] == '\\' {
+					// Quote is escaped, include it and continue
+					sb.WriteByte(l.ch)
+					l.readChar()
+					continue
+				}
+			}
 			break
 		}
 		sb.WriteByte(l.ch)
@@ -453,6 +466,19 @@ func (l *Lexer) readRawMultilineString(quoteType byte) (string, TokenType) {
 		}
 
 		if l.ch == quoteType && l.peek() == quoteType && l.peekAhead(1) == quoteType {
+			// Check if any of these quotes are escaped
+			if sb.Len() > 0 {
+				lastBytes := []byte(sb.String())
+				if len(lastBytes) > 0 && lastBytes[len(lastBytes)-1] == '\\' {
+					// At least first quote is escaped, include all and continue
+					for range 3 {
+						sb.WriteByte(l.ch)
+						l.readChar()
+					}
+					continue
+				}
+			}
+			// found endstring
 			for range 3 {
 				l.readChar()
 			}
