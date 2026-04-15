@@ -540,6 +540,40 @@ func (r *Resolver) exprType(id ast.NodeID) *Type {
 	return r.ExprTypes[id]
 }
 
+// InferReceiverTypeFromMethod attempts to determine the receiver type based on
+// a method name. This enables backward type inference for builtin methods.
+func InferReceiverTypeFromMethod(methodName string) *Type {
+	switch methodName {
+	case "split", "join", "lower", "upper", "strip", "replace", "find", "startswith", "endswith":
+		// These are all str methods
+		if sym := BuiltinSymbol("str"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "append", "extend", "insert", "remove", "sort", "reverse":
+		// These are list-only methods
+		if sym := BuiltinSymbol("list"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "get", "keys", "values", "items", "update":
+		// These are dict-only methods
+		if sym := BuiltinSymbol("dict"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "pop":
+		// pop exists on both list and dict - prefer dict for backward inference
+		// (more common to call pop() on unknown dict than unknown list)
+		if sym := BuiltinSymbol("dict"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "clear":
+		// clear exists on dict, list, and set - prefer dict
+		if sym := BuiltinSymbol("dict"); sym != nil {
+			return BuiltinType(sym)
+		}
+	}
+	return nil
+}
+
 func (r *Resolver) resolveAnnotation(expr ast.NodeID) *Type {
 	if expr == ast.NoNode {
 		return nil
@@ -654,6 +688,10 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
 		return
 
+	case ast.NodeBytes:
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("bytes")))
+		return
+
 	case ast.NodeFStringText:
 		return
 
@@ -728,8 +766,9 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 			base := r.tree.ChildAt(funcID, 0)
 			attr := r.tree.ChildAt(funcID, 1)
 			attrName, _ := r.tree.NameText(attr)
+			baseType := r.exprType(base)
+
 			if attrName == "append" {
-				baseType := r.exprType(base)
 				arg := r.tree.Node(funcID).NextSibling
 				argType := r.exprType(arg)
 				if baseType != nil && baseType.Kind == TypeList && !IsUnknownType(argType) {
@@ -739,6 +778,43 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 							baseSym.Inferred = baseType
 						}
 					}
+				}
+			}
+			// Infer return types for common str methods
+			if baseType != nil && baseType.Kind == TypeBuiltin && baseType.Symbol != nil && baseType.Symbol.Name == "str" {
+				switch attrName {
+				case "split":
+					r.setExprType(expr, ListType(BuiltinType(BuiltinSymbol("str"))))
+				case "join":
+					r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+				case "lower", "upper", "strip":
+					r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+				}
+			}
+
+			// Infer return types for dict methods
+			if baseType != nil && baseType.Kind == TypeDict {
+				switch attrName {
+				case "items":
+					// Returns list[tuple[key_type, value_type]]
+					tupleType := TupleType(baseType.Key, baseType.Elem)
+					r.setExprType(expr, ListType(tupleType))
+				case "keys":
+					// Returns list[key_type]
+					r.setExprType(expr, ListType(baseType.Key))
+				case "values":
+					// Returns list[value_type]
+					r.setExprType(expr, ListType(baseType.Elem))
+				case "get":
+					// Returns value_type | None
+					noneType := BuiltinType(BuiltinSymbol("NoneType"))
+					r.setExprType(expr, UnionType(baseType.Elem, noneType))
+				case "pop":
+					// Returns value_type
+					r.setExprType(expr, baseType.Elem)
+				case "update", "clear":
+					// Returns None
+					r.setExprType(expr, BuiltinType(BuiltinSymbol("NoneType")))
 				}
 			}
 		}
@@ -766,10 +842,18 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		r.visitDictComp(expr)
 
 	case ast.NodeDict:
+		var keyType, elemType *Type
 		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
 			r.visitExpr(child, Read)
+			// Each child is a key-value pair (NodeTuple with 2 elements)
+			if r.tree.Node(child).Kind == ast.NodeTuple {
+				keyNode := r.tree.ChildAt(child, 0)
+				valueNode := r.tree.ChildAt(child, 1)
+				keyType = JoinTypes(keyType, r.exprType(keyNode))
+				elemType = JoinTypes(elemType, r.exprType(valueNode))
+			}
 		}
-		r.setExprType(expr, BuiltinType(BuiltinSymbol("dict")))
+		r.setExprType(expr, DictType(keyType, elemType))
 
 	case ast.NodeKeywordArg:
 		r.visitExpr(r.tree.ChildAt(expr, 1), Read)
@@ -795,7 +879,28 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		}
 
 	case ast.NodeAttribute:
-		r.visitExpr(r.tree.Nodes[expr].FirstChild, Read)
+		base := r.tree.Nodes[expr].FirstChild
+		r.visitExpr(base, Read)
+
+		// BACKWARD INFERENCE: If receiver type is unknown, try to infer from attribute name
+		// This helps with unannotated function parameters that use methods like .split(), .append(), etc.
+		if ctx == Read {
+			baseType := r.exprType(base)
+			if IsUnknownType(baseType) {
+				attrName, _ := r.tree.NameText(r.tree.ChildAt(expr, 1))
+				if inferredType := InferReceiverTypeFromMethod(attrName); inferredType != nil {
+					// Update the receiver symbol's type and expression type
+					if r.tree.Node(base).Kind == ast.NodeName {
+						if baseSym := r.Resolved[base]; baseSym != nil {
+							baseSym.Inferred = inferredType
+							r.setExprType(base, inferredType)
+							baseType = inferredType
+						}
+					}
+				}
+			}
+		}
+
 		if ctx == Read {
 			if sym, ok := r.resolveAttributeExpr(expr); ok {
 				if typ := SymbolType(sym); !IsUnknownType(typ) {

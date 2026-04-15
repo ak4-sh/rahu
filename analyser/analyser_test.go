@@ -1,6 +1,7 @@
 package analyser
 
 import (
+	"strings"
 	"testing"
 
 	"rahu/parser"
@@ -220,6 +221,67 @@ func TestResolve_BuiltinExceptionNamesDoNotReportUndefined(t *testing.T) {
 	for _, err := range errs {
 		if err.Msg == "undefined name: TypeError" || err.Msg == "undefined name: AttributeError" {
 			t.Fatalf("unexpected builtin exception diagnostic: %+v", err)
+		}
+	}
+}
+
+// Comprehensive test for all builtin exceptions to prevent regression
+func TestResolve_AllBuiltinExceptionsDefined(t *testing.T) {
+	// All builtin exceptions should be defined and not report "undefined name"
+	builtinExceptions := []string{
+		"BaseException", "Exception", "TypeError", "AttributeError", "ValueError",
+		"KeyError", "IndexError", "RuntimeError", "ImportError", "NameError",
+		"OSError", "LookupError",
+		"AssertionError", "StopIteration", "SystemExit", "KeyboardInterrupt",
+		"ZeroDivisionError", "ArithmeticError", "StopAsyncIteration",
+		"ModuleNotFoundError", "FileNotFoundError", "PermissionError",
+		"NotImplementedError", "MemoryError", "RecursionError",
+		"SyntaxError", "IndentationError", "TabError",
+		"UnicodeError", "UnicodeDecodeError", "UnicodeEncodeError",
+		"BlockingIOError", "ChildProcessError", "ConnectionError",
+		"ConnectionAbortedError", "ConnectionRefusedError", "ConnectionResetError",
+		"InterruptedError", "IsADirectoryError", "NotADirectoryError",
+		"ProcessLookupError", "TimeoutError",
+		"EOFError", "IOError", "EnvironmentError",
+		"GeneratorExit", "SystemError", "ReferenceError",
+	}
+
+	// Build a source file that references all exceptions
+	src := ""
+	for _, exc := range builtinExceptions {
+		src += exc + "\n"
+	}
+
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	_, errs := Resolve(tree, global)
+	for _, err := range errs {
+		if strings.HasPrefix(err.Msg, "undefined name:") {
+			for _, exc := range builtinExceptions {
+				if err.Msg == "undefined name: "+exc {
+					t.Fatalf("builtin exception %s should be defined: %s", exc, err.Msg)
+				}
+			}
+		}
+	}
+
+	// Also verify each exception resolves to a symbol
+	resolver, _ := Resolve(tree, global)
+	for _, name := range builtinExceptions {
+		found := false
+		for nodeID, sym := range resolver.Resolved {
+			if sym != nil && sym.Name == name && sym.Kind == SymClass {
+				found = true
+				_ = nodeID
+				break
+			}
+		}
+		if !found {
+			// Check if it's in the global scope
+			if globalSym, ok := global.Lookup(name); !ok || globalSym == nil {
+				t.Fatalf("builtin exception %s should be resolvable", name)
+			}
 		}
 	}
 }
@@ -887,7 +949,7 @@ func TestResolveDictLiteralTraversal(t *testing.T) {
 	}
 
 	dataSym := defs[mustNameNode(t, tree, "data")]
-	if dataSym == nil || dataSym.Inferred == nil || dataSym.Inferred.Kind != TypeBuiltin || dataSym.Inferred.Symbol == nil || dataSym.Inferred.Symbol.Name != "dict" {
+	if dataSym == nil || dataSym.Inferred == nil || dataSym.Inferred.Kind != TypeDict {
 		t.Fatalf("expected inferred dict type on data, got %+v", dataSym)
 	}
 }
@@ -935,6 +997,168 @@ func TestResolveStringSplitDoesNotReportUndefinedAttribute(t *testing.T) {
 	attr := mustAttributeNode(t, tree, "split")
 	if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != "split" {
 		t.Fatalf("expected split attribute to resolve, got %+v", resolver.ResolvedAttr[attr])
+	}
+}
+
+func TestStringMethodReturnTypes(t *testing.T) {
+	src := `value = "hello world"
+parts = value.split(" ")
+joined = "-".join(parts)
+lowered = value.lower()
+uppered = value.upper()
+stripped = value.strip()
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// Verify all expected attributes resolve
+	for _, method := range []string{"split", "join", "lower", "upper", "strip"} {
+		attr := mustAttributeNode(t, tree, method)
+		if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != method {
+			t.Fatalf("expected %s attribute to resolve, got %+v", method, resolver.ResolvedAttr[attr])
+		}
+	}
+
+	// Test split() returns list[str]
+	partsSym := global.Symbols["parts"]
+	if partsSym == nil {
+		t.Fatal("missing parts symbol")
+	}
+	if partsSym.Inferred == nil || partsSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected parts to have inferred list type, got %+v", partsSym.Inferred)
+	}
+	if partsSym.Inferred.Elem == nil || partsSym.Inferred.Elem.Kind != TypeBuiltin || partsSym.Inferred.Elem.Symbol == nil || partsSym.Inferred.Elem.Symbol.Name != "str" {
+		t.Fatalf("expected parts to have list[str] type, got %+v", partsSym.Inferred)
+	}
+
+	// Test join() returns str
+	joinedSym := global.Symbols["joined"]
+	if joinedSym == nil {
+		t.Fatal("missing joined symbol")
+	}
+	if joinedSym.Inferred == nil || joinedSym.Inferred.Kind != TypeBuiltin || joinedSym.Inferred.Symbol == nil || joinedSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected joined to have inferred str type, got %+v", joinedSym.Inferred)
+	}
+
+	// Test lower() returns str
+	loweredSym := global.Symbols["lowered"]
+	if loweredSym == nil {
+		t.Fatal("missing lowered symbol")
+	}
+	if loweredSym.Inferred == nil || loweredSym.Inferred.Kind != TypeBuiltin || loweredSym.Inferred.Symbol == nil || loweredSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected lowered to have inferred str type, got %+v", loweredSym.Inferred)
+	}
+
+	// Test upper() returns str
+	upperedSym := global.Symbols["uppered"]
+	if upperedSym == nil {
+		t.Fatal("missing uppered symbol")
+	}
+	if upperedSym.Inferred == nil || upperedSym.Inferred.Kind != TypeBuiltin || upperedSym.Inferred.Symbol == nil || upperedSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected uppered to have inferred str type, got %+v", upperedSym.Inferred)
+	}
+
+	// Test strip() returns str
+	strippedSym := global.Symbols["stripped"]
+	if strippedSym == nil {
+		t.Fatal("missing stripped symbol")
+	}
+	if strippedSym.Inferred == nil || strippedSym.Inferred.Kind != TypeBuiltin || strippedSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected stripped to have inferred str type, got %+v", strippedSym.Inferred)
+	}
+}
+
+// Regression test for the requests library pattern: version.split(".")
+func TestVersionStringSplitReturnsListStr(t *testing.T) {
+	src := `urllib3_version = "1.26.18"
+urllib3_version_parts = urllib3_version.split(".")
+major = int(urllib3_version_parts[0])
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// Verify split attribute resolves
+	attr := mustAttributeNode(t, tree, "split")
+	if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != "split" {
+		t.Fatalf("expected split attribute to resolve, got %+v", resolver.ResolvedAttr[attr])
+	}
+
+	// Test urllib3_version_parts has list[str] type
+	partsSym := global.Symbols["urllib3_version_parts"]
+	if partsSym == nil {
+		t.Fatal("missing urllib3_version_parts symbol")
+	}
+	if partsSym.Inferred == nil || partsSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected urllib3_version_parts to have list type, got %+v", partsSym.Inferred)
+	}
+	if partsSym.Inferred.Elem == nil || partsSym.Inferred.Elem.Kind != TypeBuiltin || partsSym.Inferred.Elem.Symbol == nil || partsSym.Inferred.Elem.Symbol.Name != "str" {
+		t.Fatalf("expected urllib3_version_parts to have list[str] type, got %+v", partsSym.Inferred)
+	}
+
+	// Verify no "undefined attribute" error for split
+	for _, err := range errs {
+		if err.Msg == "undefined attribute: split" {
+			t.Fatalf("unexpected error: split should be defined on str")
+		}
+	}
+}
+
+// Test backward type inference: parameter type inferred from method call
+func TestBackwardInferenceForParameterFromMethodCall(t *testing.T) {
+	src := `def _check_cryptography(cryptography_version):
+    parts = cryptography_version.split(".")
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	// We don't care about undefined name errors for the function call
+	var realErrors []SemanticError
+	for _, err := range errs {
+		if !strings.Contains(err.Msg, "undefined name") {
+			realErrors = append(realErrors, err)
+		}
+	}
+	if len(realErrors) != 0 {
+		t.Fatalf("unexpected errors: %+v", realErrors)
+	}
+
+	// Verify split attribute resolves (backward inference should infer cryptography_version is str)
+	attr := mustAttributeNode(t, tree, "split")
+	if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != "split" {
+		t.Fatalf("expected split attribute to resolve via backward inference, got %+v", resolver.ResolvedAttr[attr])
+	}
+
+	// Verify the parameter was inferred as str
+	fnSym := global.Symbols["_check_cryptography"]
+	if fnSym == nil || fnSym.Inner == nil {
+		t.Fatal("missing _check_cryptography function symbol")
+	}
+	paramSym := fnSym.Inner.Symbols["cryptography_version"]
+	if paramSym == nil {
+		t.Fatal("missing cryptography_version parameter symbol")
+	}
+	if paramSym.Inferred == nil || paramSym.Inferred.Kind != TypeBuiltin || paramSym.Inferred.Symbol == nil || paramSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected cryptography_version parameter to be inferred as str via backward inference, got %+v", paramSym.Inferred)
+	}
+
+	// Verify parts has list[str] type
+	partsSym := fnSym.Inner.Symbols["parts"]
+	if partsSym == nil {
+		t.Fatal("missing parts symbol")
+	}
+	if partsSym.Inferred == nil || partsSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected parts to have list type, got %+v", partsSym.Inferred)
 	}
 }
 
@@ -1010,4 +1234,347 @@ func findCallNode(t *testing.T, tree *ast.AST) ast.NodeID {
 		t.Fatal("missing call node")
 	}
 	return found
+}
+
+// Test that hex literals are stored with converted decimal values in DefaultValue
+func TestHexLiteralDefaultValue(t *testing.T) {
+	src := "__build__ = 0x023301\n"
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	// Verify the symbol was created with the converted value
+	sym, ok := global.Symbols["__build__"]
+	if !ok {
+		t.Fatal("missing __build__ symbol")
+	}
+
+	// The DefaultValue should contain the converted decimal value with angle brackets
+	expectedValue := "<144129>"
+	if sym.DefaultValue != expectedValue {
+		t.Fatalf("expected DefaultValue %q for hex literal, got %q", expectedValue, sym.DefaultValue)
+	}
+}
+
+// Test that binary and octal literals are also stored with converted decimal values
+func TestBinaryOctalLiteralDefaultValue(t *testing.T) {
+	src := `binary_val = 0b1010
+octal_val = 0o777
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	// Check binary value
+	binarySym, ok := global.Symbols["binary_val"]
+	if !ok {
+		t.Fatal("missing binary_val symbol")
+	}
+	if binarySym.DefaultValue != "<10>" {
+		t.Fatalf("expected DefaultValue %q for binary literal, got %q", "<10>", binarySym.DefaultValue)
+	}
+
+	// Check octal value
+	octalSym, ok := global.Symbols["octal_val"]
+	if !ok {
+		t.Fatal("missing octal_val symbol")
+	}
+	if octalSym.DefaultValue != "<511>" {
+		t.Fatalf("expected DefaultValue %q for octal literal, got %q", "<511>", octalSym.DefaultValue)
+	}
+}
+
+// Test that bytes strings are inferred as bytes type
+func TestBytesStringTypeInference(t *testing.T) {
+	src := `s = "hello"
+b = b"world"
+rb_val = rb"raw bytes"
+br_val = br"raw bytes 2"
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// Check regular string is inferred as str
+	strSym := global.Symbols["s"]
+	if strSym == nil {
+		t.Fatal("missing s symbol")
+	}
+	if strSym.Inferred == nil || strSym.Inferred.Kind != TypeBuiltin || strSym.Inferred.Symbol == nil || strSym.Inferred.Symbol.Name != "str" {
+		t.Fatalf("expected s to have str type, got %+v", strSym.Inferred)
+	}
+
+	// Check bytes string is inferred as bytes
+	bytesSym := global.Symbols["b"]
+	if bytesSym == nil {
+		t.Fatal("missing b symbol")
+	}
+	if bytesSym.Inferred == nil || bytesSym.Inferred.Kind != TypeBuiltin || bytesSym.Inferred.Symbol == nil || bytesSym.Inferred.Symbol.Name != "bytes" {
+		t.Fatalf("expected b to have bytes type, got %+v", bytesSym.Inferred)
+	}
+
+	// Check rb prefix
+	rbSym := global.Symbols["rb_val"]
+	if rbSym == nil {
+		t.Fatal("missing rb_val symbol")
+	}
+	if rbSym.Inferred == nil || rbSym.Inferred.Kind != TypeBuiltin || rbSym.Inferred.Symbol == nil || rbSym.Inferred.Symbol.Name != "bytes" {
+		t.Fatalf("expected rb_val to have bytes type, got %+v", rbSym.Inferred)
+	}
+
+	// Check br prefix
+	brSym := global.Symbols["br_val"]
+	if brSym == nil {
+		t.Fatal("missing br_val symbol")
+	}
+	if brSym.Inferred == nil || brSym.Inferred.Kind != TypeBuiltin || brSym.Inferred.Symbol == nil || brSym.Inferred.Symbol.Name != "bytes" {
+		t.Fatalf("expected br_val to have bytes type, got %+v", brSym.Inferred)
+	}
+
+	// Verify DefaultValue shows b prefix for bytes (content without quotes)
+	if bytesSym.DefaultValue != "bworld" {
+		t.Fatalf("expected DefaultValue to show b prefix, got %q", bytesSym.DefaultValue)
+	}
+
+	_ = resolver
+}
+
+// Test dict method resolution and return type inference
+func TestDictMethodReturnTypes(t *testing.T) {
+	src := `d: dict[str, int] = {}
+items = d.items()
+keys = d.keys()
+values = d.values()
+val = d.get("key")
+popped = d.pop("key")
+d.update({"a": 1})
+d.clear()
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// Verify items attribute resolves
+	itemsAttr := mustAttributeNode(t, tree, "items")
+	if resolver.ResolvedAttr[itemsAttr] == nil || resolver.ResolvedAttr[itemsAttr].Name != "items" {
+		t.Fatalf("expected items attribute to resolve, got %+v", resolver.ResolvedAttr[itemsAttr])
+	}
+
+	// Test items has list[tuple[str, int]] type
+	itemsSym := global.Symbols["items"]
+	if itemsSym == nil {
+		t.Fatal("missing items symbol")
+	}
+	if itemsSym.Inferred == nil || itemsSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected items to have list type, got %+v", itemsSym.Inferred)
+	}
+	if itemsSym.Inferred.Elem == nil || itemsSym.Inferred.Elem.Kind != TypeTuple {
+		t.Fatalf("expected items to have list[tuple[...]] type, got %+v", itemsSym.Inferred.Elem)
+	}
+
+	// Test keys has list[str] type
+	keysSym := global.Symbols["keys"]
+	if keysSym == nil {
+		t.Fatal("missing keys symbol")
+	}
+	if keysSym.Inferred == nil || keysSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected keys to have list type, got %+v", keysSym.Inferred)
+	}
+	if keysSym.Inferred.Elem == nil || keysSym.Inferred.Elem.Kind != TypeBuiltin || keysSym.Inferred.Elem.Symbol == nil || keysSym.Inferred.Elem.Symbol.Name != "str" {
+		t.Fatalf("expected keys to have list[str] type, got %+v", keysSym.Inferred)
+	}
+
+	// Test values has list[int] type
+	valuesSym := global.Symbols["values"]
+	if valuesSym == nil {
+		t.Fatal("missing values symbol")
+	}
+	if valuesSym.Inferred == nil || valuesSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected values to have list type, got %+v", valuesSym.Inferred)
+	}
+	if valuesSym.Inferred.Elem == nil || valuesSym.Inferred.Elem.Kind != TypeBuiltin || valuesSym.Inferred.Elem.Symbol == nil || valuesSym.Inferred.Elem.Symbol.Name != "int" {
+		t.Fatalf("expected values to have list[int] type, got %+v", valuesSym.Inferred)
+	}
+
+	// Test get returns int | None (union)
+	valSym := global.Symbols["val"]
+	if valSym == nil {
+		t.Fatal("missing val symbol")
+	}
+	if valSym.Inferred == nil || valSym.Inferred.Kind != TypeUnion {
+		t.Fatalf("expected val to have union type (int | None), got %+v", valSym.Inferred)
+	}
+
+	// Test pop returns int
+	poppedSym := global.Symbols["popped"]
+	if poppedSym == nil {
+		t.Fatal("missing popped symbol")
+	}
+	if poppedSym.Inferred == nil || poppedSym.Inferred.Kind != TypeBuiltin || poppedSym.Inferred.Symbol == nil || poppedSym.Inferred.Symbol.Name != "int" {
+		t.Fatalf("expected popped to have int type, got %+v", poppedSym.Inferred)
+	}
+}
+
+// Test dict methods work without type annotations (inferred from usage)
+func TestDictMethodsWithoutAnnotation(t *testing.T) {
+	src := `d = {"a": 1, "b": 2}
+items = d.items()
+keys = d.keys()
+values = d.values()
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// Verify all attributes resolve without errors
+	for _, method := range []string{"items", "keys", "values"} {
+		attr := mustAttributeNode(t, tree, method)
+		if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != method {
+			t.Fatalf("expected %s attribute to resolve, got %+v", method, resolver.ResolvedAttr[attr])
+		}
+	}
+
+	// Verify items, keys, values have list types
+	for _, varName := range []string{"items", "keys", "values"} {
+		sym := global.Symbols[varName]
+		if sym == nil {
+			t.Fatalf("missing %s symbol", varName)
+		}
+		if sym.Inferred == nil || sym.Inferred.Kind != TypeList {
+			t.Fatalf("expected %s to have list type, got %+v", varName, sym.Inferred)
+		}
+	}
+}
+
+// Test nested dict return types
+func TestNestedDictMethodReturnTypes(t *testing.T) {
+	src := `d: dict[str, dict[int, list[float]]] = {}
+items = d.items()
+inner_dict = d.get("key")
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+
+	// Test items returns list[tuple[str, dict[int, list[float]]]]
+	itemsSym := global.Symbols["items"]
+	if itemsSym == nil {
+		t.Fatal("missing items symbol")
+	}
+	if itemsSym.Inferred == nil || itemsSym.Inferred.Kind != TypeList {
+		t.Fatalf("expected items to have list type, got %+v", itemsSym.Inferred)
+	}
+	if itemsSym.Inferred.Elem == nil || itemsSym.Inferred.Elem.Kind != TypeTuple {
+		t.Fatalf("expected items to have list[tuple[...]] type, got %+v", itemsSym.Inferred.Elem)
+	}
+
+	// Verify inner_dict has dict[int, list[float]] | None type
+	innerSym := global.Symbols["inner_dict"]
+	if innerSym == nil {
+		t.Fatal("missing inner_dict symbol")
+	}
+	if innerSym.Inferred == nil || innerSym.Inferred.Kind != TypeUnion {
+		t.Fatalf("expected inner_dict to have union type, got %+v", innerSym.Inferred)
+	}
+
+	_ = resolver
+}
+
+// Test backward type inference for function parameters using dict methods
+func TestDictBackwardInference(t *testing.T) {
+	src := `def process_dict(x):
+    items = x.items()
+    keys = x.keys()
+    values = x.values()
+    val = x.get("key")
+    return items, keys, values, val
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	// Filter out "undefined name" errors for the function itself
+	var realErrors []SemanticError
+	for _, err := range errs {
+		if !strings.Contains(err.Msg, "undefined name") {
+			realErrors = append(realErrors, err)
+		}
+	}
+	if len(realErrors) != 0 {
+		t.Fatalf("unexpected errors: %+v", realErrors)
+	}
+
+	// Verify dict method attributes resolve (backward inference should type x as dict)
+	for _, method := range []string{"items", "keys", "values", "get"} {
+		attr := mustAttributeNode(t, tree, method)
+		if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != method {
+			t.Fatalf("expected %s attribute to resolve via backward inference, got %+v", method, resolver.ResolvedAttr[attr])
+		}
+	}
+
+	// Verify the parameter x was inferred as dict via backward inference
+	fnSym := global.Symbols["process_dict"]
+	if fnSym == nil || fnSym.Inner == nil {
+		t.Fatal("missing process_dict function symbol")
+	}
+	paramSym := fnSym.Inner.Symbols["x"]
+	if paramSym == nil {
+		t.Fatal("missing x parameter symbol")
+	}
+	if paramSym.Inferred == nil || paramSym.Inferred.Kind != TypeBuiltin || paramSym.Inferred.Symbol == nil || paramSym.Inferred.Symbol.Name != "dict" {
+		t.Fatalf("expected x parameter to be inferred as dict via backward inference, got %+v", paramSym.Inferred)
+	}
+}
+
+// Test backward inference with pop method (exists on both list and dict)
+func TestDictPopBackwardInference(t *testing.T) {
+	src := `def get_value(d):
+    return d.pop("key")
+`
+	tree := parser.New(src).Parse()
+	global, _ := BuildScopes(tree, src)
+
+	resolver, errs := Resolve(tree, global)
+	var realErrors []SemanticError
+	for _, err := range errs {
+		if !strings.Contains(err.Msg, "undefined name") {
+			realErrors = append(realErrors, err)
+		}
+	}
+	if len(realErrors) != 0 {
+		t.Fatalf("unexpected errors: %+v", realErrors)
+	}
+
+	// Verify pop attribute resolves
+	attr := mustAttributeNode(t, tree, "pop")
+	if resolver.ResolvedAttr[attr] == nil || resolver.ResolvedAttr[attr].Name != "pop" {
+		t.Fatalf("expected pop attribute to resolve via backward inference, got %+v", resolver.ResolvedAttr[attr])
+	}
+
+	// Verify parameter d was inferred as dict (we prefer dict over list for pop)
+	fnSym := global.Symbols["get_value"]
+	if fnSym == nil || fnSym.Inner == nil {
+		t.Fatal("missing get_value function symbol")
+	}
+	paramSym := fnSym.Inner.Symbols["d"]
+	if paramSym == nil {
+		t.Fatal("missing d parameter symbol")
+	}
+	if paramSym.Inferred == nil || paramSym.Inferred.Kind != TypeBuiltin || paramSym.Inferred.Symbol == nil || paramSym.Inferred.Symbol.Name != "dict" {
+		t.Fatalf("expected d parameter to be inferred as dict via backward inference, got %+v", paramSym.Inferred)
+	}
 }

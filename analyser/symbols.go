@@ -160,6 +160,7 @@ func NewBuiltinScope() *Scope {
 	for _, name := range []string{
 		"bool", "int", "str", "float", "list", "tuple", "dict", "set",
 		"frozenset", "bytes", "bytearray", "complex", "object",
+		"NoneType", // Type of None
 	} {
 		defineBuiltinType(name)
 	}
@@ -172,11 +173,29 @@ func NewBuiltinScope() *Scope {
 			defineMember(strSym, name)
 		}
 	}
+	if dictSym, ok := s.LookupLocal("dict"); ok {
+		for _, name := range []string{"get", "keys", "values", "items", "update", "pop", "clear"} {
+			defineMember(dictSym, name)
+		}
+	}
 
 	for _, name := range []string{
 		"BaseException", "Exception", "TypeError", "AttributeError", "ValueError",
 		"KeyError", "IndexError", "RuntimeError", "ImportError", "NameError",
 		"OSError", "LookupError",
+		// Additional commonly used exceptions
+		"AssertionError", "StopIteration", "SystemExit", "KeyboardInterrupt",
+		"ZeroDivisionError", "ArithmeticError", "StopAsyncIteration",
+		"ModuleNotFoundError", "FileNotFoundError", "PermissionError",
+		"NotImplementedError", "MemoryError", "RecursionError",
+		"SyntaxError", "IndentationError", "TabError",
+		"UnicodeError", "UnicodeDecodeError", "UnicodeEncodeError",
+		"BlockingIOError", "ChildProcessError", "ConnectionError",
+		"ConnectionAbortedError", "ConnectionRefusedError", "ConnectionResetError",
+		"InterruptedError", "IsADirectoryError", "NotADirectoryError",
+		"ProcessLookupError", "TimeoutError",
+		"EOFError", "IOError", "EnvironmentError",
+		"GeneratorExit", "SystemError", "ReferenceError",
 	} {
 		defineBuiltinClass(name)
 	}
