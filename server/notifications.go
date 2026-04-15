@@ -40,16 +40,11 @@ func (s *Server) endWorkspaceIndexingProgress() {
 	if s.conn == nil {
 		return
 	}
-	s.snapshotsMu.RLock()
-	s.snapshotsMu.RUnlock()
-	s.indexMu.RLock()
-	count := len(s.modulesByName)
-	s.indexMu.RUnlock()
 	_ = s.conn.Notify("$/progress", lsp.ProgressParams{
 		Token: indexingProgressToken(),
 		Value: lsp.WorkDoneProgressEnd{
 			Kind:    "end",
-			Message: fmt.Sprintf("Finished indexing %d Python files", count),
+			Message: "Indexing complete",
 		},
 	})
 }
@@ -66,5 +61,16 @@ func (s *Server) reportIndexingProgress(current, total int) {
 			Message:    fmt.Sprintf("Indexed %d/%d files", current, total),
 			Percentage: &percentage,
 		},
+	})
+}
+
+// showWarningMessage sends a warning notification to the editor
+func (s *Server) showWarningMessage(message string) {
+	if s.conn == nil {
+		return
+	}
+	_ = s.conn.Notify("window/showMessage", lsp.ShowMessageParams{
+		Type:    lsp.MessageTypeWarning,
+		Message: message,
 	})
 }

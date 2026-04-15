@@ -229,7 +229,7 @@ func (s *Server) Initialize(
 	s.priorityDir = rootPath // Default priority to workspace root
 	s.miscMu.Unlock()
 
-	env := discoverPythonEnv(rootPath)
+	env := discoverPythonEnvCached(rootPath, s)
 	roots := normalizeExternalSearchRoots(rootPath, env.Paths)
 	builtins := make(map[string]struct{}, len(env.Builtins))
 	for _, name := range env.Builtins {
@@ -244,9 +244,9 @@ func (s *Server) Initialize(
 	s.pythonBuiltinNames = builtins
 	s.pythonModuleInfoByName = make(map[string]pythonModuleInfo)
 
-	// Initialize typeshed loader based on Python version
+	// Initialize typeshed loader based on Python version (with caching)
 	pyVersion := GetPythonVersion(env.Executable)
-	typeshedLoader, err := NewTypeshedLoader(pyVersion)
+	typeshedLoader, err := NewTypeshedLoaderWithCache(pyVersion, rootPath, s)
 	if err != nil {
 		log.Printf("[typeshed] Failed to initialize: %v", err)
 	} else {
@@ -424,12 +424,16 @@ func (s *Server) backgroundIndex(ctx context.Context) {
 	}
 	workspaceDuration := time.Since(workspaceStart)
 
-	s.endWorkspaceIndexingProgress()
-
 	// Re-analyze all open documents to pick up cross-file imports
+	// This must complete BEFORE we signal indexing progress as done,
+	// because semantic tokens and other features depend on SetAnalysis()
+	// being called for open documents.
 	reanalyzeStart := time.Now()
 	s.reanalyzeOpenDocuments()
 	reanalyzeDuration := time.Since(reanalyzeStart)
+
+	// Signal completion AFTER open documents are ready
+	s.endWorkspaceIndexingProgress()
 	if s.conn != nil {
 		s.miscMu.Lock()
 		startup := s.startup
