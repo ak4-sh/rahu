@@ -10,6 +10,7 @@ import (
 	"rahu"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // TypeshedLoader loads type stubs from embedded typeshed with version filtering.
@@ -38,6 +39,12 @@ type VersionRange struct {
 // If the Python version exceeds the maximum supported by typeshed, it returns
 // a disabled loader that will fall back to introspection.
 func NewTypeshedLoader(pyVersion PythonVersion) (*TypeshedLoader, error) {
+	return NewTypeshedLoaderWithCache(pyVersion, "", nil)
+}
+
+// NewTypeshedLoaderWithCache creates a typeshed loader, using cache if available.
+// The rootPath and server are used for cache operations.
+func NewTypeshedLoaderWithCache(pyVersion PythonVersion, rootPath string, server *Server) (*TypeshedLoader, error) {
 	loader := &TypeshedLoader{
 		fs:             rahu.TypeshedFS(),
 		pyVersion:      pyVersion,
@@ -58,6 +65,23 @@ func NewTypeshedLoader(pyVersion PythonVersion) (*TypeshedLoader, error) {
 		return loader, nil
 	}
 
+	// Try to load from cache if rootPath provided
+	if rootPath != "" {
+		if cache := loadPythonEnvCacheForTypeshed(rootPath, server); cache != nil {
+			if cache.Typeshed != nil {
+				// Restore cached data
+				loader.maxSupported = cache.Typeshed.MaxSupported
+				loader.stdlibVersions = cache.Typeshed.StdlibVersions
+				loader.skipModules = make(map[string]bool)
+				for _, mod := range cache.Typeshed.SkipModules {
+					loader.skipModules[mod] = true
+				}
+				log.Printf("[typeshed] Loaded from cache for Python %d.%d", pyVersion.Major, pyVersion.Minor)
+				return loader, nil
+			}
+		}
+	}
+
 	// Parse the VERSIONS file from embedded typeshed
 	if err := loader.parseVersionsFile(); err != nil {
 		return nil, fmt.Errorf("failed to parse typeshed VERSIONS: %w", err)
@@ -66,7 +90,64 @@ func NewTypeshedLoader(pyVersion PythonVersion) (*TypeshedLoader, error) {
 	log.Printf("[typeshed] Loaded for Python %d.%d (max supported: %d.%d)",
 		pyVersion.Major, pyVersion.Minor, loader.maxSupported.Major, loader.maxSupported.Minor)
 
+	// Save to cache if we have a rootPath
+	if rootPath != "" && server != nil {
+		saveTypeshedToCache(loader, rootPath, server)
+	}
+
 	return loader, nil
+}
+
+// loadPythonEnvCacheForTypeshed loads the python env cache to extract typeshed data
+func loadPythonEnvCacheForTypeshed(rootPath string, server *Server) *pythonEnvCache {
+	// Get current Python version to find the right cache file
+	python := discoverPythonExecutable(rootPath)
+	if python == "" {
+		return nil
+	}
+	pyVersion := getPythonVersion(python)
+	if pyVersion == "" {
+		pyVersion = "unknown"
+	}
+	return loadPythonEnvCache(rootPath, pyVersion)
+}
+
+// saveTypeshedToCache saves typeshed data to the python env cache
+func saveTypeshedToCache(loader *TypeshedLoader, rootPath string, server *Server) {
+	python := discoverPythonExecutable(rootPath)
+	if python == "" {
+		return
+	}
+	pyVersionStr := getPythonVersion(python)
+	if pyVersionStr == "" {
+		pyVersionStr = "unknown"
+	}
+
+	// Try to load existing cache
+	cache := loadPythonEnvCache(rootPath, pyVersionStr)
+	if cache == nil {
+		// No existing cache, create minimal one
+		cache = &pythonEnvCache{
+			Executable:    python,
+			PythonVersion: pyVersionStr,
+			CachedAt:      time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	// Update typeshed cache
+	skipMods := make([]string, 0, len(loader.skipModules))
+	for mod := range loader.skipModules {
+		skipMods = append(skipMods, mod)
+	}
+
+	cache.Typeshed = &typeshedCacheData{
+		MaxSupported:   loader.maxSupported,
+		StdlibVersions: loader.stdlibVersions,
+		SkipModules:    skipMods,
+		TypeshedMtime:  0, // Could add typeshed source hash/mtime here
+	}
+
+	savePythonEnvCache(rootPath, cache, server)
 }
 
 // IsDisabled returns true if typeshed is disabled (e.g., Python version too new).
