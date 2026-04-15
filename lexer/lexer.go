@@ -31,6 +31,7 @@ package lexer
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -292,6 +293,10 @@ func isDigit(val byte) bool {
 	return val >= '0' && val <= '9'
 }
 
+func isHexDigit(val byte) bool {
+	return (val >= '0' && val <= '9') || (val >= 'a' && val <= 'f') || (val >= 'A' && val <= 'F')
+}
+
 func (l *Lexer) isChar() bool {
 	if (l.ch >= 'a' && l.ch <= 'z') || (l.ch >= 'A' && l.ch <= 'Z') {
 		return true
@@ -305,6 +310,19 @@ func (l *Lexer) isIdentifierChar() bool {
 
 func (l *Lexer) readNumber() string {
 	start := l.position
+
+	// Check for hex (0x), binary (0b), or octal (0o) literals
+	if l.input[start] == '0' && l.readPosition < uint32(len(l.input)) {
+		nextChar := l.input[l.readPosition]
+		switch nextChar {
+		case 'x', 'X':
+			return l.readHexNumber(start)
+		case 'b', 'B':
+			return l.readBinaryNumber(start)
+		case 'o', 'O':
+			return l.readOctalNumber(start)
+		}
+	}
 
 	for l.readPosition < uint32(len(l.input)) && isDigit(l.input[l.readPosition]) {
 		l.readPosition++
@@ -331,6 +349,78 @@ func (l *Lexer) readNumber() string {
 	l.readPosition++
 
 	return lit
+}
+
+func (l *Lexer) readHexNumber(start uint32) string {
+	// Consume the 'x' or 'X'
+	l.readPosition++
+
+	// Read hex digits
+	for l.readPosition < uint32(len(l.input)) && isHexDigit(l.input[l.readPosition]) {
+		l.readPosition++
+	}
+
+	hexLit := l.input[start:l.readPosition]
+	l.position = l.readPosition
+
+	if l.position < uint32(len(l.input)) {
+		l.ch = l.input[l.position]
+	} else {
+		l.ch = 0
+	}
+	l.readPosition++
+
+	// Convert hex to decimal with angle brackets
+	decimalVal := parseHexToDecimal(hexLit)
+	return "<" + decimalVal + ">"
+}
+
+func (l *Lexer) readBinaryNumber(start uint32) string {
+	// Consume the 'b' or 'B'
+	l.readPosition++
+
+	// Read binary digits (0 or 1)
+	for l.readPosition < uint32(len(l.input)) && (l.input[l.readPosition] == '0' || l.input[l.readPosition] == '1') {
+		l.readPosition++
+	}
+
+	binaryLit := l.input[start:l.readPosition]
+	l.position = l.readPosition
+
+	if l.position < uint32(len(l.input)) {
+		l.ch = l.input[l.position]
+	} else {
+		l.ch = 0
+	}
+	l.readPosition++
+
+	// Convert binary to decimal with angle brackets
+	decimalVal := parseBinaryToDecimal(binaryLit)
+	return "<" + decimalVal + ">"
+}
+
+func (l *Lexer) readOctalNumber(start uint32) string {
+	// Consume the 'o' or 'O'
+	l.readPosition++
+
+	// Read octal digits (0-7)
+	for l.readPosition < uint32(len(l.input)) && l.input[l.readPosition] >= '0' && l.input[l.readPosition] <= '7' {
+		l.readPosition++
+	}
+
+	octalLit := l.input[start:l.readPosition]
+	l.position = l.readPosition
+
+	if l.position < uint32(len(l.input)) {
+		l.ch = l.input[l.position]
+	} else {
+		l.ch = 0
+	}
+	l.readPosition++
+
+	// Convert octal to decimal with angle brackets
+	decimalVal := parseOctalToDecimal(octalLit)
+	return "<" + decimalVal + ">"
 }
 
 func (l *Lexer) readIdentifier() string {
@@ -543,18 +633,24 @@ func (l *Lexer) readFString(prefixLen uint32, raw bool) (string, TokenType) {
 	return l.input[start:l.position], UNTERMINATED_STRING
 }
 
-func stringPrefixLength(ch, next byte) (prefixLen uint32, raw bool, fstring bool) {
+func stringPrefixLength(ch, next byte) (prefixLen uint32, raw bool, fstring bool, bstring bool) {
 	switch {
 	case (ch == 'f' || ch == 'F') && (next == '\'' || next == '"'):
-		return 1, false, true
+		return 1, false, true, false
 	case (ch == 'r' || ch == 'R') && (next == '\'' || next == '"'):
-		return 1, true, false
+		return 1, true, false, false
 	case (ch == 'r' || ch == 'R') && (next == 'f' || next == 'F'):
-		return 2, true, true
+		return 2, true, true, false
 	case (ch == 'f' || ch == 'F') && (next == 'r' || next == 'R'):
-		return 2, true, true
+		return 2, true, true, false
+	case (ch == 'b' || ch == 'B') && (next == '\'' || next == '"'):
+		return 1, false, false, true
+	case (ch == 'b' || ch == 'B') && (next == 'r' || next == 'R'):
+		return 2, true, false, true
+	case (ch == 'r' || ch == 'R') && (next == 'b' || next == 'B'):
+		return 2, true, false, true
 	default:
-		return 0, false, false
+		return 0, false, false, false
 	}
 }
 
@@ -710,7 +806,7 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	if l.isChar() || l.ch == '_' {
-		if prefixLen, raw, fstring := stringPrefixLength(l.ch, l.peek()); prefixLen != 0 {
+		if prefixLen, raw, fstring, bstring := stringPrefixLength(l.ch, l.peek()); prefixLen != 0 {
 			quotePos := l.position + prefixLen
 			if quotePos >= uint32(len(l.input)) || (l.input[quotePos] != '"' && l.input[quotePos] != '\'') {
 				goto identifier
@@ -720,6 +816,18 @@ func (l *Lexer) NextToken() Token {
 			var typ TokenType
 			if fstring {
 				lit, typ = l.readFString(prefixLen, raw)
+			} else if bstring {
+				// Byte strings: b"...", rb"...", br"..."
+				quote := l.input[quotePos]
+				for range prefixLen {
+					l.readChar()
+				}
+				if quotePos+2 < uint32(len(l.input)) && l.input[quotePos+1] == quote && l.input[quotePos+2] == quote {
+					lit, typ = l.readRawMultilineString(quote)
+				} else {
+					lit, typ = l.readRawString(quote)
+				}
+				typ = BSTRING
 			} else {
 				quote := l.input[quotePos]
 				for range prefixLen {
@@ -791,4 +899,46 @@ func (l *Lexer) NextToken() Token {
 		Start:   start,
 		End:     l.position,
 	}
+}
+
+// Helper functions to convert hex/binary/octal literals to decimal with angle brackets
+
+func parseHexToDecimal(hexLit string) string {
+	// Strip "0x" or "0X" prefix
+	hexStr := strings.TrimPrefix(strings.TrimPrefix(hexLit, "0x"), "0X")
+	if hexStr == "" {
+		return "0"
+	}
+	val, err := strconv.ParseInt(hexStr, 16, 64)
+	if err != nil {
+		// If parsing fails, return the original without conversion
+		return hexLit
+	}
+	return strconv.FormatInt(val, 10)
+}
+
+func parseBinaryToDecimal(binLit string) string {
+	// Strip "0b" or "0B" prefix
+	binStr := strings.TrimPrefix(strings.TrimPrefix(binLit, "0b"), "0B")
+	if binStr == "" {
+		return "0"
+	}
+	val, err := strconv.ParseInt(binStr, 2, 64)
+	if err != nil {
+		return binLit
+	}
+	return strconv.FormatInt(val, 10)
+}
+
+func parseOctalToDecimal(octLit string) string {
+	// Strip "0o" or "0O" prefix
+	octStr := strings.TrimPrefix(strings.TrimPrefix(octLit, "0o"), "0O")
+	if octStr == "" {
+		return "0"
+	}
+	val, err := strconv.ParseInt(octStr, 8, 64)
+	if err != nil {
+		return octLit
+	}
+	return strconv.FormatInt(val, 10)
 }
