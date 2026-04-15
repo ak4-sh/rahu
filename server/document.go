@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -242,6 +243,56 @@ func (s *Server) Initialize(
 	s.externalSearchRoots = roots
 	s.pythonBuiltinNames = builtins
 	s.pythonModuleInfoByName = make(map[string]pythonModuleInfo)
+
+	// Initialize typeshed loader based on Python version
+	pyVersion := GetPythonVersion(env.Executable)
+	typeshedLoader, err := NewTypeshedLoader(pyVersion)
+	if err != nil {
+		log.Printf("[typeshed] Failed to initialize: %v", err)
+	} else {
+		s.typeshedLoader = typeshedLoader
+		if typeshedLoader.IsDisabled() {
+			log.Printf("[typeshed] Disabled for Python %d.%d", pyVersion.Major, pyVersion.Minor)
+		} else {
+			log.Printf("[typeshed] Enabled for Python %d.%d", pyVersion.Major, pyVersion.Minor)
+		}
+	}
+
+	// Load builtin cache for accurate builtin symbol resolution
+	pyVersionStr := fmt.Sprintf("%d.%d", pyVersion.Major, pyVersion.Minor)
+	if cache, ok := LoadBuiltinCache(pyVersionStr); ok {
+		// Verify cache is not stale
+		valid, currentHash := cache.VerifySourceHash()
+		if !valid {
+			log.Printf("[builtins] Cache hash mismatch (expected %s, got %s), using fallback",
+				cache.SourceHash[:16], currentHash[:16])
+		} else {
+			// Convert cache symbols to analyser format
+			cacheSymbols := make([]struct {
+				Name  string
+				Kind  string
+				Bases []string
+			}, len(cache.Symbols))
+			for i, sym := range cache.Symbols {
+				cacheSymbols[i] = struct {
+					Name  string
+					Kind  string
+					Bases []string
+				}{
+					Name:  sym.Name,
+					Kind:  sym.Kind,
+					Bases: sym.Bases,
+				}
+			}
+			newScope := analyser.NewBuiltinScopeFromCache(cacheSymbols)
+			analyser.SetBuiltinScope(newScope)
+			log.Printf("[builtins] Loaded %d symbols from cache for Python %s",
+				len(cache.Symbols), pyVersionStr)
+		}
+	} else {
+		log.Printf("[builtins] No cache found for Python %s, using fallback", pyVersionStr)
+	}
+
 	s.indexMu.Unlock()
 
 	// Indexing will start in backgroundIndex() triggered by Initialized
@@ -286,8 +337,75 @@ func (s *Server) Initialized(_ *struct{}) {
 	go s.backgroundIndex(ctx)
 }
 
+func newStartupReadiness() *startupReadiness {
+	return &startupReadiness{
+		priorityModuleNames: make(map[string]struct{}),
+		priorityOpenURIs:    make(map[lsp.DocumentURI]struct{}),
+		firstDiagAtByURI:    make(map[lsp.DocumentURI]time.Time),
+		firstApplyAtByURI:   make(map[lsp.DocumentURI]time.Time),
+	}
+}
+
+func (s *Server) resetStartupReadiness() {
+	s.miscMu.Lock()
+	s.startup = newStartupReadiness()
+	s.miscMu.Unlock()
+}
+
+func (s *Server) markOpenDocumentSnapshotApplied(uri lsp.DocumentURI) {
+	s.miscMu.Lock()
+	defer s.miscMu.Unlock()
+	if s.startup == nil {
+		return
+	}
+	if _, ok := s.startup.priorityOpenURIs[uri]; !ok {
+		return
+	}
+	if s.startup.firstApplyAtByURI[uri].IsZero() {
+		s.startup.firstApplyAtByURI[uri] = time.Now()
+	}
+	s.markPriorityReadyIfSatisfiedLocked()
+}
+
+func (s *Server) markOpenDocumentDiagnosticsPublished(uri lsp.DocumentURI) {
+	s.miscMu.Lock()
+	defer s.miscMu.Unlock()
+	if s.startup == nil {
+		return
+	}
+	if _, ok := s.startup.priorityOpenURIs[uri]; !ok {
+		return
+	}
+	if s.startup.firstDiagAtByURI[uri].IsZero() {
+		s.startup.firstDiagAtByURI[uri] = time.Now()
+	}
+	s.markPriorityReadyIfSatisfiedLocked()
+}
+
+func (s *Server) markPriorityReadyIfSatisfied() {
+	s.miscMu.Lock()
+	defer s.miscMu.Unlock()
+	s.markPriorityReadyIfSatisfiedLocked()
+}
+
+func (s *Server) markPriorityReadyIfSatisfiedLocked() {
+	if s.startup == nil || !s.startup.allOpenFilesReadyAt.IsZero() {
+		return
+	}
+	if len(s.startup.priorityOpenURIs) == 0 {
+		return
+	}
+	for uri := range s.startup.priorityOpenURIs {
+		if s.startup.firstApplyAtByURI[uri].IsZero() || s.startup.firstDiagAtByURI[uri].IsZero() {
+			return
+		}
+	}
+	s.startup.allOpenFilesReadyAt = time.Now()
+}
+
 func (s *Server) backgroundIndex(ctx context.Context) {
 	defer close(s.indexingDone)
+	s.resetStartupReadiness()
 
 	s.createWorkspaceIndexingProgress()
 	s.beginWorkspaceIndexingProgress()
@@ -313,7 +431,28 @@ func (s *Server) backgroundIndex(ctx context.Context) {
 	s.reanalyzeOpenDocuments()
 	reanalyzeDuration := time.Since(reanalyzeStart)
 	if s.conn != nil {
-		log.Printf("INDEX: module_index=%s workspace=%s reanalyze_open_docs=%s", moduleIndexDuration, workspaceDuration, reanalyzeDuration)
+		s.miscMu.Lock()
+		startup := s.startup
+		priorityReadyAt := time.Time{}
+		allOpenReadyAt := time.Time{}
+		priorityCount := 0
+		priorityRounds := 0
+		if startup != nil {
+			priorityReadyAt = startup.priorityReadyAt
+			allOpenReadyAt = startup.allOpenFilesReadyAt
+			priorityCount = startup.priorityModuleCount
+			priorityRounds = startup.prioritySurfaceRounds
+		}
+		s.miscMu.Unlock()
+		priorityReadyDuration := time.Duration(0)
+		allOpenReadyDuration := time.Duration(0)
+		if !priorityReadyAt.IsZero() {
+			priorityReadyDuration = priorityReadyAt.Sub(workspaceStart)
+		}
+		if !allOpenReadyAt.IsZero() {
+			allOpenReadyDuration = allOpenReadyAt.Sub(workspaceStart)
+		}
+		log.Printf("INDEX: module_index=%s workspace=%s priority_ready=%s all_open_ready=%s priority_modules=%d priority_rounds=%d reanalyze_open_docs=%s", moduleIndexDuration, workspaceDuration, priorityReadyDuration, allOpenReadyDuration, priorityCount, priorityRounds, reanalyzeDuration)
 	}
 }
 

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"rahu/analyser"
 	"rahu/lsp"
@@ -437,6 +439,158 @@ func createBenchmarkWorkspace(b *testing.B, moduleCount, importsPerModule int) s
 	return root
 }
 
+type startupReadinessMetrics struct {
+	priorityReadyNS int64
+	allOpenReadyNS  int64
+	priorityModules int
+	priorityRounds  int
+	residentModules int
+}
+
+func createStartupReadinessWorkspaceShallow(b *testing.B, unrelatedCount int) (string, map[string]string) {
+	b.Helper()
+	root := b.TempDir()
+	libCode := benchmarkModuleCode("lib", nil)
+	mainCode := "from lib import func_0\nresult = func_0(1)\n"
+	writeBenchmarkFile(b, filepath.Join(root, "lib.py"), libCode)
+	writeBenchmarkFile(b, filepath.Join(root, "main.py"), mainCode)
+	for i := range unrelatedCount {
+		name := fmt.Sprintf("u%03d", i)
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, nil))
+	}
+	return root, map[string]string{"main.py": mainCode}
+}
+
+func createStartupReadinessWorkspaceDeep(b *testing.B, depth, unrelatedCount int) (string, map[string]string) {
+	b.Helper()
+	root := b.TempDir()
+	for i := depth - 1; i >= 0; i-- {
+		name := fmt.Sprintf("dep%03d", i)
+		imports := []string(nil)
+		if i+1 < depth {
+			imports = []string{fmt.Sprintf("dep%03d", i+1)}
+		}
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, imports))
+	}
+	mainCode := "from dep000 import func_0\nresult = func_0(1)\n"
+	writeBenchmarkFile(b, filepath.Join(root, "main.py"), mainCode)
+	for i := range unrelatedCount {
+		name := fmt.Sprintf("u%03d", i)
+		imports := []string(nil)
+		if i > 0 {
+			imports = []string{fmt.Sprintf("u%03d", i-1)}
+		}
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, imports))
+	}
+	return root, map[string]string{"main.py": mainCode}
+}
+
+func createStartupReadinessWorkspaceShared(b *testing.B, unrelatedCount int) (string, map[string]string) {
+	b.Helper()
+	root := b.TempDir()
+	writeBenchmarkFile(b, filepath.Join(root, "core.py"), benchmarkModuleCode("core", nil))
+	writeBenchmarkFile(b, filepath.Join(root, "util.py"), benchmarkModuleCode("util", nil))
+	main1 := "from core import func_0\nfrom util import func_0 as util_func\nresult = func_0(1) + util_func(2)\n"
+	main2 := "from util import func_0\nfrom core import func_0 as core_func\nvalue = func_0(1) + core_func(2)\n"
+	writeBenchmarkFile(b, filepath.Join(root, "main1.py"), main1)
+	writeBenchmarkFile(b, filepath.Join(root, "main2.py"), main2)
+	for i := range unrelatedCount {
+		name := fmt.Sprintf("u%03d", i)
+		imports := []string(nil)
+		if i%5 == 0 && i > 0 {
+			imports = []string{fmt.Sprintf("u%03d", i-1)}
+		}
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, imports))
+	}
+	return root, map[string]string{"main1.py": main1, "main2.py": main2}
+}
+
+func createStartupReadinessWorkspaceSparse(b *testing.B, unrelatedCount int) (string, map[string]string) {
+	b.Helper()
+	root := b.TempDir()
+	writeBenchmarkFile(b, filepath.Join(root, "core.py"), benchmarkModuleCode("core", nil))
+	writeBenchmarkFile(b, filepath.Join(root, "helper.py"), benchmarkModuleCode("helper", []string{"core"}))
+	writeBenchmarkFile(b, filepath.Join(root, "util.py"), benchmarkModuleCode("util", []string{"core"}))
+	mainCode := "from helper import func_0\nfrom util import func_0 as util_func\nresult = func_0(1) + util_func(2)\n"
+	writeBenchmarkFile(b, filepath.Join(root, "main.py"), mainCode)
+	for i := range unrelatedCount {
+		name := fmt.Sprintf("u%03d", i)
+		imports := make([]string, 0, 2)
+		if i > 0 {
+			imports = append(imports, fmt.Sprintf("u%03d", i-1))
+		}
+		if i > 2 && i%7 == 0 {
+			imports = append(imports, fmt.Sprintf("u%03d", i-3))
+		}
+		writeBenchmarkFile(b, filepath.Join(root, name+".py"), benchmarkModuleCode(name, imports))
+	}
+	return root, map[string]string{"main.py": mainCode}
+}
+
+func openBenchmarkWorkspaceFiles(b *testing.B, s *Server, root string, openFiles map[string]string) []lsp.DocumentURI {
+	b.Helper()
+	names := make([]string, 0, len(openFiles))
+	for name := range openFiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	uris := make([]lsp.DocumentURI, 0, len(names))
+	for i, name := range names {
+		uri := pathToURI(filepath.Join(root, name))
+		s.Open(lsp.TextDocumentItem{URI: uri, Text: openFiles[name], Version: i + 1})
+		uris = append(uris, uri)
+	}
+	return uris
+}
+
+func benchmarkStartupReadinessOnce(b *testing.B, root string, openFiles map[string]string, maxCachedModules int) startupReadinessMetrics {
+	b.Helper()
+	s := newBenchmarkWorkspaceServer(b, root, maxCachedModules)
+	_ = openBenchmarkWorkspaceFiles(b, s, root, openFiles)
+	started := time.Now()
+	s.buildWorkspaceSnapshots()
+	if s.startup == nil {
+		b.Fatal("expected startup readiness state")
+	}
+	if len(openFiles) != 0 {
+		if s.startup.priorityReadyAt.IsZero() {
+			b.Fatal("expected priority readiness timestamp")
+		}
+		if s.startup.allOpenFilesReadyAt.IsZero() {
+			b.Fatal("expected all-open-files readiness timestamp")
+		}
+	}
+	metrics := startupReadinessMetrics{
+		priorityModules: s.startup.priorityModuleCount,
+		priorityRounds:  s.startup.prioritySurfaceRounds,
+		residentModules: benchmarkResidentSnapshotCount(s),
+	}
+	if !s.startup.priorityReadyAt.IsZero() {
+		metrics.priorityReadyNS = s.startup.priorityReadyAt.Sub(started).Nanoseconds()
+	}
+	if !s.startup.allOpenFilesReadyAt.IsZero() {
+		metrics.allOpenReadyNS = s.startup.allOpenFilesReadyAt.Sub(started).Nanoseconds()
+	}
+	if metrics.priorityModules == 0 {
+		b.Fatal("expected non-zero priority module count")
+	}
+	return metrics
+}
+
+func runStartupReadinessBenchmark(b *testing.B, root string, openFiles map[string]string, maxCachedModules int) {
+	b.Helper()
+	var last startupReadinessMetrics
+	b.ResetTimer()
+	for b.Loop() {
+		last = benchmarkStartupReadinessOnce(b, root, openFiles, maxCachedModules)
+	}
+	b.ReportMetric(float64(last.priorityReadyNS), "priority_ready_ns")
+	b.ReportMetric(float64(last.allOpenReadyNS), "all_open_ready_ns")
+	b.ReportMetric(float64(last.priorityModules), "priority_modules")
+	b.ReportMetric(float64(last.priorityRounds), "priority_rounds")
+	b.ReportMetric(float64(last.residentModules), "resident_modules")
+}
+
 func newBenchmarkWorkspaceServer(b *testing.B, root string, maxCachedModules int) *Server {
 	b.Helper()
 	s := New(nil)
@@ -717,6 +871,26 @@ func BenchmarkMediumWorkspaceIndex_Unbounded(b *testing.B) {
 		s := newBenchmarkWorkspaceServer(b, root, benchWorkspaceMedium)
 		s.buildWorkspaceSnapshots()
 	}
+}
+
+func BenchmarkStartupReadiness_OneOpenFile_ShallowImports(b *testing.B) {
+	root, openFiles := createStartupReadinessWorkspaceShallow(b, benchWorkspaceMedium)
+	runStartupReadinessBenchmark(b, root, openFiles, 256)
+}
+
+func BenchmarkStartupReadiness_OneOpenFile_DeepImports(b *testing.B) {
+	root, openFiles := createStartupReadinessWorkspaceDeep(b, 32, benchWorkspaceMedium)
+	runStartupReadinessBenchmark(b, root, openFiles, 256)
+}
+
+func BenchmarkStartupReadiness_MultipleOpenFiles_SharedDeps(b *testing.B) {
+	root, openFiles := createStartupReadinessWorkspaceShared(b, benchWorkspaceMedium)
+	runStartupReadinessBenchmark(b, root, openFiles, 256)
+}
+
+func BenchmarkStartupReadiness_LargeWorkspace_UnrelatedModules(b *testing.B) {
+	root, openFiles := createStartupReadinessWorkspaceSparse(b, benchWorkspaceLarge)
+	runStartupReadinessBenchmark(b, root, openFiles, 64)
 }
 
 func BenchmarkMediumWorkspaceIndex_LRU256(b *testing.B) {

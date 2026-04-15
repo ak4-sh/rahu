@@ -333,6 +333,49 @@ func TestParseFuncAnnotationErrors(t *testing.T) {
 	}
 }
 
+func TestParseFuncTrailingCommaInParams(t *testing.T) {
+	src := `def f(x,):
+    pass
+`
+	p := New(src)
+	tree := p.Parse()
+	if tree.Root == a.NoNode {
+		t.Fatal("failed to parse function with trailing comma")
+	}
+	for _, err := range p.Errors() {
+		if err.Msg == "expected parameter name" {
+			t.Fatal("trailing comma should not cause 'expected parameter name' error")
+		}
+	}
+}
+
+func TestParseFuncMultipleTrailingCommas(t *testing.T) {
+	src := `def f(x, y, z,):
+    pass
+`
+	p := New(src)
+	tree := p.Parse()
+	if tree.Root == a.NoNode {
+		t.Fatal("failed to parse function with trailing comma")
+	}
+	for _, err := range p.Errors() {
+		if err.Msg == "expected parameter name" {
+			t.Fatal("trailing comma should not cause 'expected parameter name' error")
+		}
+	}
+
+	// Verify all 3 parameters were parsed
+	fn := moduleStmt(t, tree, 0)
+	requireKind(t, tree, fn, a.NodeFunctionDef)
+	_, args, _, _ := tree.FunctionPartsWithReturn(fn)
+	if args == a.NoNode {
+		t.Fatal("missing args node")
+	}
+	if tree.ChildCount(args) != 3 {
+		t.Fatalf("expected 3 parameters, got %d", tree.ChildCount(args))
+	}
+}
+
 func TestParseFuncDocstringStoredOnFunction(t *testing.T) {
 	p, tree := parseSource(t, "def f():\n    \"doc\"\n    x\n")
 	requireNoParseErrors(t, p)
@@ -419,6 +462,27 @@ func TestParseFStringEscapedBraces(t *testing.T) {
 	}
 }
 
+func TestParseFStringConversionAndFormatSpec(t *testing.T) {
+	tests := []string{
+		"f\"{username!r}\"\n",
+		"f\"{value:.2f}\"\n",
+		"f\"{value!r:>10}\"\n",
+	}
+
+	for _, src := range tests {
+		p, tree := parseSource(t, src)
+		requireNoParseErrors(t, p)
+
+		exprStmt := moduleStmt(t, tree, 0)
+		fstring := requireChildCount(t, tree, exprStmt, 1)[0]
+		kids := tree.Children(fstring)
+		if len(kids) == 0 {
+			t.Fatalf("expected f-string children for %q", src)
+		}
+		requireKind(t, tree, kids[0], a.NodeFStringExpr)
+	}
+}
+
 func TestParseFStringErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -428,6 +492,7 @@ func TestParseFStringErrors(t *testing.T) {
 		{name: "unterminated expr", src: "f\"{name\"\n", want: "unterminated f-string expression"},
 		{name: "empty expr", src: "f\"{}\"\n", want: "empty f-string expression"},
 		{name: "single closing brace", src: "f\"}\"\n", want: "single '}' is not allowed in f-string"},
+		{name: "invalid conversion", src: "f\"{value!x}\"\n", want: "invalid f-string conversion"},
 	}
 
 	for _, tt := range tests {
@@ -436,6 +501,69 @@ func TestParseFStringErrors(t *testing.T) {
 			requireParseErrorContains(t, p, tt.want)
 		})
 	}
+}
+
+func TestParseAdjacentFStringsInsideParens(t *testing.T) {
+	src := "base = (\n    f'username=\"{self.username}\", realm=\"{realm}\", nonce=\"{nonce}\", ' \n    f'uri=\"{path}\", response=\"{respdig}\"'\n)\n"
+	p, tree := parseSource(t, src)
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeFString)
+	if len(tree.Children(value)) < 4 {
+		t.Fatalf("expected merged f-string children, got %d", len(tree.Children(value)))
+	}
+}
+
+func TestParseRawStringLiteral(t *testing.T) {
+	p, tree := parseSource(t, "x = r\"\\w+\\s+\"\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeString)
+	if got, _ := tree.StringText(value); got != `\w+\s+` {
+		t.Fatalf("unexpected raw string text: got %q", got)
+	}
+}
+
+func TestParseRawFStringLiteral(t *testing.T) {
+	p, tree := parseSource(t, "x = rf\"{name}\\n\"\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeFString)
+	kids := tree.Children(value)
+	if len(kids) != 2 {
+		t.Fatalf("unexpected raw f-string child count: %d", len(kids))
+	}
+	if got, _ := tree.StringText(kids[1]); got != `\n` {
+		t.Fatalf("unexpected raw f-string trailing text: got %q", got)
+	}
+}
+
+func TestParseNestedForWithBlankLineBeforeReturn(t *testing.T) {
+	src := "def f():\n    if header:\n        for link in links:\n            key = link.get(\"rel\")\n            resolved_links[key] = link\n\n    return resolved_links\n"
+	p, tree := parseSource(t, src)
+	requireNoParseErrors(t, p)
+
+	fn := moduleStmt(t, tree, 0)
+	_, _, body := tree.FunctionParts(fn)
+	bodyKids := requireChildCount(t, tree, body, 2)
+	requireKind(t, tree, bodyKids[1], a.NodeReturn)
+}
+
+func TestParseAdjacentWarningMessageWithFStringConversion(t *testing.T) {
+	src := "msg = (\n    \"Non-string usernames will no longer be supported in Requests \"\n    f\"3.0.0. Please convert the object you've passed in ({username!r}) to \"\n    \"a string or bytes object in the near future to avoid \"\n    \"problems.\"\n)\n"
+	p, tree := parseSource(t, src)
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	value := requireChildCount(t, tree, assign, 2)[0]
+	requireKind(t, tree, value, a.NodeFString)
 }
 
 func TestParseDictComprehensionShape(t *testing.T) {
@@ -913,6 +1041,206 @@ func TestParseAssignShape(t *testing.T) {
 	}
 }
 
+func TestParseChainedAssignment(t *testing.T) {
+	p, tree := parseSource(t, "a = b = 1\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+
+	// Chained assignment: a = b = 1 should have:
+	// Child 0: value (1)
+	// Child 1: first target (b)
+	// Child 2: second target (a)
+	assignKids := requireChildCount(t, tree, assign, 3)
+
+	// Value should be 1
+	if tree.Node(assignKids[0]).Kind != a.NodeNumber {
+		t.Fatalf("expected number value, got %s", tree.Node(assignKids[0]).Kind)
+	}
+	// Targets should be a and b (in reverse order due to how we build)
+	if tree.Node(assignKids[1]).Kind != a.NodeName {
+		t.Fatalf("expected first target to be name, got %s", tree.Node(assignKids[1]).Kind)
+	}
+	if tree.Node(assignKids[2]).Kind != a.NodeName {
+		t.Fatalf("expected second target to be name, got %s", tree.Node(assignKids[2]).Kind)
+	}
+}
+
+func TestParseChainedAssignmentMultiple(t *testing.T) {
+	p, tree := parseSource(t, "a = b = c = d = 1\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+
+	// Should have 5 children: value + 4 targets
+	assignKids := children(tree, assign)
+	if len(assignKids) != 5 {
+		t.Fatalf("expected 5 children (1 value + 4 targets), got %d", len(assignKids))
+	}
+
+	// First child should be the value (1)
+	if tree.Node(assignKids[0]).Kind != a.NodeNumber {
+		t.Fatalf("expected number value, got %s", tree.Node(assignKids[0]).Kind)
+	}
+
+	// Rest should be names
+	for i := 1; i < len(assignKids); i++ {
+		if tree.Node(assignKids[i]).Kind != a.NodeName {
+			t.Fatalf("expected child %d to be name, got %s", i, tree.Node(assignKids[i]).Kind)
+		}
+	}
+}
+
+func TestParseGeneratorExpression(t *testing.T) {
+	tests := []struct {
+		name         string
+		src          string
+		expectInCall bool
+	}{
+		{name: "simple generator", src: "(x for x in range(10))\n", expectInCall: false},
+		{name: "generator with condition", src: "(x for x in range(10) if x > 5)\n", expectInCall: false},
+		{name: "generator in function call", src: "sum(x for x in items)\n", expectInCall: true},
+		{name: "nested loops", src: "((x, y) for x in range(5) for y in range(5))\n", expectInCall: false},
+		{name: "complex expression", src: "', '.join(f\"item {n}\" for n in items)\n", expectInCall: true},
+		{name: "generator with multiple conditions", src: "(x for x in range(100) if x > 10 if x < 50)\n", expectInCall: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+
+			exprStmt := moduleStmt(t, tree, 0)
+			node := requireChildCount(t, tree, exprStmt, 1)[0]
+
+			if tt.expectInCall {
+				// Generator is inside a function call
+				requireKind(t, tree, node, a.NodeCall)
+				// Verify it has at least one argument
+				callKids := children(tree, node)
+				if len(callKids) < 2 {
+					t.Fatalf("expected call to have arguments, got %d children", len(callKids))
+				}
+				// First argument should be the generator
+				requireKind(t, tree, callKids[1], a.NodeGeneratorExp)
+			} else {
+				// Generator is the direct expression
+				requireKind(t, tree, node, a.NodeGeneratorExp)
+			}
+		})
+	}
+}
+
+func TestParseConditionalExpression(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{name: "simple conditional", src: "x if y else z\n"},
+		{name: "conditional in assignment", src: "result = a if b > 0 else 0\n"},
+		{name: "nested conditional", src: "a if b else c if d else e\n"},
+		{name: "conditional with complex condition", src: "x if (a > 0 and b < 10) else y\n"},
+		{name: "conditional with arithmetic", src: "(a + b) if c > 0 else (d - e)\n"},
+		{name: "conditional with or", src: "a or b if c else d\n"}, // Should parse as: a or (b if c else d)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+
+			exprStmt := moduleStmt(t, tree, 0)
+			// The conditional should be part of the expression
+			stmtKids := children(tree, exprStmt)
+			if len(stmtKids) == 0 {
+				t.Fatal("expression statement has no children")
+			}
+			node := stmtKids[0]
+			// Could be conditional directly or a parent expression containing it
+			if tree.Node(node).Kind != a.NodeConditional {
+				// Check if it's an assignment containing a conditional
+				if tree.Node(node).Kind == a.NodeAssign {
+					kids := children(tree, node)
+					found := false
+					for _, kid := range kids {
+						if tree.Node(kid).Kind == a.NodeConditional {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("expected to find conditional expression in assignment, got children with kinds: ")
+						for _, kid := range kids {
+							t.Logf("  - %s", tree.Node(kid).Kind)
+						}
+					}
+				} else if tree.Node(node).Kind == a.NodeBooleanOp {
+					// a or (b if c else d) - check children for conditional
+					kids := children(tree, node)
+					found := false
+					for _, kid := range kids {
+						if tree.Node(kid).Kind == a.NodeConditional {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("expected to find conditional expression in boolean op, got %s", tree.Node(node).Kind)
+					}
+				} else {
+					t.Errorf("unexpected node kind: got %s want NodeConditional or container", tree.Node(node).Kind)
+				}
+			}
+		})
+	}
+}
+
+func TestParseChainedAssignmentComplex(t *testing.T) {
+	src := `manager = self.proxy_manager[proxy] = value
+`
+	p := New(src)
+	tree := p.Parse()
+
+	// Should parse without error
+	for _, err := range p.Errors() {
+		if err.Msg == "expected newline after assignment" {
+			t.Fatal("chained assignment should not cause 'expected newline after assignment' error")
+		}
+	}
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+
+	// Should have 3 children: value + 2 targets
+	assignKids := children(tree, assign)
+	if len(assignKids) != 3 {
+		t.Fatalf("expected 3 children (1 value + 2 targets), got %d", len(assignKids))
+	}
+
+	// First child should be the value (name "value")
+	if tree.Node(assignKids[0]).Kind != a.NodeName {
+		t.Fatalf("expected value to be name, got %s", tree.Node(assignKids[0]).Kind)
+	}
+	if got := nameText(t, tree, assignKids[0]); got != "value" {
+		t.Fatalf("expected value name to be 'value', got %q", got)
+	}
+
+	// Second child should be name (manager)
+	if tree.Node(assignKids[1]).Kind != a.NodeName {
+		t.Fatalf("expected first target to be name, got %s", tree.Node(assignKids[1]).Kind)
+	}
+	if got := nameText(t, tree, assignKids[1]); got != "manager" {
+		t.Fatalf("expected first target name to be 'manager', got %q", got)
+	}
+
+	// Third child should be subscript (self.proxy_manager[proxy])
+	if tree.Node(assignKids[2]).Kind != a.NodeSubScript {
+		t.Fatalf("expected second target to be subscript, got %s", tree.Node(assignKids[2]).Kind)
+	}
+}
+
 func TestParseSubscriptAssignmentShape(t *testing.T) {
 	p, tree := parseSource(t, "a[0] = x\n")
 	requireNoParseErrors(t, p)
@@ -1015,6 +1343,34 @@ func TestParseSubscriptAugAssignShape(t *testing.T) {
 	}
 }
 
+// Regression test: tuple assignment like a, b = 1, 2 should work
+func TestParseTupleAssignmentWithTupleValue(t *testing.T) {
+	p, tree := parseSource(t, "a, b = 1, 2\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+	kids := requireChildCount(t, tree, assign, 3)
+
+	// First child should be the value (a tuple)
+	requireKind(t, tree, kids[0], a.NodeTuple)
+	valueKids := requireChildCount(t, tree, kids[0], 2)
+	if got := numberValue(t, tree, valueKids[0]); got != "1" {
+		t.Fatalf("unexpected first value: got %q", got)
+	}
+	if got := numberValue(t, tree, valueKids[1]); got != "2" {
+		t.Fatalf("unexpected second value: got %q", got)
+	}
+
+	// Second and third children should be targets
+	if got := nameText(t, tree, kids[1]); got != "a" {
+		t.Fatalf("unexpected first target: got %q", got)
+	}
+	if got := nameText(t, tree, kids[2]); got != "b" {
+		t.Fatalf("unexpected second target: got %q", got)
+	}
+}
+
 func TestParseCallShape(t *testing.T) {
 	p, tree := parseSource(t, "f(x, y)\n")
 	requireNoParseErrors(t, p)
@@ -1085,7 +1441,6 @@ func TestParseCallKeywordArgErrors(t *testing.T) {
 		{name: "missing star expr", src: "foo(*)\n", want: "expected expression after '*' in call argument"},
 		{name: "missing kwstar expr", src: "foo(**)\n", want: "expected expression after '**' in call argument"},
 		{name: "positional after kwstar", src: "foo(**kw, x)\n", want: "positional argument follows **kwargs"},
-		{name: "keyword after kwstar", src: "foo(**kw, x=1)\n", want: "keyword argument follows **kwargs"},
 	}
 
 	for _, tt := range tests {
@@ -1114,6 +1469,57 @@ func TestParseCallStarAndKwStarArguments(t *testing.T) {
 	requireKind(t, tree, callKids[4], a.NodeKwStarArg)
 	if got := nameText(t, tree, tree.ChildAt(callKids[4], 0)); got != "kw" {
 		t.Fatalf("unexpected kwstar arg expr: got %q", got)
+	}
+}
+
+func TestParseCallKeywordArgAfterKwStar(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "single keyword after **kwargs",
+			src:  "foo(**kw, x=1)\n",
+			want: []string{"foo", "kw", "x", "1"},
+		},
+		{
+			name: "multiple keywords after **kwargs",
+			src:  "foo(**kw, x=1, y=2)\n",
+			want: []string{"foo", "kw", "x", "1", "y", "2"},
+		},
+		{
+			name: "keyword after **kwargs with earlier args",
+			src:  "foo(a, *xs, **kw, x=1)\n",
+			want: []string{"foo", "a", "xs", "kw", "x", "1"},
+		},
+		{
+			name: "**kwargs followed by keyword with complex expr",
+			src:  "foo(**kw, x=a+b)\n",
+			want: []string{"foo", "kw", "x"},
+		},
+		{
+			name: "nested call with keyword after **kwargs",
+			src:  "foo(**bar(), x=1)\n",
+			want: []string{"foo", "bar", "x", "1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, tree := parseSource(t, tt.src)
+			requireNoParseErrors(t, p)
+
+			exprStmt := moduleStmt(t, tree, 0)
+			call := requireChildCount(t, tree, exprStmt, 1)[0]
+			requireKind(t, tree, call, a.NodeCall)
+
+			// Verify we have the expected number of children (func + args)
+			kids := tree.Children(call)
+			if len(kids) < 2 {
+				t.Fatalf("expected at least 2 children, got %d", len(kids))
+			}
+		})
 	}
 }
 

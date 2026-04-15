@@ -57,6 +57,28 @@ func (r *Resolver) BindMembers() {
 		if baseType := r.exprType(base); baseType != nil {
 			sym, ok := LookupMemberOnType(baseType, attrName)
 			if !ok {
+				// Check for inferred instance attributes as fallback
+				var classSym *Symbol
+				switch baseType.Kind {
+				case TypeInstance:
+					classSym = baseType.Symbol
+				case TypeClass:
+					classSym = baseType.Symbol
+				}
+				if classSym != nil {
+					// Try to get inferred type from the resolver
+					if inferredType := r.getInferredInstanceAttr(classSym, attrName); inferredType != nil {
+						// Create a synthetic symbol
+						attrSym := &Symbol{
+							Name:     attrName,
+							Kind:     SymAttr,
+							Inferred: inferredType,
+							Scope:    classSym.Inner,
+						}
+						r.ResolvedAttr[attrNode] = attrSym
+						continue
+					}
+				}
 				r.error(r.tree.RangeOf(attrNameNode), "undefined attribute: "+attrName)
 				continue
 			}

@@ -3,6 +3,7 @@ package server
 import (
 	"hash"
 	"hash/fnv"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +21,12 @@ import (
 type moduleSnapshotLookup func(string) (*ModuleSnapshot, bool)
 
 type moduleImportSurfaceLookup func(string) (*ModuleImportSurface, bool)
+
+func computeTextHash(text string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(text))
+	return h.Sum64()
+}
 
 func stampSymbolURIs(uri lsp.DocumentURI, maps ...map[ast.NodeID]*analyser.Symbol) {
 	for _, m := range maps {
@@ -110,8 +117,8 @@ func (s *Server) resolveImportModuleName(importerURI lsp.DocumentURI, tree *ast.
 }
 
 func firstModuleSegment(name string) string {
-	if idx := strings.IndexByte(name, '.'); idx >= 0 {
-		return name[:idx]
+	if before, _, ok := strings.Cut(name, "."); ok {
+		return before
 	}
 	return name
 }
@@ -350,6 +357,7 @@ func (s *Server) buildBaseModuleSnapshot(name string, uri lsp.DocumentURI, path,
 		URI:         uri,
 		Path:        path,
 		LineIndex:   lineIndex,
+		TextHash:    computeTextHash(text),
 		Tree:        tree,
 		ParseErrs:   p.Errors(),
 		Symbols:     resolver.Resolved,
@@ -374,6 +382,7 @@ func (s *Server) buildStartupModuleBase(name string, uri lsp.DocumentURI, path, 
 		URI:       uri,
 		Path:      path,
 		Text:      text,
+		TextHash:  computeTextHash(text),
 		LineIndex: lineIndex,
 		Tree:      tree,
 		ParseErrs: p.Errors(),
@@ -408,10 +417,45 @@ func buildMemberScope(exports map[string]*analyser.Symbol) *analyser.Scope {
 		Kind:    analyser.ScopeMember,
 		Symbols: make(map[string]*analyser.Symbol, len(exports)),
 	}
-	for k, v := range exports {
-		scope.Symbols[k] = v
-	}
+	maps.Copy(scope.Symbols, exports)
 	return scope
+}
+
+func importSurfaceFromSnapshot(snapshot *ModuleSnapshot) *ModuleImportSurface {
+	if snapshot == nil {
+		return nil
+	}
+	return &ModuleImportSurface{
+		Name:        snapshot.Name,
+		URI:         snapshot.URI,
+		Path:        snapshot.Path,
+		Tree:        snapshot.Tree,
+		Exports:     snapshot.Exports,
+		MemberScope: snapshot.MemberScope,
+		ExportHash:  snapshot.ExportHash,
+	}
+}
+
+func (s *Server) lookupImportSurface(name string, lookup moduleImportSurfaceLookup) (*ModuleImportSurface, bool) {
+	if name == "" {
+		return nil, false
+	}
+	if lookup != nil {
+		if surface, ok := lookup(name); ok && surface != nil {
+			return surface, true
+		}
+	}
+	s.indexMu.RLock()
+	_, workspaceModule := s.modulesByName[name]
+	s.indexMu.RUnlock()
+	if workspaceModule {
+		return nil, false
+	}
+	snapshot, ok := s.analyzeModuleByName(name)
+	if !ok || snapshot == nil {
+		return nil, false
+	}
+	return importSurfaceFromSnapshot(snapshot), true
 }
 
 func (s *Server) buildImportSurfaceFromBase(base *StartupModuleBase) *ModuleImportSurface {
@@ -466,6 +510,7 @@ func (s *Server) buildFinalSnapshotFromBase(base *StartupModuleBase, lookup modu
 		URI:         base.URI,
 		Path:        base.Path,
 		LineIndex:   base.LineIndex,
+		TextHash:    base.TextHash,
 		Tree:        base.Tree,
 		ParseErrs:   append([]parser.Error(nil), base.ParseErrs...),
 		Symbols:     resolver.Resolved,
@@ -1158,7 +1203,7 @@ func (s *Server) bindImportStmtWithSurfaceLookup(tree *ast.AST, stmt ast.NodeID,
 		local.Span = ast.Range{}
 		local.URI = ""
 
-		surface, ok := lookup(moduleToBind)
+		surface, ok := s.lookupImportSurface(moduleToBind, lookup)
 		if !ok {
 			errs = append(errs, unresolvedModuleError(tree.RangeOf(target), moduleToBind))
 			continue
@@ -1220,9 +1265,7 @@ func (s *Server) bindSubmoduleChain(root *analyser.Symbol, rootName, fullName st
 			Symbols: make(map[string]*analyser.Symbol, cap),
 		}
 		if oldMembers != nil {
-			for k, v := range oldMembers.Symbols {
-				newMembers.Symbols[k] = v
-			}
+			maps.Copy(newMembers.Symbols, oldMembers.Symbols)
 		}
 		newMembers.Symbols[seg] = subSym
 		currentSym.Members = newMembers
@@ -1238,7 +1281,7 @@ func (s *Server) bindSubmoduleChainFromSurface(root *analyser.Symbol, rootName, 
 
 	for _, seg := range segments[1:] {
 		prefix = prefix + "." + seg
-		surface, ok := lookup(prefix)
+		surface, ok := s.lookupImportSurface(prefix, lookup)
 		if !ok {
 			return
 		}
@@ -1261,9 +1304,7 @@ func (s *Server) bindSubmoduleChainFromSurface(root *analyser.Symbol, rootName, 
 			Symbols: make(map[string]*analyser.Symbol, cap),
 		}
 		if oldMembers != nil {
-			for k, v := range oldMembers.Symbols {
-				newMembers.Symbols[k] = v
-			}
+			maps.Copy(newMembers.Symbols, oldMembers.Symbols)
 		}
 		newMembers.Symbols[seg] = subSym
 		currentSym.Members = newMembers
@@ -1357,7 +1398,7 @@ func (s *Server) bindFromImportStmtWithSurfaceLookup(tree *ast.AST, stmt ast.Nod
 		return nil
 	}
 
-	surface, ok := lookup(moduleName)
+	surface, ok := s.lookupImportSurface(moduleName, lookup)
 	if !ok {
 		return []analyser.SemanticError{unresolvedModuleError(fromImportModuleSpan(tree, stmt, module), moduleName)}
 	}
@@ -1407,7 +1448,7 @@ func (s *Server) bindFromImportStmtWithSurfaceLookup(tree *ast.AST, stmt ast.Nod
 		}
 
 		submoduleName := moduleName + "." + name
-		submodule, ok := lookup(submoduleName)
+		submodule, ok := s.lookupImportSurface(submoduleName, lookup)
 		if !ok || submodule == nil {
 			errs = append(errs, missingImportNameError(tree.RangeOf(target), moduleName, name))
 			continue

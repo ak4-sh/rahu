@@ -20,7 +20,7 @@ func (s *Server) DidOpen(p *lsp.DidOpenTextDocumentParams) {
 	s.Open(p.TextDocument)
 	doc := s.Get(p.TextDocument.URI)
 	if doc != nil {
-		s.analyze(doc)
+		s.analyzeOpenDocumentFast(doc)
 	}
 }
 
@@ -221,6 +221,14 @@ func (s *Server) hoverForSymbol(doc *Document, sym *a.Symbol) *lsp.Hover {
 		builder.WriteString(")\n```")
 	}
 
+	// For attributes on self, try lazy introspection for inherited methods from synthetic classes
+	if sym.Kind == a.SymAttr && sym.Name != "" {
+		if enhanced := s.enhanceHoverForInheritedMethod(sym); enhanced != "" {
+			builder.Reset()
+			builder.WriteString(enhanced)
+		}
+	}
+
 	targetURI, targetLineIndex := s.hoverTarget(sym, doc)
 	filename := filenameFromURI(targetURI)
 	builder.WriteString("\n\n")
@@ -246,6 +254,118 @@ func filenameFromURI(uri lsp.DocumentURI) string {
 	}
 
 	return filepath.Base(u.Path)
+}
+
+// enhanceHoverForInheritedMethod performs lazy introspection to get rich hover
+// info for inherited methods from synthetic (builtin/frozen) classes.
+// Returns enhanced markdown content if successful, empty string otherwise.
+func (s *Server) enhanceHoverForInheritedMethod(sym *a.Symbol) string {
+	if sym == nil || sym.Name == "" {
+		return ""
+	}
+
+	// Find the owner class
+	owner := classOwner(sym.Scope)
+	if owner == nil {
+		return ""
+	}
+
+	// Walk full MRO to find method origin
+	mro := walkFullMRO(owner)
+	for _, base := range mro {
+		if base == nil || base.Members == nil {
+			continue
+		}
+
+		// Check if this base class has the method
+		if _, hasMethod := base.Members.Symbols[sym.Name]; hasMethod {
+			// Check if this is a synthetic class
+			if !isSyntheticSymbol(base) {
+				continue
+			}
+
+			// Extract module and class name from the synthetic URI
+			moduleName, className := extractModuleAndClassFromSynthetic(base.URI, base.Name)
+			if moduleName == "" || className == "" {
+				continue
+			}
+
+			// Try to get method info from cache or lazy introspection
+			if info, ok := s.getMethodInfo(moduleName, className, sym.Name); ok {
+				var builder strings.Builder
+				builder.WriteString("```python\n")
+				builder.WriteString(className)
+				builder.WriteString(".")
+				builder.WriteString(sym.Name)
+				builder.WriteString(info.Signature)
+				builder.WriteString("\n```")
+
+				if info.Docstring != "" {
+					builder.WriteString("\n\n")
+					builder.WriteString(info.Docstring)
+				}
+				return builder.String()
+			}
+		}
+	}
+
+	return ""
+}
+
+// walkFullMRO walks the complete Method Resolution Order of a class.
+// Returns a slice of class symbols in MRO order (including the class itself).
+func walkFullMRO(cls *a.Symbol) []*a.Symbol {
+	if cls == nil {
+		return nil
+	}
+
+	var result []*a.Symbol
+	seen := make(map[*a.Symbol]bool)
+
+	var walk func(*a.Symbol)
+	walk = func(c *a.Symbol) {
+		if c == nil || seen[c] {
+			return
+		}
+		seen[c] = true
+		result = append(result, c)
+
+		for _, base := range c.Bases {
+			walk(base)
+		}
+	}
+
+	walk(cls)
+	return result
+}
+
+// isSyntheticSymbol checks if a symbol comes from a builtin/frozen module.
+func isSyntheticSymbol(sym *a.Symbol) bool {
+	if sym == nil || sym.URI == "" {
+		return false
+	}
+	return isSyntheticURI(sym.URI)
+}
+
+// extractModuleAndClassFromSynthetic extracts the module and class names from a synthetic URI.
+// For example: "frozen:///collections/abc" with class "MutableMapping" -> ("collections.abc", "MutableMapping")
+func extractModuleAndClassFromSynthetic(uri lsp.DocumentURI, className string) (string, string) {
+	uriStr := string(uri)
+
+	// Remove prefix
+	var path string
+	if strings.HasPrefix(uriStr, "builtin:///") {
+		path = strings.TrimPrefix(uriStr, "builtin:///")
+	} else if strings.HasPrefix(uriStr, "frozen:///") {
+		path = strings.TrimPrefix(uriStr, "frozen:///")
+	} else {
+		return "", className
+	}
+
+	// Convert path to module name (slashes to dots)
+	moduleName := strings.ReplaceAll(path, "/", ".")
+
+	return moduleName, className
 }
 
 func symbolAtOffset(doc *Document, offset int) (*a.Symbol, ast.NodeID, bool) {
@@ -387,6 +507,8 @@ func (s *Server) Diagnostic(p *lsp.DocumentDiagnosticParams) (*lsp.DocumentDiagn
 }
 
 func (s *Server) publishDiagnostics(uri lsp.DocumentURI, diags []lsp.Diagnostic) {
+	s.markOpenDocumentDiagnosticsPublished(uri)
+
 	// Skip if no connection available
 	if s.conn == nil {
 		return
@@ -432,6 +554,11 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 			return nil, jsonrpc.InvalidParamsError(nil)
 		}
 
+		// Skip synthetic modules (no actual file to navigate to)
+		if isSyntheticURI(uri) {
+			return nil, nil
+		}
+
 		if sym.Kind != a.SymBuiltin &&
 			sym.Kind != a.SymConstant &&
 			sym.Kind != a.SymType &&
@@ -449,6 +576,10 @@ func (s *Server) Definition(p *lsp.DefinitionParams) (*lsp.Location, *jsonrpc.Er
 		li := s.lineIndexForURI(uri)
 		if li == nil || sym.Span.IsEmpty() {
 			return nil, jsonrpc.InvalidParamsError(nil)
+		}
+		// Skip synthetic modules (no actual file to navigate to)
+		if isSyntheticURI(uri) {
+			return nil, nil
 		}
 		return &lsp.Location{URI: uri, Range: ToRange(li, sym.Span)}, nil
 	}

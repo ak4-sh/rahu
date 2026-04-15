@@ -96,6 +96,50 @@ func TestSemanticTokensIncludePassKeyword(t *testing.T) {
 	assertSemanticToken(t, decoded, 1, 4, 4, "keyword")
 }
 
+func TestSemanticTokensIncludeLiteralsAndOperators(t *testing.T) {
+	code := "answer = 42\nmsg = \"hi\"\nformatted = f\"{answer}\"\nresult = left and right or not flag\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	tokens, err := s.SemanticTokensFull(&lsp.SemanticTokensParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatalf("unexpected semantic tokens error: %v", err)
+	}
+	decoded := decodeSemanticTokens(tokens)
+	assertSemanticToken(t, decoded, 0, 7, 1, "operator")
+	assertSemanticToken(t, decoded, 0, 9, 2, "number")
+	assertSemanticToken(t, decoded, 1, 4, 1, "operator")
+	assertSemanticToken(t, decoded, 1, 6, 4, "string")
+	assertSemanticToken(t, decoded, 2, 10, 1, "operator")
+	assertSemanticToken(t, decoded, 2, 12, 11, "string")
+	assertSemanticToken(t, decoded, 3, 7, 1, "operator")
+	assertSemanticToken(t, decoded, 3, 14, 3, "operator")
+	assertSemanticToken(t, decoded, 3, 24, 2, "operator")
+	assertSemanticToken(t, decoded, 3, 27, 3, "operator")
+}
+
+func TestSemanticTokensIncludeDecoratorKeywordVariants(t *testing.T) {
+	code := "@decorator\ndef run():\n    global total\n    with ctx as value:\n        yield value\n    del total\n"
+	s := New(nil)
+	uri := lsp.DocumentURI("file:///test.py")
+	s.Open(lsp.TextDocumentItem{URI: uri, Text: code, Version: 1})
+	s.analyze(s.Get(uri))
+
+	tokens, err := s.SemanticTokensFull(&lsp.SemanticTokensParams{TextDocument: lsp.TextDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatalf("unexpected semantic tokens error: %v", err)
+	}
+	decoded := decodeSemanticTokens(tokens)
+	assertSemanticToken(t, decoded, 0, 1, 9, "decorator")
+	assertSemanticToken(t, decoded, 2, 4, 6, "keyword")
+	assertSemanticToken(t, decoded, 3, 4, 4, "keyword")
+	assertSemanticToken(t, decoded, 3, 13, 2, "keyword")
+	assertSemanticToken(t, decoded, 4, 8, 5, "keyword")
+	assertSemanticToken(t, decoded, 5, 4, 3, "keyword")
+}
+
 func TestSemanticTokensEmptyDataIsNonNil(t *testing.T) {
 	code := "x\n"
 	s := New(nil)

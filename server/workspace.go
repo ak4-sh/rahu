@@ -4,7 +4,9 @@ import (
 	"context"
 	"io/fs"
 	"log"
+	"maps"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -18,6 +20,12 @@ import (
 
 type startupIndexTimings struct {
 	moduleCount      int
+	priorityModules  int
+	priorityRounds   int
+	priorityReady    time.Duration
+	moduleWalk       time.Duration
+	prioritySetBuild time.Duration
+	deferredComplete time.Duration
 	phaseABuild      time.Duration
 	phaseABuildTotal atomic.Int64
 	phaseBBind       time.Duration
@@ -31,8 +39,14 @@ func (t *startupIndexTimings) log() {
 		return
 	}
 	log.Printf(
-		"INDEX: modules=%d phase_a=%s phase_a_total=%s phase_b=%s phase_b_total=%s ref_index=%s reverse_deps=%s",
+		"INDEX: modules=%d priority_modules=%d priority_rounds=%d priority_ready=%s deferred_complete=%s walk=%s priority_set=%s phase_a=%s phase_a_total=%s phase_b=%s phase_b_total=%s ref_index=%s reverse_deps=%s",
 		t.moduleCount,
+		t.priorityModules,
+		t.priorityRounds,
+		t.priorityReady,
+		t.deferredComplete,
+		t.moduleWalk,
+		t.prioritySetBuild,
 		t.phaseABuild,
 		totalDurationFromAtomic(&t.phaseABuildTotal),
 		t.phaseBBind,
@@ -83,12 +97,16 @@ func pathToURI(path string) lsp.DocumentURI {
 }
 
 func moduleNameFromPath(rootPath, filePath string) (string, bool) {
+	return moduleNameFromImportRoot(rootPath, filePath)
+}
+
+func moduleNameFromImportRoot(importRoot, filePath string) (string, bool) {
 	ext := filepath.Ext(filePath)
-	if rootPath == "" || (ext != ".py" && ext != ".pyi") {
+	if importRoot == "" || (ext != ".py" && ext != ".pyi") {
 		return "", false
 	}
 
-	rootAbs, err := filepath.Abs(rootPath)
+	rootAbs, err := filepath.Abs(importRoot)
 	if err != nil {
 		return "", false
 	}
@@ -122,6 +140,125 @@ func moduleNameFromPath(rootPath, filePath string) (string, bool) {
 	}
 
 	return strings.Join(parts, "."), true
+}
+
+func hasPythonProjectMarker(path string) bool {
+	for _, name := range []string{"pyproject.toml", "setup.py", "setup.cfg"} {
+		info, err := os.Stat(filepath.Join(path, name))
+		if err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func hasImportablePythonModule(path string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			if strings.HasPrefix(name, ".") || shouldSkipWorkspaceDir(name) {
+				continue
+			}
+			if _, ok := moduleNameFromImportRoot(path, filepath.Join(path, name, "__init__.py")); ok {
+				return true
+			}
+			if _, ok := moduleNameFromImportRoot(path, filepath.Join(path, name, "__init__.pyi")); ok {
+				return true
+			}
+			continue
+		}
+		if isPythonModulePath(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func detectImportRoot(projectRoot string) string {
+	if projectRoot == "" {
+		return ""
+	}
+	srcRoot := filepath.Join(projectRoot, "src")
+	if info, err := os.Stat(srcRoot); err == nil && info.IsDir() && hasImportablePythonModule(srcRoot) {
+		return srcRoot
+	}
+	return projectRoot
+}
+
+func appendPythonProjectRoot(roots []PythonProjectRoot, projectRoot string) []PythonProjectRoot {
+	if projectRoot == "" {
+		return roots
+	}
+	projectAbs, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return roots
+	}
+	for _, root := range roots {
+		if root.ProjectRoot == projectAbs {
+			return roots
+		}
+	}
+	return append(roots, PythonProjectRoot{ProjectRoot: projectAbs, ImportRoot: detectImportRoot(projectAbs)})
+}
+
+func findPythonProjectRoots(rootPath string) []PythonProjectRoot {
+	if rootPath == "" {
+		return nil
+	}
+	rootAbs, err := filepath.Abs(rootPath)
+	if err != nil {
+		return []PythonProjectRoot{{ProjectRoot: rootPath, ImportRoot: rootPath}}
+	}
+	roots := []PythonProjectRoot{{ProjectRoot: rootAbs, ImportRoot: rootAbs}}
+	_ = filepath.WalkDir(rootAbs, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if path != rootAbs && shouldSkipWorkspaceDir(d.Name()) {
+			return filepath.SkipDir
+		}
+		if path != rootAbs && hasPythonProjectMarker(path) {
+			roots = appendPythonProjectRoot(roots, path)
+		}
+		return nil
+	})
+	sort.Slice(roots, func(i, j int) bool {
+		if len(roots[i].ImportRoot) == len(roots[j].ImportRoot) {
+			return roots[i].ImportRoot < roots[j].ImportRoot
+		}
+		return len(roots[i].ImportRoot) > len(roots[j].ImportRoot)
+	})
+	return roots
+}
+
+func moduleNameForPath(filePath string, roots []PythonProjectRoot) (string, bool) {
+	fileAbs, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", false
+	}
+	for _, root := range roots {
+		importRoot := root.ImportRoot
+		if importRoot == "" {
+			continue
+		}
+		importAbs, err := filepath.Abs(importRoot)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(importAbs, fileAbs)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		return moduleNameFromImportRoot(importAbs, fileAbs)
+	}
+	return "", false
 }
 
 func modulePathPriority(path string) int {
@@ -172,10 +309,12 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 
 	modulesByName := make(map[string]ModuleFile)
 	modulesByURI := make(map[lsp.DocumentURI]ModuleFile)
+	projectRoots := findPythonProjectRoots(rootPath)
 	if rootPath == "" {
 		s.indexMu.Lock()
 		s.modulesByName = modulesByName
 		s.modulesByURI = modulesByURI
+		s.pythonProjectRoots = nil
 		s.indexMu.Unlock()
 		return nil
 	}
@@ -203,7 +342,7 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 			return nil
 		}
 
-		name, ok := moduleNameFromPath(rootPath, path)
+		name, ok := moduleNameForPath(path, projectRoots)
 		if !ok {
 			return nil
 		}
@@ -230,6 +369,7 @@ func (s *Server) buildModuleIndexWithContext(ctx context.Context) error {
 	s.indexMu.Lock()
 	s.modulesByName = modulesByName
 	s.modulesByURI = modulesByURI
+	s.pythonProjectRoots = projectRoots
 	s.externalModulesByName = make(map[string]ModuleFile)
 	s.externalModulesByURI = make(map[lsp.DocumentURI]ModuleFile)
 	s.indexMu.Unlock()
@@ -289,159 +429,63 @@ func (s *Server) buildWorkspaceSnapshotsWithPriority(ctx context.Context, cancel
 	sortModulesByPriority(mods, priorityDir)
 
 	timings := &startupIndexTimings{moduleCount: len(mods)}
-	total := len(mods)
-	workers := workspaceIndexWorkerCount(total)
-	jobs := make(chan ModuleFile)
-	var wg sync.WaitGroup
-	var completed atomic.Int32
-	baseByName := make(map[string]*StartupModuleBase, len(mods))
-	var baseMu sync.Mutex
 
 	phaseAStart := time.Now()
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case mod, ok := <-jobs:
-					if !ok {
-						return
-					}
-					started := time.Now()
-					base, ok := s.buildStartupBaseForModule(mod)
-					addDurationAtomic(&timings.phaseABuildTotal, time.Since(started))
-					if ok && base != nil {
-						baseMu.Lock()
-						baseByName[mod.Name] = base
-						baseMu.Unlock()
-					}
-					current := int(completed.Add(1))
-					if current%10 == 0 || current == total {
-						s.reportIndexingProgress(current, total)
-					}
-				}
-			}
-		}()
+	baseByName, err := s.buildStartupBases(ctx, mods, timings)
+	if err != nil {
+		return err
 	}
-
-	for _, mod := range mods {
-		select {
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			return ctx.Err()
-		case jobs <- mod:
-		}
-	}
-	close(jobs)
-	wg.Wait()
-	cancel()
 	timings.phaseABuild = time.Since(phaseAStart)
 
-	surfaceByName := make(map[string]*ModuleImportSurface, len(mods))
-	var surfaceMu sync.RWMutex
-	finalByName := make(map[string]*ModuleSnapshot, len(mods))
-	var finalMu sync.Mutex
+	priorityStart := time.Now()
+	openMods := s.startupOpenWorkspaceModules()
+	priorityNames := buildPriorityModuleSet(openMods, baseByName)
+	timings.prioritySetBuild = time.Since(priorityStart)
+	timings.priorityModules = len(priorityNames)
+	priorityMods := filterModulesByNameSet(mods, priorityNames)
 
-	lookup := func(name string) (*ModuleImportSurface, bool) {
-		surfaceMu.RLock()
-		surface := surfaceByName[name]
-		surfaceMu.RUnlock()
-		return surface, surface != nil
+	s.miscMu.Lock()
+	if s.startup == nil {
+		s.startup = newStartupReadiness()
 	}
+	s.startup.priorityModuleNames = maps.Clone(priorityNames)
+	s.startup.priorityOpenURIs = make(map[lsp.DocumentURI]struct{}, len(openMods))
+	for _, mod := range openMods {
+		s.startup.priorityOpenURIs[mod.URI] = struct{}{}
+	}
+	s.startup.priorityModuleCount = len(priorityNames)
+	s.miscMu.Unlock()
 
 	phaseBStart := time.Now()
-	for round := 0; round <= len(mods); round++ {
-		nextByName := make(map[string]*ModuleImportSurface, len(mods))
-		var nextMu sync.Mutex
-		jobs := make(chan *StartupModuleBase, len(mods))
-		var wg sync.WaitGroup
-		for i := 0; i < workers; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for base := range jobs {
-					started := time.Now()
-					surface := s.buildImportSurfaceFromBaseWithLookup(base, lookup)
-					if surface != nil {
-						nextMu.Lock()
-						nextByName[base.Name] = surface
-						nextMu.Unlock()
-					}
-					addDurationAtomic(&timings.phaseBBindTotal, time.Since(started))
-				}
-			}()
+	if len(priorityMods) != 0 {
+		initialDirty := maps.Clone(priorityNames)
+		prioritySurfaces := s.convergeImportSurfaces(ctx, priorityMods, baseByName, initialDirty, timings)
+		priorityFinal := s.buildFinalSnapshots(ctx, priorityMods, baseByName, prioritySurfaces, timings)
+		s.publishPrioritySnapshots(priorityMods, priorityFinal)
+		s.miscMu.Lock()
+		if s.startup != nil && s.startup.priorityReadyAt.IsZero() {
+			s.startup.priorityReadyAt = time.Now()
+			s.startup.prioritySurfaceRounds = timings.priorityRounds
 		}
-		for _, mod := range mods {
-			baseMu.Lock()
-			base := baseByName[mod.Name]
-			baseMu.Unlock()
-			if base != nil {
-				jobs <- base
-			}
-		}
-		close(jobs)
-		wg.Wait()
-
-		changed := round == 0
-		if !changed {
-			for _, mod := range mods {
-				prev := surfaceByName[mod.Name]
-				next := nextByName[mod.Name]
-				if prev == nil || next == nil || prev.ExportHash != next.ExportHash {
-					changed = true
-					break
-				}
-			}
-		}
-
-		surfaceMu.Lock()
-		surfaceByName = nextByName
-		surfaceMu.Unlock()
-		if !changed {
-			break
-		}
+		s.miscMu.Unlock()
+		s.markPriorityReadyIfSatisfied()
 	}
+	timings.priorityReady = time.Since(phaseBStart)
 
-	cJobs := make(chan *StartupModuleBase, len(mods))
-	var cWg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		cWg.Add(1)
-		go func() {
-			defer cWg.Done()
-			for base := range cJobs {
-				started := time.Now()
-				snapshot := s.buildFinalSnapshotFromBase(base, lookup)
-				if snapshot != nil {
-					finalMu.Lock()
-					finalByName[base.Name] = snapshot
-					finalMu.Unlock()
-				}
-				addDurationAtomic(&timings.phaseBBindTotal, time.Since(started))
-			}
-		}()
-	}
+	deferredStart := time.Now()
+	allNames := make(map[string]struct{}, len(mods))
 	for _, mod := range mods {
-		baseMu.Lock()
-		base := baseByName[mod.Name]
-		baseMu.Unlock()
-		if base != nil {
-			cJobs <- base
-		}
+		allNames[mod.Name] = struct{}{}
 	}
-	close(cJobs)
-	cWg.Wait()
+	surfaceByName := s.convergeImportSurfaces(ctx, mods, baseByName, allNames, timings)
+	finalByName := s.buildFinalSnapshots(ctx, mods, baseByName, surfaceByName, timings)
 	timings.phaseBBind = time.Since(phaseBStart)
+	timings.deferredComplete = time.Since(deferredStart)
 
 	s.refIndex.Clear()
 	phaseRefStart := time.Now()
 	for _, mod := range mods {
-		finalMu.Lock()
 		snapshot := finalByName[mod.Name]
-		finalMu.Unlock()
 		if snapshot == nil {
 			continue
 		}
@@ -495,6 +539,301 @@ func modulePriority(path, priorityDir string) int {
 	return 2 // Lowest: everything else
 }
 
+func (s *Server) startupOpenWorkspaceModules() []ModuleFile {
+	s.docsMu.RLock()
+	openURIs := make([]lsp.DocumentURI, 0, len(s.docs))
+	for uri := range s.docs {
+		openURIs = append(openURIs, uri)
+	}
+	s.docsMu.RUnlock()
+
+	mods := make([]ModuleFile, 0, len(openURIs))
+	seen := make(map[string]struct{}, len(openURIs))
+	for _, uri := range openURIs {
+		mod, ok := s.LookupModuleByURI(uri)
+		if !ok || mod.Name == "" {
+			continue
+		}
+		if _, exists := seen[mod.Name]; exists {
+			continue
+		}
+		seen[mod.Name] = struct{}{}
+		mods = append(mods, mod)
+	}
+	return mods
+}
+
+func buildPriorityModuleSet(openMods []ModuleFile, baseByName map[string]*StartupModuleBase) map[string]struct{} {
+	priority := make(map[string]struct{}, len(openMods))
+	queue := make([]string, 0, len(openMods))
+	for _, mod := range openMods {
+		if mod.Name == "" {
+			continue
+		}
+		if _, exists := priority[mod.Name]; exists {
+			continue
+		}
+		priority[mod.Name] = struct{}{}
+		queue = append(queue, mod.Name)
+	}
+
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		base := baseByName[name]
+		if base == nil {
+			continue
+		}
+		for _, dep := range base.Imports {
+			if dep == "" {
+				continue
+			}
+			if _, ok := baseByName[dep]; !ok {
+				continue
+			}
+			if _, exists := priority[dep]; exists {
+				continue
+			}
+			priority[dep] = struct{}{}
+			queue = append(queue, dep)
+		}
+	}
+
+	return priority
+}
+
+func filterModulesByNameSet(mods []ModuleFile, names map[string]struct{}) []ModuleFile {
+	if len(names) == 0 {
+		return nil
+	}
+	filtered := make([]ModuleFile, 0, len(names))
+	for _, mod := range mods {
+		if _, ok := names[mod.Name]; ok {
+			filtered = append(filtered, mod)
+		}
+	}
+	return filtered
+}
+
+func buildReverseDepsFromBases(baseByName map[string]*StartupModuleBase) map[string]map[string]struct{} {
+	reverse := make(map[string]map[string]struct{}, len(baseByName))
+	for name, base := range baseByName {
+		if base == nil {
+			continue
+		}
+		for _, dep := range base.Imports {
+			if dep == "" {
+				continue
+			}
+			if reverse[dep] == nil {
+				reverse[dep] = make(map[string]struct{})
+			}
+			reverse[dep][name] = struct{}{}
+		}
+	}
+	return reverse
+}
+
+func (s *Server) buildStartupBases(ctx context.Context, mods []ModuleFile, timings *startupIndexTimings) (map[string]*StartupModuleBase, error) {
+	total := len(mods)
+	workers := workspaceIndexWorkerCount(total)
+	jobs := make(chan ModuleFile)
+	var wg sync.WaitGroup
+	var completed atomic.Int32
+	baseByName := make(map[string]*StartupModuleBase, len(mods))
+	var baseMu sync.Mutex
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case mod, ok := <-jobs:
+					if !ok {
+						return
+					}
+					started := time.Now()
+					base, ok := s.buildStartupBaseForModule(mod)
+					addDurationAtomic(&timings.phaseABuildTotal, time.Since(started))
+					if ok && base != nil {
+						baseMu.Lock()
+						baseByName[mod.Name] = base
+						baseMu.Unlock()
+					}
+					current := int(completed.Add(1))
+					if current%10 == 0 || current == total {
+						s.reportIndexingProgress(current, total)
+					}
+				}
+			}
+		}()
+	}
+
+	for _, mod := range mods {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return nil, ctx.Err()
+		case jobs <- mod:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return baseByName, nil
+}
+
+func (s *Server) convergeImportSurfaces(ctx context.Context, mods []ModuleFile, baseByName map[string]*StartupModuleBase, initialDirty map[string]struct{}, timings *startupIndexTimings) map[string]*ModuleImportSurface {
+	workers := workspaceIndexWorkerCount(len(mods))
+	reverse := buildReverseDepsFromBases(baseByName)
+	surfaces := make(map[string]*ModuleImportSurface, len(mods))
+	dirty := make(map[string]struct{}, len(initialDirty))
+	for name := range initialDirty {
+		dirty[name] = struct{}{}
+	}
+	rounds := 0
+
+	for len(dirty) > 0 {
+		select {
+		case <-ctx.Done():
+			return surfaces
+		default:
+		}
+		rounds++
+		names := make([]string, 0, len(dirty))
+		for name := range dirty {
+			names = append(names, name)
+		}
+		clear(dirty)
+		sort.Strings(names)
+
+		lookup := func(name string) (*ModuleImportSurface, bool) {
+			surface := surfaces[name]
+			return surface, surface != nil
+		}
+
+		jobs := make(chan string, len(names))
+		results := make(chan *ModuleImportSurface, len(names))
+		var wg sync.WaitGroup
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for name := range jobs {
+					base := baseByName[name]
+					if base == nil {
+						continue
+					}
+					started := time.Now()
+					surface := s.buildImportSurfaceFromBaseWithLookup(base, lookup)
+					addDurationAtomic(&timings.phaseBBindTotal, time.Since(started))
+					if surface != nil {
+						results <- surface
+					}
+				}
+			}()
+		}
+		for _, name := range names {
+			jobs <- name
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+
+		for surface := range results {
+			prev := surfaces[surface.Name]
+			surfaces[surface.Name] = surface
+			if prev != nil && prev.ExportHash == surface.ExportHash {
+				continue
+			}
+			for dependent := range reverse[surface.Name] {
+				if _, ok := baseByName[dependent]; ok {
+					dirty[dependent] = struct{}{}
+				}
+			}
+		}
+	}
+
+	if timings != nil {
+		timings.priorityRounds = rounds
+	}
+	return surfaces
+}
+
+func (s *Server) buildFinalSnapshots(ctx context.Context, mods []ModuleFile, baseByName map[string]*StartupModuleBase, surfaces map[string]*ModuleImportSurface, timings *startupIndexTimings) map[string]*ModuleSnapshot {
+	workers := workspaceIndexWorkerCount(len(mods))
+	finalByName := make(map[string]*ModuleSnapshot, len(mods))
+	var finalMu sync.Mutex
+	lookup := func(name string) (*ModuleImportSurface, bool) {
+		surface := surfaces[name]
+		return surface, surface != nil
+	}
+	jobs := make(chan ModuleFile, len(mods))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for mod := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				base := baseByName[mod.Name]
+				if base == nil {
+					continue
+				}
+				started := time.Now()
+				snapshot := s.buildFinalSnapshotFromBase(base, lookup)
+				addDurationAtomic(&timings.phaseBBindTotal, time.Since(started))
+				if snapshot != nil {
+					finalMu.Lock()
+					finalByName[mod.Name] = snapshot
+					finalMu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, mod := range mods {
+		jobs <- mod
+	}
+	close(jobs)
+	wg.Wait()
+	return finalByName
+}
+
+func (s *Server) publishPrioritySnapshots(mods []ModuleFile, finalByName map[string]*ModuleSnapshot) {
+	for _, mod := range mods {
+		snapshot := finalByName[mod.Name]
+		if snapshot == nil {
+			continue
+		}
+		s.publishModuleSnapshot(mod, snapshot)
+		s.refIndex.IndexDocument(snapshot.URI, snapshot.Tree, snapshot.LineIndex, snapshot.Symbols, snapshot.AttrSymbols, snapshot.Defs)
+		s.applySnapshotToOpenDocument(snapshot)
+	}
+	if len(mods) != 0 {
+		s.enforceSnapshotLRULimit()
+	}
+}
+
+func (s *Server) snapshotMatchesOpenDocument(snapshot *ModuleSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	doc := s.Get(snapshot.URI)
+	if doc == nil {
+		return false
+	}
+	doc.mu.RLock()
+	defer doc.mu.RUnlock()
+	return computeTextHash(doc.Text) == snapshot.TextHash
+}
+
 func (s *Server) rebuildReverseDeps() {
 	s.depsMu.Lock()
 	defer s.depsMu.Unlock()
@@ -516,11 +855,12 @@ func (s *Server) rebuildReverseDeps() {
 }
 
 func (s *Server) applySnapshotToOpenDocument(snapshot *ModuleSnapshot) {
-	if snapshot == nil || s.Get(snapshot.URI) == nil {
+	if snapshot == nil || s.Get(snapshot.URI) == nil || !s.snapshotMatchesOpenDocument(snapshot) {
 		return
 	}
 
 	s.SetAnalysis(snapshot.URI, snapshot.Tree, snapshot.Global, snapshot.Defs, snapshot.Symbols, snapshot.AttrSymbols, snapshot.SemErrs)
+	s.markOpenDocumentSnapshotApplied(snapshot.URI)
 	s.publishDiagnostics(snapshot.URI, toDiagnostics(snapshot.LineIndex, snapshot.ParseErrs, snapshot.SemErrs))
 }
 

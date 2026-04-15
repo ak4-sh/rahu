@@ -119,6 +119,20 @@ func (a *AST) StringText(id NodeID) (string, bool) {
 	return a.Strings[idx], true
 }
 
+// BytesText fetches the bytes string from a given NodeBytes
+func (a *AST) BytesText(id NodeID) (string, bool) {
+	if id == NoNode || a.Nodes[id].Kind != NodeBytes {
+		return "", false
+	}
+
+	idx := a.Nodes[id].Data
+	if int(idx) >= len(a.Bytes) {
+		return "", false
+	}
+
+	return a.Bytes[idx], true
+}
+
 // NumberText fetches the Number for a given NodeNumber
 func (a *AST) NumberText(id NodeID) (string, bool) {
 	if id == NoNode || a.Nodes[id].Kind != NodeNumber {

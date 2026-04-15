@@ -32,6 +32,7 @@ type (
 		Names     []string
 		Strings   []string
 		Numbers   []string
+		Bytes     []string // Byte string literals (b"...", rb"...", br"...")
 		nameIndex map[string]uint32
 	}
 	Operator        uint8
@@ -114,6 +115,7 @@ const (
 	NodeName
 	NodeNumber
 	NodeString
+	NodeBytes // Byte string literals (b"...", rb"...", br"...")
 	NodeFString
 	NodeFStringText
 	NodeFStringExpr
@@ -164,6 +166,8 @@ const (
 	NodeExcept
 	NodeListComp
 	NodeDictComp
+	NodeGeneratorExp
+	NodeConditional
 	NodeComprehension
 	NodeWith
 	NodeWithItem

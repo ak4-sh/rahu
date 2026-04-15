@@ -12,6 +12,7 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 	if left == a.NoNode {
 		return a.NoNode
 	}
+	left = p.parseAdjacentStringLiterals(left)
 
 	left = p.postfixParseLoop(left)
 
@@ -80,6 +81,35 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 			continue
 		}
 
+		// Handle conditional expression: X if C else Y
+		if opTok.Type == l.IF {
+			p.advance() // consume 'if'
+			condition := p.parseExpression(bp)
+			if condition == a.NoNode {
+				p.errorCurrent("expected condition after 'if' in conditional expression")
+				return left
+			}
+
+			if p.current.Type != l.ELSE {
+				p.errorCurrent("expected 'else' after condition in conditional expression")
+				return left
+			}
+			p.advance() // consume 'else'
+
+			falseExpr := p.parseExpression(bp)
+			if falseExpr == a.NoNode {
+				p.errorCurrent("expected expression after 'else' in conditional expression")
+				return left
+			}
+
+			condID := p.tree.NewNode(a.NodeConditional, p.tree.Nodes[left].Start, p.tree.Nodes[falseExpr].End)
+			p.tree.AddChild(condID, condition) // condition
+			p.tree.AddChild(condID, left)      // true expression
+			p.tree.AddChild(condID, falseExpr) // false expression
+			left = condID
+			continue
+		}
+
 		p.advance()
 
 		var right a.NodeID
@@ -101,6 +131,20 @@ func (p *Parser) parseExpression(minBP int) a.NodeID {
 		p.tree.AddChild(binOpID, left)
 		p.tree.AddChild(binOpID, right)
 		left = binOpID
+	}
+	return left
+}
+
+func (p *Parser) parseAdjacentStringLiterals(left a.NodeID) a.NodeID {
+	for left != a.NoNode && (p.tree.Node(left).Kind == a.NodeString || p.tree.Node(left).Kind == a.NodeFString) {
+		if p.current.Type != l.STRING && p.current.Type != l.FSTRING {
+			return left
+		}
+		right := p.parsePrimary()
+		if right == a.NoNode {
+			return left
+		}
+		left = p.mergeStringLiterals(left, right)
 	}
 	return left
 }
@@ -170,6 +214,11 @@ func (p *Parser) parsePrimary() a.NodeID {
 			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
 		}
 
+		// Check for generator expression: (expr for target in iter)
+		if p.current.Type == l.FOR {
+			return p.parseGeneratorExp(startPos, first)
+		}
+
 		if p.current.Type != l.COMMA {
 			if p.current.Type != l.RPAR {
 				p.errorCurrent("expected ')' after expression")
@@ -217,6 +266,14 @@ func (p *Parser) parsePrimary() a.NodeID {
 		idx := uint32(len(p.tree.Strings))
 		p.tree.Strings = append(p.tree.Strings, p.current.Literal)
 		ret := p.tree.NewNode(a.NodeString, p.current.Start, p.current.End)
+		p.tree.Nodes[ret].Data = idx
+		p.advance()
+		return ret
+
+	case l.BSTRING:
+		idx := uint32(len(p.tree.Bytes))
+		p.tree.Bytes = append(p.tree.Bytes, p.current.Literal)
+		ret := p.tree.NewNode(a.NodeBytes, p.current.Start, p.current.End)
 		p.tree.Nodes[ret].Data = idx
 		p.advance()
 		return ret
@@ -379,6 +436,27 @@ func (p *Parser) parseListComp(startPos uint32, expr a.NodeID) a.NodeID {
 	return ret
 }
 
+func (p *Parser) parseGeneratorExp(startPos uint32, expr a.NodeID) a.NodeID {
+	ret := p.tree.NewNode(a.NodeGeneratorExp, startPos, p.tree.Nodes[expr].End)
+	p.tree.AddChild(ret, expr)
+	for p.current.Type == l.FOR {
+		clause := p.parseComprehensionClause()
+		if clause == a.NoNode {
+			return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+		}
+		p.tree.AddChild(ret, clause)
+		p.tree.Nodes[ret].End = p.tree.Nodes[clause].End
+	}
+	if p.current.Type != l.RPAR {
+		p.errorCurrent("expected ')' after generator expression")
+		return p.tree.NewNode(a.NodeErrExp, startPos, p.current.End)
+	}
+	endPos := p.current.Start
+	p.advance()
+	p.tree.Nodes[ret].End = endPos
+	return ret
+}
+
 func (p *Parser) parseComprehensionClause() a.NodeID {
 	startPos := p.current.Start
 	p.advance()
@@ -394,7 +472,9 @@ func (p *Parser) parseComprehensionClause() a.NodeID {
 		return ret
 	}
 	p.advance()
-	iter := p.parseExpression(LOWEST)
+	// Use IF+1 as min precedence to prevent conditional expressions from consuming the IF
+	// (comprehension filters use bare IF, not conditional IF-ELSE)
+	iter := p.parseExpression(IF + 1)
 	if iter == a.NoNode {
 		p.errorCurrent("invalid expression for comprehension iterator")
 		return ret
@@ -403,7 +483,8 @@ func (p *Parser) parseComprehensionClause() a.NodeID {
 	p.tree.Nodes[ret].End = p.tree.Nodes[iter].End
 	for p.current.Type == l.IF {
 		p.advance()
-		filter := p.parseExpression(LOWEST)
+		// Use IF+1 to prevent nested if from being parsed as conditional expression
+		filter := p.parseExpression(IF + 1)
 		if filter == a.NoNode {
 			p.errorCurrent("invalid expression for comprehension filter")
 			return ret

@@ -6,6 +6,7 @@ import (
 
 const (
 	LOWEST = iota
+	IF     // Conditional expression (if-else) - lowest precedence expression
 	OR
 	AND
 	NOT
@@ -19,6 +20,8 @@ const (
 
 func infixBindingPower(t lexer.TokenType) int {
 	switch t {
+	case lexer.IF:
+		return IF
 	case lexer.PLUS, lexer.MINUS:
 		return SUM
 	case lexer.VBAR:

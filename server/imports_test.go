@@ -8,6 +8,7 @@ import (
 
 	"rahu/analyser"
 	"rahu/lsp"
+	ast "rahu/parser/ast"
 	"rahu/source"
 )
 
@@ -71,6 +72,136 @@ func TestDefinitionFromImportAliasCrossFile(t *testing.T) {
 	if loc.URI != pathToURI(filepath.Join(root, "pkg", "mod.py")) {
 		t.Fatalf("unexpected definition URI: got %q", loc.URI)
 	}
+}
+
+func TestClassBaseFromStdlibImportResolves(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from collections.abc import MutableMapping\n\nclass X(MutableMapping):\n    pass\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	assertNoBaseClassDiagnostic(t, doc, "MutableMapping")
+	assertClassBase(t, doc, "X", "MutableMapping")
+}
+
+func TestClassBaseFromReexportedWorkspaceImportResolves(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "mod.py"), "class Base:\n    pass\n")
+	writeWorkspaceFile(t, filepath.Join(root, "compat.py"), "from mod import Base\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from compat import Base\n\nclass X(Base):\n    pass\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	assertNoBaseClassDiagnostic(t, doc, "Base")
+	assertClassBase(t, doc, "X", "Base")
+}
+
+func TestClassBaseFromRequestsCompatMutableMappingResolves(t *testing.T) {
+	root := t.TempDir()
+	requestsDir := filepath.Join(root, "requests")
+	writeWorkspaceFile(t, filepath.Join(requestsDir, "__init__.py"), "")
+	writeWorkspaceFile(t, filepath.Join(requestsDir, "compat.py"), "from collections.abc import Mapping, MutableMapping\n")
+	structuresCode := "from collections import OrderedDict\nfrom .compat import Mapping, MutableMapping\n\nclass CaseInsensitiveDict(MutableMapping):\n    def __init__(self):\n        self._store = OrderedDict()\n\n    def __setitem__(self, key, value):\n        self._store[key.lower()] = (key, value)\n\n    def __getitem__(self, key):\n        return self._store[key.lower()][1]\n\n    def __delitem__(self, key):\n        del self._store[key.lower()]\n\n    def __iter__(self):\n        return (casedkey for casedkey, mappedvalue in self._store.values())\n\n    def __len__(self):\n        return len(self._store)\n\n    def __eq__(self, other):\n        if isinstance(other, Mapping):\n            return True\n        return False\n"
+	structuresPath := filepath.Join(requestsDir, "structures.py")
+	writeWorkspaceFile(t, structuresPath, structuresCode)
+
+	s := newWorkspaceServer(t, root)
+	compatSnapshot := s.moduleSnapshotsByName["requests.compat"]
+	if compatSnapshot == nil || compatSnapshot.Exports["MutableMapping"] == nil {
+		t.Fatalf("expected compat snapshot to export MutableMapping, got %+v", compatSnapshot)
+	}
+	if compatSnapshot.Exports["MutableMapping"].Kind != analyser.SymClass {
+		t.Fatalf("expected compat MutableMapping export to be a class, got %+v", compatSnapshot.Exports["MutableMapping"])
+	}
+	startupStructures := s.moduleSnapshotsByName["requests.structures"]
+	if startupStructures == nil {
+		t.Fatal("expected startup snapshot for requests.structures")
+	}
+	for _, err := range startupStructures.SemErrs {
+		if err.Msg == "MutableMapping is not a class" {
+			t.Fatalf("unexpected startup base class diagnostic: %+v", err)
+		}
+	}
+	structuresURI := pathToURI(structuresPath)
+	s.Open(lsp.TextDocumentItem{URI: structuresURI, Text: structuresCode, Version: 1})
+	s.analyze(s.Get(structuresURI))
+
+	doc := s.Get(structuresURI)
+	if doc.Global != nil {
+		if sym, ok := doc.Global.LookupLocal("MutableMapping"); ok && sym != nil && sym.Kind != analyser.SymClass {
+			t.Fatalf("expected open-document MutableMapping binding to be class, got %+v", sym)
+		}
+	}
+	for id, sym := range doc.Symbols {
+		if doc.Tree != nil && doc.Tree.Node(id).Kind == ast.NodeName {
+			if name, ok := doc.Tree.NameText(id); ok && name == "MutableMapping" {
+				rng := doc.Tree.RangeOf(id)
+				if rng.Start == 107 && rng.End == 121 && sym != nil && sym.Kind != analyser.SymClass {
+					t.Fatalf("expected class-header MutableMapping to resolve as class, got %+v", sym)
+				}
+			}
+		}
+	}
+	for _, err := range doc.SemErrs {
+		if err.Msg == "unresolved module: requests.compat" || err.Msg == "cannot import name 'MutableMapping' from 'requests.compat'" {
+			t.Fatalf("unexpected compat import diagnostic: %+v", err)
+		}
+	}
+	assertNoBaseClassDiagnostic(t, doc, "MutableMapping")
+	assertClassBase(t, doc, "CaseInsensitiveDict", "MutableMapping")
+}
+
+func TestClassBaseFromNestedSrcRequestsCompatMutableMappingResolves(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceFile(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	writeWorkspaceFile(t, filepath.Join(requestsRoot, "src", "requests", "__init__.py"), "")
+	writeWorkspaceFile(t, filepath.Join(requestsRoot, "src", "requests", "compat.py"), "from collections.abc import Mapping, MutableMapping\n")
+	structuresCode := "from collections import OrderedDict\nfrom .compat import Mapping, MutableMapping\n\nclass CaseInsensitiveDict(MutableMapping):\n    def __init__(self):\n        self._store = OrderedDict()\n\n    def __setitem__(self, key, value):\n        self._store[key.lower()] = (key, value)\n\n    def __getitem__(self, key):\n        return self._store[key.lower()][1]\n\n    def __delitem__(self, key):\n        del self._store[key.lower()]\n\n    def __iter__(self):\n        return (casedkey for casedkey, mappedvalue in self._store.values())\n\n    def __len__(self):\n        return len(self._store)\n\n    def __eq__(self, other):\n        if isinstance(other, Mapping):\n            return True\n        return False\n"
+	structuresPath := filepath.Join(requestsRoot, "src", "requests", "structures.py")
+	writeWorkspaceFile(t, structuresPath, structuresCode)
+
+	s := newWorkspaceServer(t, root)
+	structuresURI := pathToURI(structuresPath)
+	s.Open(lsp.TextDocumentItem{URI: structuresURI, Text: structuresCode, Version: 1})
+	s.analyze(s.Get(structuresURI))
+
+	doc := s.Get(structuresURI)
+	assertNoBaseClassDiagnostic(t, doc, "MutableMapping")
+	assertClassBase(t, doc, "CaseInsensitiveDict", "MutableMapping")
+	loc := mustDefinitionAt(t, s, structuresURI, structuresCode, 1, 7)
+	if loc.URI != pathToURI(filepath.Join(requestsRoot, "src", "requests", "compat.py")) {
+		t.Fatalf("unexpected relative import definition URI: got %q", loc.URI)
+	}
+}
+
+func TestClassBaseFromReexportedStdlibExceptionResolves(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, filepath.Join(root, "compat.py"), "from json import JSONDecodeError\n")
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "from compat import JSONDecodeError\n\nclass X(JSONDecodeError):\n    pass\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	assertNoBaseClassDiagnostic(t, doc, "JSONDecodeError")
+	assertClassBase(t, doc, "X", "JSONDecodeError")
 }
 
 func TestWorkspaceStubModulePrefersPyi(t *testing.T) {
@@ -663,9 +794,16 @@ func TestImportBuiltinModuleSysResolves(t *testing.T) {
 		}
 	}
 
-	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
-	if got := string(loc.URI); !strings.HasPrefix(got, "builtin:///") {
-		t.Fatalf("unexpected builtin module URI: got %q", got)
+	// Builtin modules have no source file, so goto-def should return nil
+	loc, err := s.Definition(&lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: mainURI},
+		Position:     lsp.Position{Line: 1, Character: 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected definition error: %v", err)
+	}
+	if loc != nil {
+		t.Fatalf("expected no definition for builtin module, got: %v", loc)
 	}
 }
 
@@ -686,9 +824,16 @@ func TestFromImportBuiltinModuleMemberSysPathResolves(t *testing.T) {
 		}
 	}
 
-	loc := mustDefinitionAt(t, s, mainURI, mainCode, 1, 0)
-	if got := string(loc.URI); !strings.HasPrefix(got, "builtin:///") {
-		t.Fatalf("unexpected builtin member URI: got %q", got)
+	// Builtin module members have no source file, so goto-def should return nil
+	loc, err := s.Definition(&lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: mainURI},
+		Position:     lsp.Position{Line: 1, Character: 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected definition error: %v", err)
+	}
+	if loc != nil {
+		t.Fatalf("expected no definition for builtin module member, got: %v", loc)
 	}
 }
 
@@ -763,6 +908,82 @@ func TestNewStatementsDoNotProduceUnexpectedDiagnostics(t *testing.T) {
 		if strings.Contains(err.Msg, "unexpected token") || strings.Contains(err.Msg, "undefined name") {
 			t.Fatalf("unexpected semantic diagnostic: %+v", err)
 		}
+	}
+}
+
+func TestAdjacentParenthesizedFStringsDoNotProduceDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "class Auth:\n    def __init__(self, username):\n        self.username = username\n\n    def build(self, realm, nonce, path, respdig):\n        base = (\n            f'username=\"{self.username}\", realm=\"{realm}\", nonce=\"{nonce}\", ' \n            f'uri=\"{path}\", response=\"{respdig}\"'\n        )\n        return base\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	if doc == nil {
+		t.Fatal("expected open document")
+	}
+	if len(doc.SemErrs) != 0 {
+		t.Fatalf("unexpected semantic diagnostics: %+v", doc.SemErrs)
+	}
+	if doc.Tree == nil {
+		t.Fatal("expected parsed tree")
+	}
+
+	classNode := doc.Tree.Children(doc.Tree.Root)[0]
+	_, _, classBody := doc.Tree.ClassParts(classNode)
+	fn := doc.Tree.Children(classBody)[1]
+	_, _, body := doc.Tree.FunctionParts(fn)
+	bodyStmt := doc.Tree.Children(body)[0]
+	assignKids := doc.Tree.Children(bodyStmt)
+	if len(assignKids) != 2 {
+		t.Fatalf("unexpected assignment children: %d", len(assignKids))
+	}
+	if doc.Tree.Node(assignKids[0]).Kind != ast.NodeFString {
+		t.Fatalf("expected merged f-string assignment value, got %s", doc.Tree.Node(assignKids[0]).Kind)
+	}
+}
+
+func TestResponseLinksStyleMethodWithBlankLineBeforeReturnDoesNotProduceDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "class Response:\n    @property\n    def links(self):\n        header = self.headers.get(\"link\")\n\n        resolved_links = {}\n\n        if header:\n            links = parse_header_links(header)\n\n            for link in links:\n                key = link.get(\"rel\") or link.get(\"url\")\n                resolved_links[key] = link\n\n        return resolved_links\n"
+	writeWorkspaceFile(t, filepath.Join(root, "helpers.py"), "def parse_header_links(value):\n    return []\n")
+	writeWorkspaceFile(t, mainPath, "from helpers import parse_header_links\n\n"+mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Text: "from helpers import parse_header_links\n\n" + mainCode, Version: 1})
+	s.analyze(s.Get(mainURI))
+
+	doc := s.Get(mainURI)
+	if doc == nil {
+		t.Fatal("expected open document")
+	}
+	for _, err := range doc.SemErrs {
+		if strings.Contains(err.Msg, "unexpected token") {
+			t.Fatalf("unexpected semantic diagnostic: %+v", err)
+		}
+	}
+}
+
+func TestWarningMessageFStringConversionDoesNotProduceParseErrors(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	mainCode := "def build_warning(username):\n    return (\n        \"Non-string usernames will no longer be supported in Requests \"\n        f\"3.0.0. Please convert the object you've passed in ({username!r}) to \"\n        \"a string or bytes object in the near future to avoid \"\n        \"problems.\"\n    )\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	mainURI := pathToURI(mainPath)
+	snapshot := s.buildBaseModuleSnapshot("main", mainURI, mainPath, mainCode, source.NewLineIndex(mainCode))
+	if snapshot == nil {
+		t.Fatal("expected module snapshot")
+	}
+	if len(snapshot.ParseErrs) != 0 {
+		t.Fatalf("unexpected parse errors: %+v", snapshot.ParseErrs)
 	}
 }
 
@@ -1211,6 +1432,69 @@ func TestRefreshModuleAndDependentsUpdatesOpenImporterDiagnostics(t *testing.T) 
 	assertSemanticDiagnostic(t, doc, "cannot import name 'foo' from 'pkg.mod'", 0, 20)
 }
 
+func TestDidOpenFastAnalysisLeavesWorkspaceImportUnrefinedUntilAsyncPass(t *testing.T) {
+	root := t.TempDir()
+	depPath := filepath.Join(root, "dep.py")
+	mainPath := filepath.Join(root, "main.py")
+	writeWorkspaceFile(t, depPath, "value = 1\n")
+	mainCode := "from dep import value\nvalue\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	s.scheduleAsync = func(func()) {}
+	mainURI := pathToURI(mainPath)
+
+	s.DidOpen(&lsp.DidOpenTextDocumentParams{
+		TextDocument: lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1},
+	})
+
+	loc, err := s.Definition(&lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: mainURI},
+		Position:     lsp.Position{Line: 1, Character: 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected definition error before async refinement: %v", err)
+	}
+	if loc == nil {
+		t.Fatal("expected local definition before async refinement")
+	}
+	if loc.URI != mainURI {
+		t.Fatalf("expected fast open definition to remain local before refinement: got %s want %s", loc.URI, mainURI)
+	}
+}
+
+func TestDidOpenEventuallyRefinesWorkspaceImports(t *testing.T) {
+	root := t.TempDir()
+	depPath := filepath.Join(root, "dep.py")
+	mainPath := filepath.Join(root, "main.py")
+	writeWorkspaceFile(t, depPath, "value = 1\n")
+	mainCode := "from dep import value\nvalue\n"
+	writeWorkspaceFile(t, mainPath, mainCode)
+
+	s := newWorkspaceServer(t, root)
+	s.scheduleAsync = func(fn func()) { fn() }
+	mainURI := pathToURI(mainPath)
+	depURI := pathToURI(depPath)
+
+	s.DidOpen(&lsp.DidOpenTextDocumentParams{
+		TextDocument: lsp.TextDocumentItem{URI: mainURI, Text: mainCode, Version: 1},
+	})
+
+	loc, err := s.Definition(&lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: mainURI},
+		Position:     lsp.Position{Line: 1, Character: 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected definition error after refinement: %v", err)
+	}
+	if loc == nil {
+		t.Fatal("expected refined definition")
+	}
+	if loc.URI != depURI {
+		t.Fatalf("unexpected definition URI: got %s want %s", loc.URI, depURI)
+	}
+}
+
 func TestDidCloseRebuildsWorkspaceModuleFromDisk(t *testing.T) {
 	root := t.TempDir()
 	modPath := filepath.Join(root, "pkg", "mod.py")
@@ -1470,7 +1754,7 @@ func writeWorkspaceFile(t *testing.T, path, content string) {
 	}
 }
 
-func mustDefinitionAt(t *testing.T, s *Server, uri lsp.DocumentURI, code string, line, char int) *lsp.Location {
+func mustDefinitionAt(t *testing.T, s *Server, uri lsp.DocumentURI, _ string, line, char int) *lsp.Location {
 	t.Helper()
 
 	loc, err := s.Definition(&lsp.DefinitionParams{
@@ -1518,4 +1802,33 @@ func assertSemanticDiagnostic(t *testing.T, doc *Document, want string, line, ch
 		}
 	}
 	t.Fatalf("expected semantic diagnostic %q, got %+v", want, doc.SemErrs)
+}
+
+func assertNoBaseClassDiagnostic(t *testing.T, doc *Document, name string) {
+	t.Helper()
+	if doc == nil {
+		t.Fatal("expected document")
+	}
+	for _, err := range doc.SemErrs {
+		if err.Msg == "undefined base class: "+name || err.Msg == name+" is not a class" {
+			t.Fatalf("unexpected base class diagnostic: %+v", err)
+		}
+	}
+}
+
+func assertClassBase(t *testing.T, doc *Document, className, baseName string) {
+	t.Helper()
+	if doc == nil || doc.Global == nil {
+		t.Fatal("expected analyzed document")
+	}
+	classSym, ok := doc.Global.LookupLocal(className)
+	if !ok || classSym == nil {
+		t.Fatalf("missing class symbol %s", className)
+	}
+	for _, base := range classSym.Bases {
+		if base != nil && base.Name == baseName {
+			return
+		}
+	}
+	t.Fatalf("expected %s to inherit from %s, got %+v", className, baseName, classSym.Bases)
 }

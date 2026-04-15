@@ -3,6 +3,7 @@ package analyser
 import (
 	"strings"
 
+	"rahu/parser"
 	"rahu/parser/ast"
 )
 
@@ -34,6 +35,18 @@ type Resolver struct {
 	PendingAttrs []PendingAttr
 	selfName     string
 	ExprTypes    map[ast.NodeID]*Type
+
+	// Cache for resolved stringified type annotations (forward references)
+	// Maps annotation text to resolved type to avoid re-parsing and re-resolving
+	stringAnnotCache map[string]*Type
+
+	// Type constraints from isinstance() checks for type narrowing
+	// Maps variable name to narrowed type within the current scope
+	typeConstraints map[string]*Type
+
+	// Inferred instance attributes for each class
+	// Maps class SymbolID to map of attribute name -> union type
+	classInstanceAttrs map[SymbolID]map[string]*Type
 }
 
 type SemanticError struct {
@@ -55,17 +68,19 @@ func newResolver(tree *ast.AST, global *Scope) *Resolver {
 		exprTypeCap = 4
 	}
 	return &Resolver{
-		tree:         tree,
-		current:      global,
-		errors:       nil,
-		loopDepth:    0,
-		Resolved:     make(map[ast.NodeID]*Symbol, resolvedCap),
-		inFunction:   false,
-		inClass:      false,
-		PendingAttrs: make([]PendingAttr, 0, attrCap),
-		ResolvedAttr: make(map[ast.NodeID]*Symbol, attrCap),
-		selfName:     "",
-		ExprTypes:    make(map[ast.NodeID]*Type, exprTypeCap),
+		tree:               tree,
+		current:            global,
+		errors:             nil,
+		loopDepth:          0,
+		Resolved:           make(map[ast.NodeID]*Symbol, resolvedCap),
+		inFunction:         false,
+		PendingAttrs:       make([]PendingAttr, 0, attrCap),
+		ResolvedAttr:       make(map[ast.NodeID]*Symbol, attrCap),
+		selfName:           "",
+		ExprTypes:          make(map[ast.NodeID]*Type, exprTypeCap),
+		stringAnnotCache:   make(map[string]*Type),
+		typeConstraints:    make(map[string]*Type),
+		classInstanceAttrs: make(map[SymbolID]map[string]*Type),
 	}
 }
 
@@ -130,11 +145,37 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 						} else {
 							sym.InstanceOf = nil
 						}
+						// Also set the expression type for this occurrence
+						r.setExprType(target, valueType)
 					}
 				}
 			} else if targetKind == ast.NodeAttribute && !IsUnknownType(valueType) {
 				// Attribute was just added to PendingAttrs by visitExpr
 				r.PendingAttrs[len(r.PendingAttrs)-1].ValueType = valueType
+
+				// Infer instance attribute for class-level attribute tracking
+				// When we see obj.attr = value, record that the class of obj has 'attr'
+				base := r.tree.ChildAt(target, 0)
+				attrNode := r.tree.ChildAt(target, 1)
+				if base != ast.NoNode && attrNode != ast.NoNode {
+					attrName, _ := r.tree.NameText(attrNode)
+					if attrName != "" {
+						baseType := r.exprType(base)
+						if baseType != nil {
+							// Get the class symbol from the type
+							var classSym *Symbol
+							switch baseType.Kind {
+							case TypeInstance:
+								classSym = baseType.Symbol
+							case TypeClass:
+								classSym = baseType.Symbol
+							}
+							if classSym != nil {
+								r.recordInstanceAttr(classSym, attrName, valueType)
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -257,7 +298,16 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 
 		if r.inClass && args != ast.NoNode && r.tree.Nodes[args].FirstChild != ast.NoNode {
 			selfParam, _, _ := r.tree.ParamParts(r.tree.Nodes[args].FirstChild)
-			r.selfName, _ = r.tree.NameText(selfParam)
+			selfName, _ := r.tree.NameText(selfParam)
+			r.selfName = selfName
+
+			// Set self parameter's type to instance of the current class
+			if selfName != "" && r.currentClass != nil {
+				if selfSym := fnSym.Inner.Symbols[selfName]; selfSym != nil {
+					selfSym.Inferred = InstanceType(r.currentClass)
+					selfSym.InstanceOf = r.currentClass
+				}
+			}
 		} else {
 			r.selfName = ""
 		}
@@ -288,8 +338,20 @@ func (r *Resolver) visitStmt(stmt ast.NodeID) {
 		}
 		r.visitExpr(test, Read)
 
+		// Check for isinstance() type narrowing
+		narrowedVars := make(map[string]struct{})
+		if varName, narrowedType, ok := r.extractIsinstanceCheck(test); ok {
+			r.typeConstraints[varName] = narrowedType
+			narrowedVars[varName] = struct{}{}
+		}
+
 		for inner := r.tree.Nodes[body].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
 			r.visitStmt(inner)
+		}
+
+		// Remove type constraints after visiting the if-body
+		for varName := range narrowedVars {
+			delete(r.typeConstraints, varName)
 		}
 
 		for inner := r.tree.Nodes[orelse].FirstChild; inner != ast.NoNode; inner = r.tree.Nodes[inner].NextSibling {
@@ -440,11 +502,23 @@ func (r *Resolver) resolveBaseClassSymbol(baseExpr ast.NodeID) (*Symbol, bool) {
 		r.error(r.tree.RangeOf(baseExpr), "undefined base class: "+baseName)
 		return nil, false
 	}
-	if baseSym.Kind != SymClass {
-		r.error(r.tree.RangeOf(baseExpr), baseName+" is not a class")
-		return nil, false
+	if baseSym.Kind == SymClass {
+		return baseSym, true
 	}
-	return baseSym, true
+	if typ := SymbolType(baseSym); !IsUnknownType(typ) {
+		switch typ.Kind {
+		case TypeClass:
+			if typ.Symbol != nil {
+				return typ.Symbol, true
+			}
+		case TypeInstance:
+			if typ.Symbol != nil && typ.Symbol.Kind == SymClass {
+				return typ.Symbol, true
+			}
+		}
+	}
+	r.error(r.tree.RangeOf(baseExpr), baseName+" is not a class")
+	return nil, false
 }
 
 func (r *Resolver) resolveAttributeExpr(expr ast.NodeID) (*Symbol, bool) {
@@ -467,10 +541,42 @@ func (r *Resolver) resolveAttributeExpr(expr ast.NodeID) (*Symbol, bool) {
 
 	if baseType := r.exprType(base); baseType != nil {
 		if sym, ok := LookupMemberOnType(baseType, attrName); ok {
-			r.ResolvedAttr[expr] = sym
-			if typ := SymbolType(sym); !IsUnknownType(typ) {
+			typ := SymbolType(sym)
+			if !IsUnknownType(typ) {
+				r.ResolvedAttr[expr] = sym
 				r.setExprType(expr, typ)
+				return sym, true
 			}
+			// Symbol found but has no type - check inferred attrs as fallback
+		}
+
+		// Check for inferred instance attributes (from dynamic attribute assignment)
+		// When we see obj.attr = value in a method, we record that the class has 'attr'
+		var classSym *Symbol
+		switch baseType.Kind {
+		case TypeInstance:
+			classSym = baseType.Symbol
+		case TypeClass:
+			classSym = baseType.Symbol
+		}
+		if classSym != nil {
+			if inferredType := r.getInferredInstanceAttr(classSym, attrName); inferredType != nil {
+				// Create a synthetic symbol for the inferred attribute
+				attrSym := &Symbol{
+					Name:     attrName,
+					Kind:     SymAttr,
+					Inferred: inferredType,
+					Scope:    classSym.Inner,
+				}
+				r.ResolvedAttr[expr] = attrSym
+				r.setExprType(expr, inferredType)
+				return attrSym, true
+			}
+		}
+
+		// If we found a symbol earlier but it had no type, return it now as fallback
+		if sym, ok := LookupMemberOnType(baseType, attrName); ok {
+			r.ResolvedAttr[expr] = sym
 			return sym, true
 		}
 	}
@@ -528,6 +634,244 @@ func (r *Resolver) exprType(id ast.NodeID) *Type {
 	return r.ExprTypes[id]
 }
 
+// InferReceiverTypeFromMethod attempts to determine the receiver type based on
+// a method name. This enables backward type inference for builtin methods.
+func InferReceiverTypeFromMethod(methodName string) *Type {
+	switch methodName {
+	case "split", "join", "lower", "upper", "strip", "replace", "find", "startswith", "endswith":
+		// These are all str methods
+		if sym := BuiltinSymbol("str"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "append", "extend", "insert", "remove", "sort", "reverse":
+		// These are list-only methods
+		if sym := BuiltinSymbol("list"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "get", "keys", "values", "items", "update":
+		// These are dict-only methods
+		if sym := BuiltinSymbol("dict"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "pop":
+		// pop exists on both list and dict - prefer dict for backward inference
+		// (more common to call pop() on unknown dict than unknown list)
+		if sym := BuiltinSymbol("dict"); sym != nil {
+			return BuiltinType(sym)
+		}
+	case "clear":
+		// clear exists on dict, list, and set - prefer dict
+		if sym := BuiltinSymbol("dict"); sym != nil {
+			return BuiltinType(sym)
+		}
+	}
+	return nil
+}
+
+// recordInstanceAttr records an inferred instance attribute for a class.
+// When we see `obj.attr = value` in a method, we infer that the class of `obj`
+// has an instance attribute `attr`. The types are unioned if the attribute
+// is set multiple times.
+func (r *Resolver) recordInstanceAttr(classSym *Symbol, attrName string, typ *Type) {
+	if classSym == nil || attrName == "" || typ == nil || IsUnknownType(typ) {
+		return
+	}
+
+	if r.classInstanceAttrs[classSym.ID] == nil {
+		r.classInstanceAttrs[classSym.ID] = make(map[string]*Type)
+	}
+
+	// If attribute already exists, union the types
+	if existingType, ok := r.classInstanceAttrs[classSym.ID][attrName]; ok {
+		r.classInstanceAttrs[classSym.ID][attrName] = JoinTypes(existingType, typ)
+	} else {
+		r.classInstanceAttrs[classSym.ID][attrName] = typ
+	}
+}
+
+// getInferredInstanceAttr retrieves an inferred instance attribute type
+// for a given class and attribute name.
+func (r *Resolver) getInferredInstanceAttr(classSym *Symbol, attrName string) *Type {
+	if classSym == nil || attrName == "" {
+		return nil
+	}
+
+	// Check the class itself
+	if attrs, ok := r.classInstanceAttrs[classSym.ID]; ok {
+		if typ, ok := attrs[attrName]; ok {
+			return typ
+		}
+	}
+
+	// Check parent classes (inheritance)
+	for _, base := range classSym.Bases {
+		if typ := r.getInferredInstanceAttr(base, attrName); typ != nil {
+			return typ
+		}
+	}
+
+	return nil
+}
+
+// extractIsinstanceCheck attempts to extract type narrowing information from
+// an isinstance() call. Returns (variableName, narrowedType, true) if the
+// expression is isinstance(var, Type), otherwise returns ("", nil, false).
+func (r *Resolver) extractIsinstanceCheck(expr ast.NodeID) (string, *Type, bool) {
+	if expr == ast.NoNode || r.tree.Node(expr).Kind != ast.NodeCall {
+		return "", nil, false
+	}
+
+	// Get the function being called
+	funcExpr := r.tree.Node(expr).FirstChild
+	if funcExpr == ast.NoNode {
+		return "", nil, false
+	}
+
+	// Check if it's isinstance
+	if r.tree.Node(funcExpr).Kind != ast.NodeName {
+		return "", nil, false
+	}
+
+	funcName, _ := r.tree.NameText(funcExpr)
+	if funcName != "isinstance" {
+		return "", nil, false
+	}
+
+	// Get arguments - first should be variable name, second should be type
+	// NodeCall children: func, arg1, arg2, ...
+	arg1 := r.tree.Node(funcExpr).NextSibling
+	if arg1 == ast.NoNode {
+		return "", nil, false
+	}
+
+	// First arg must be a name node (the variable being checked)
+	if r.tree.Node(arg1).Kind != ast.NodeName {
+		return "", nil, false
+	}
+
+	varName, _ := r.tree.NameText(arg1)
+	if varName == "" {
+		return "", nil, false
+	}
+
+	// Get second argument (the type to check against)
+	arg2 := r.tree.Node(arg1).NextSibling
+	if arg2 == ast.NoNode {
+		return "", nil, false
+	}
+
+	// Resolve the type argument
+	narrowedType := r.resolveTypeFromExpr(arg2)
+	if narrowedType == nil {
+		return "", nil, false
+	}
+
+	return varName, narrowedType, true
+}
+
+// resolveTypeFromExpr resolves a type from an expression node.
+// Used for extracting the type argument from isinstance() calls.
+func (r *Resolver) resolveTypeFromExpr(expr ast.NodeID) *Type {
+	if expr == ast.NoNode {
+		return nil
+	}
+
+	switch r.tree.Node(expr).Kind {
+	case ast.NodeName:
+		name, _ := r.tree.NameText(expr)
+		if name == "" {
+			return nil
+		}
+
+		// Look up the name in scope
+		if sym, ok := r.current.Lookup(name); ok && sym != nil {
+			if sym.Kind == SymClass {
+				return InstanceType(sym)
+			}
+			// For builtin types like str, int, etc.
+			if typ := SymbolType(sym); !IsUnknownType(typ) {
+				return typ
+			}
+		}
+
+		// Try builtin symbols for types like str, int, etc.
+		if builtin := BuiltinSymbol(name); builtin != nil {
+			return BuiltinType(builtin)
+		}
+
+		return nil
+
+	case ast.NodeSubScript:
+		// Handle generic types like list[int], dict[str, int]
+		return r.resolveSubscriptTypeExpr(expr)
+
+	case ast.NodeAttribute:
+		// Handle qualified names like typing.List, collections.abc.Sequence
+		base := r.tree.ChildAt(expr, 0)
+		attrNode := r.tree.ChildAt(expr, 1)
+		if base == ast.NoNode || attrNode == ast.NoNode {
+			return nil
+		}
+
+		baseName, _ := r.tree.NameText(base)
+		_, _ = r.tree.NameText(attrNode) // attrName reserved for future use
+
+		// Common patterns: typing.List, typing.Dict, etc.
+		if baseName == "typing" || baseName == "collections" {
+			// For now, return unknown type - full typing module support is complex
+			// This could be enhanced to look up in imported modules
+			return nil
+		}
+
+		return nil
+
+	default:
+		return nil
+	}
+}
+
+// resolveSubscriptTypeExpr resolves a subscript expression as a type.
+// Handles generic types like list[int], dict[str, int], etc.
+func (r *Resolver) resolveSubscriptTypeExpr(expr ast.NodeID) *Type {
+	base := r.tree.ChildAt(expr, 0)
+	index := r.tree.ChildAt(expr, 1)
+	if base == ast.NoNode || index == ast.NoNode || r.tree.Node(base).Kind != ast.NodeName {
+		return nil
+	}
+
+	baseName, _ := r.tree.NameText(base)
+	switch baseName {
+	case "list":
+		elemType := r.resolveTypeFromExpr(index)
+		return ListType(elemType)
+	case "tuple":
+		if r.tree.Node(index).Kind == ast.NodeTuple {
+			// tuple[int, str, ...] - multiple type arguments
+			items := make([]*Type, 0, r.tree.ChildCount(index))
+			for child := r.tree.Node(index).FirstChild; child != ast.NoNode; child = r.tree.Node(child).NextSibling {
+				items = append(items, r.resolveTypeFromExpr(child))
+			}
+			return TupleType(items...)
+		}
+		return TupleType(r.resolveTypeFromExpr(index))
+	case "dict":
+		if r.tree.Node(index).Kind != ast.NodeTuple || r.tree.ChildCount(index) != 2 {
+			return nil
+		}
+		key := r.tree.ChildAt(index, 0)
+		value := r.tree.ChildAt(index, 1)
+		return DictType(r.resolveTypeFromExpr(key), r.resolveTypeFromExpr(value))
+	case "set":
+		return SetType(r.resolveTypeFromExpr(index))
+	case "type":
+		// type[T] - represents the type T itself, not an instance
+		// For isinstance checks, this is typically used as the second arg
+		return r.resolveTypeFromExpr(index)
+	default:
+		return nil
+	}
+}
+
 func (r *Resolver) resolveAnnotation(expr ast.NodeID) *Type {
 	if expr == ast.NoNode {
 		return nil
@@ -545,6 +889,9 @@ func (r *Resolver) resolveAnnotation(expr ast.NodeID) *Type {
 			return InstanceType(sym)
 		}
 		return SymbolType(sym)
+	case ast.NodeString:
+		// Handle stringified type annotations (forward references)
+		return r.resolveStringAnnotation(expr)
 	case ast.NodeSubScript:
 		return r.resolveSubscriptAnnotation(expr)
 	case ast.NodeTuple:
@@ -553,6 +900,159 @@ func (r *Resolver) resolveAnnotation(expr ast.NodeID) *Type {
 			items = append(items, r.resolveAnnotation(child))
 		}
 		return TupleType(items...)
+	default:
+		return nil
+	}
+}
+
+// resolveStringAnnotation handles stringified type annotations (forward references)
+// by parsing the string content and resolving the resulting type expression.
+// Errors during parsing are silently ignored to match Python runtime behavior.
+func (r *Resolver) resolveStringAnnotation(expr ast.NodeID) *Type {
+	if expr == ast.NoNode {
+		return nil
+	}
+
+	// Extract the string content
+	text, ok := r.tree.StringText(expr)
+	if !ok || text == "" {
+		return nil
+	}
+
+	// Check cache first to avoid re-parsing the same annotation
+	if cachedType, ok := r.stringAnnotCache[text]; ok {
+		return cachedType
+	}
+
+	// Parse the string content by wrapping it in a dummy annotated assignment
+	// This lets us reuse the existing parser infrastructure
+	dummySrc := "_: " + text + "\n"
+	subParser := parser.New(dummySrc)
+	subTree := subParser.Parse()
+
+	// Extract the annotation from the parsed dummy statement
+	// The structure will be: NodeModule -> NodeAnnAssign -> [target, annotation]
+	var parsedExpr ast.NodeID = ast.NoNode
+	if subTree.Root != ast.NoNode {
+		moduleNode := subTree.Root
+		firstStmt := subTree.Node(moduleNode).FirstChild
+		if firstStmt != ast.NoNode && subTree.Node(firstStmt).Kind == ast.NodeAnnAssign {
+			_, annotation, _ := subTree.AnnAssignParts(firstStmt)
+			parsedExpr = annotation
+		}
+	}
+
+	if parsedExpr == ast.NoNode {
+		// Parsing failed - cache nil and return
+		// This matches Python's behavior where invalid string annotations
+		// are ignored at runtime
+		r.stringAnnotCache[text] = nil
+		return nil
+	}
+
+	// Resolve the parsed expression
+	// Note: The parsed expression comes from a different AST (subTree),
+	// so we need special handling to resolve names in the current scope
+	result := r.resolveParsedAnnotation(parsedExpr, subTree)
+
+	// Cache the resolved type (even if nil, to avoid re-parsing invalid annotations)
+	r.stringAnnotCache[text] = result
+
+	return result
+}
+
+// resolveParsedAnnotation resolves a type from a parsed expression in a sub-AST.
+// This handles expressions parsed from string annotations.
+func (r *Resolver) resolveParsedAnnotation(expr ast.NodeID, subTree *ast.AST) *Type {
+	if expr == ast.NoNode {
+		return nil
+	}
+
+	switch subTree.Node(expr).Kind {
+	case ast.NodeName:
+		name, _ := subTree.NameText(expr)
+		// Look up the name in the current scope
+		if sym, ok := r.current.Lookup(name); ok && sym != nil {
+			if sym.Kind == SymClass {
+				return InstanceType(sym)
+			}
+			return SymbolType(sym)
+		}
+		return nil
+	case ast.NodeSubScript:
+		return r.resolveParsedSubscriptAnnotation(expr, subTree)
+	case ast.NodeTuple:
+		items := make([]*Type, 0, subTree.ChildCount(expr))
+		for child := subTree.Node(expr).FirstChild; child != ast.NoNode; child = subTree.Node(child).NextSibling {
+			items = append(items, r.resolveParsedAnnotation(child, subTree))
+		}
+		return TupleType(items...)
+	case ast.NodeString:
+		// Nested string annotation - resolve recursively using main cache
+		nestedText, _ := subTree.StringText(expr)
+		if nestedText == "" {
+			return nil
+		}
+		// Check main cache first
+		if cachedType, ok := r.stringAnnotCache[nestedText]; ok {
+			return cachedType
+		}
+		return nil
+	case ast.NodeNone:
+		// None literal in annotation - resolve to NoneType
+		if noneSym := BuiltinSymbol("NoneType"); noneSym != nil {
+			return BuiltinType(noneSym)
+		}
+		return nil
+	case ast.NodeBinOp:
+		// Handle union types (X | Y) - Python 3.10+
+		left := subTree.ChildAt(expr, 0)
+		right := subTree.ChildAt(expr, 1)
+		leftType := r.resolveParsedAnnotation(left, subTree)
+		rightType := r.resolveParsedAnnotation(right, subTree)
+		if leftType != nil && rightType != nil {
+			return UnionType(leftType, rightType)
+		}
+		if leftType != nil {
+			return leftType
+		}
+		return rightType
+	default:
+		return nil
+	}
+}
+
+// resolveParsedSubscriptAnnotation handles subscript types like list[int], dict[str, Any]
+// from a parsed sub-AST (string annotation)
+func (r *Resolver) resolveParsedSubscriptAnnotation(expr ast.NodeID, subTree *ast.AST) *Type {
+	base := subTree.ChildAt(expr, 0)
+	index := subTree.ChildAt(expr, 1)
+	if base == ast.NoNode || index == ast.NoNode || subTree.Node(base).Kind != ast.NodeName {
+		return nil
+	}
+
+	baseName, _ := subTree.NameText(base)
+	switch baseName {
+	case "list":
+		return ListType(r.resolveParsedAnnotation(index, subTree))
+	case "tuple":
+		if subTree.Node(index).Kind == ast.NodeTuple {
+			items := make([]*Type, 0, subTree.ChildCount(index))
+			for child := subTree.Node(index).FirstChild; child != ast.NoNode; child = subTree.Node(child).NextSibling {
+				items = append(items, r.resolveParsedAnnotation(child, subTree))
+			}
+			return TupleType(items...)
+		}
+		return TupleType(r.resolveParsedAnnotation(index, subTree))
+	case "dict":
+		if subTree.Node(index).Kind != ast.NodeTuple || subTree.ChildCount(index) != 2 {
+			return nil
+		}
+		key := subTree.ChildAt(index, 0)
+		value := subTree.ChildAt(index, 1)
+		return DictType(r.resolveParsedAnnotation(key, subTree), r.resolveParsedAnnotation(value, subTree))
+	case "set":
+		return SetType(r.resolveParsedAnnotation(index, subTree))
 	default:
 		return nil
 	}
@@ -624,7 +1124,14 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 	case ast.NodeName:
 		r.resolveName(expr, ctx)
 		if ctx == Read {
-			r.setExprType(expr, SymbolType(r.Resolved[expr]))
+			// Check for type narrowing from isinstance() check
+			name, _ := r.tree.NameText(expr)
+			if narrowedType, ok := r.typeConstraints[name]; ok {
+				// Use the narrowed type from isinstance() check
+				r.setExprType(expr, narrowedType)
+			} else {
+				r.setExprType(expr, SymbolType(r.Resolved[expr]))
+			}
 		}
 		return
 
@@ -640,6 +1147,10 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 
 	case ast.NodeString:
 		r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+		return
+
+	case ast.NodeBytes:
+		r.setExprType(expr, BuiltinType(BuiltinSymbol("bytes")))
 		return
 
 	case ast.NodeFStringText:
@@ -716,8 +1227,9 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 			base := r.tree.ChildAt(funcID, 0)
 			attr := r.tree.ChildAt(funcID, 1)
 			attrName, _ := r.tree.NameText(attr)
+			baseType := r.exprType(base)
+
 			if attrName == "append" {
-				baseType := r.exprType(base)
 				arg := r.tree.Node(funcID).NextSibling
 				argType := r.exprType(arg)
 				if baseType != nil && baseType.Kind == TypeList && !IsUnknownType(argType) {
@@ -727,6 +1239,43 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 							baseSym.Inferred = baseType
 						}
 					}
+				}
+			}
+			// Infer return types for common str methods
+			if baseType != nil && baseType.Kind == TypeBuiltin && baseType.Symbol != nil && baseType.Symbol.Name == "str" {
+				switch attrName {
+				case "split":
+					r.setExprType(expr, ListType(BuiltinType(BuiltinSymbol("str"))))
+				case "join":
+					r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+				case "lower", "upper", "strip":
+					r.setExprType(expr, BuiltinType(BuiltinSymbol("str")))
+				}
+			}
+
+			// Infer return types for dict methods
+			if baseType != nil && baseType.Kind == TypeDict {
+				switch attrName {
+				case "items":
+					// Returns list[tuple[key_type, value_type]]
+					tupleType := TupleType(baseType.Key, baseType.Elem)
+					r.setExprType(expr, ListType(tupleType))
+				case "keys":
+					// Returns list[key_type]
+					r.setExprType(expr, ListType(baseType.Key))
+				case "values":
+					// Returns list[value_type]
+					r.setExprType(expr, ListType(baseType.Elem))
+				case "get":
+					// Returns value_type | None
+					noneType := BuiltinType(BuiltinSymbol("NoneType"))
+					r.setExprType(expr, UnionType(baseType.Elem, noneType))
+				case "pop":
+					// Returns value_type
+					r.setExprType(expr, baseType.Elem)
+				case "update", "clear":
+					// Returns None
+					r.setExprType(expr, BuiltinType(BuiltinSymbol("NoneType")))
 				}
 			}
 		}
@@ -754,10 +1303,18 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		r.visitDictComp(expr)
 
 	case ast.NodeDict:
+		var keyType, elemType *Type
 		for child := r.tree.Nodes[expr].FirstChild; child != ast.NoNode; child = r.tree.Nodes[child].NextSibling {
 			r.visitExpr(child, Read)
+			// Each child is a key-value pair (NodeTuple with 2 elements)
+			if r.tree.Node(child).Kind == ast.NodeTuple {
+				keyNode := r.tree.ChildAt(child, 0)
+				valueNode := r.tree.ChildAt(child, 1)
+				keyType = JoinTypes(keyType, r.exprType(keyNode))
+				elemType = JoinTypes(elemType, r.exprType(valueNode))
+			}
 		}
-		r.setExprType(expr, BuiltinType(BuiltinSymbol("dict")))
+		r.setExprType(expr, DictType(keyType, elemType))
 
 	case ast.NodeKeywordArg:
 		r.visitExpr(r.tree.ChildAt(expr, 1), Read)
@@ -783,7 +1340,28 @@ func (r *Resolver) visitExpr(expr ast.NodeID, ctx NameContext) {
 		}
 
 	case ast.NodeAttribute:
-		r.visitExpr(r.tree.Nodes[expr].FirstChild, Read)
+		base := r.tree.Nodes[expr].FirstChild
+		r.visitExpr(base, Read)
+
+		// BACKWARD INFERENCE: If receiver type is unknown, try to infer from attribute name
+		// This helps with unannotated function parameters that use methods like .split(), .append(), etc.
+		if ctx == Read {
+			baseType := r.exprType(base)
+			if IsUnknownType(baseType) {
+				attrName, _ := r.tree.NameText(r.tree.ChildAt(expr, 1))
+				if inferredType := InferReceiverTypeFromMethod(attrName); inferredType != nil {
+					// Update the receiver symbol's type and expression type
+					if r.tree.Node(base).Kind == ast.NodeName {
+						if baseSym := r.Resolved[base]; baseSym != nil {
+							baseSym.Inferred = inferredType
+							r.setExprType(base, inferredType)
+							baseType = inferredType
+						}
+					}
+				}
+			}
+		}
+
 		if ctx == Read {
 			if sym, ok := r.resolveAttributeExpr(expr); ok {
 				if typ := SymbolType(sym); !IsUnknownType(typ) {

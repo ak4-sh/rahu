@@ -21,10 +21,37 @@ func (b *ScopeBuilder) newSymID() SymbolID {
 const maxDefaultValueLen = 50
 
 // extractValue extracts the source text for a node, truncating if too long.
+// For number nodes, it returns the stored literal value (which may be a converted
+// hex/binary/octal value with angle brackets like "<144129>").
 func (b *ScopeBuilder) extractValue(nodeID ast.NodeID) string {
 	if nodeID == ast.NoNode || b.source == "" {
 		return ""
 	}
+
+	// For number nodes, use the stored literal value (which may be converted from hex/octal/binary)
+	if b.tree.Node(nodeID).Kind == ast.NodeNumber {
+		idx := b.tree.Nodes[nodeID].Data
+		if int(idx) < len(b.tree.Numbers) {
+			val := b.tree.Numbers[idx]
+			if len(val) > maxDefaultValueLen {
+				return val[:maxDefaultValueLen] + "..."
+			}
+			return val
+		}
+	}
+
+	// For bytes nodes, add b prefix to distinguish from regular strings
+	if b.tree.Node(nodeID).Kind == ast.NodeBytes {
+		idx := b.tree.Nodes[nodeID].Data
+		if int(idx) < len(b.tree.Bytes) {
+			val := "b" + b.tree.Bytes[idx]
+			if len(val) > maxDefaultValueLen {
+				return val[:maxDefaultValueLen] + "..."
+			}
+			return val
+		}
+	}
+
 	r := b.tree.RangeOf(nodeID)
 	if int(r.End) > len(b.source) {
 		return ""
@@ -623,7 +650,14 @@ func (b *ScopeBuilder) visitFunctionDef(id ast.NodeID) {
 
 	fnScope.Owner = fnSym
 
-	_ = b.current.Define(fnSym)
+	if err := b.current.Define(fnSym); err != nil {
+		// Allow function definitions to shadow existing symbols in module scope only
+		// This handles fallback patterns like: try: from x import y; except: def y(): ...
+		if b.current.Kind == ScopeGlobal {
+			delete(b.current.Symbols, nameText)
+			_ = b.current.Define(fnSym)
+		}
+	}
 	b.Defs[name] = fnSym
 
 	fnSym.Inner = fnScope

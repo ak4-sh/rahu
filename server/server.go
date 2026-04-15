@@ -30,8 +30,10 @@ type Server struct {
 	externalModulesByURI   map[lsp.DocumentURI]ModuleFile
 	pythonBuiltinNames     map[string]struct{}
 	pythonModuleInfoByName map[string]pythonModuleInfo
+	pythonProjectRoots     []PythonProjectRoot
 	externalSearchRoots    []string
 	pythonExecutable       string
+	typeshedLoader         *TypeshedLoader
 
 	// Snapshots lock - protects module analysis cache (read-heavy)
 	snapshotsMu           sync.RWMutex
@@ -58,11 +60,38 @@ type Server struct {
 	indexingCtx              context.Context
 	indexingCancel           context.CancelFunc
 	indexingDone             chan struct{}
+	startup                  *startupReadiness
+	scheduleAsync            func(func())
 
 	// Reference index for fast O(1) reference lookups
 	refIndex *RefIndex
 
+	// Method introspection cache for synthetic module methods (lazy hover)
+	methodCacheMu     sync.RWMutex
+	pythonMethodCache map[string]pythonMethodInfo // key: "module.class.method"
+
 	conn *jsonrpc.Conn
+}
+
+// pythonMethodInfo stores cached introspection results for methods
+type pythonMethodInfo struct {
+	Module    string
+	Class     string
+	Method    string
+	Signature string
+	Docstring string
+	CachedAt  time.Time
+}
+
+type startupReadiness struct {
+	priorityModuleNames   map[string]struct{}
+	priorityOpenURIs      map[lsp.DocumentURI]struct{}
+	priorityReadyAt       time.Time
+	allOpenFilesReadyAt   time.Time
+	firstDiagAtByURI      map[lsp.DocumentURI]time.Time
+	firstApplyAtByURI     map[lsp.DocumentURI]time.Time
+	priorityModuleCount   int
+	prioritySurfaceRounds int
 }
 
 type ModuleFile struct {
@@ -72,11 +101,17 @@ type ModuleFile struct {
 	Kind string
 }
 
+type PythonProjectRoot struct {
+	ProjectRoot string
+	ImportRoot  string
+}
+
 type StartupModuleBase struct {
 	Name      string
 	URI       lsp.DocumentURI
 	Path      string
 	Text      string
+	TextHash  uint64
 	LineIndex *source.LineIndex
 	Tree      *ast.AST
 	ParseErrs []parser.Error
@@ -109,6 +144,7 @@ type ModuleSnapshot struct {
 	Exports     map[string]*analyser.Symbol
 	ExportHash  uint64
 	Imports     []string
+	TextHash    uint64
 }
 
 func New(conn *jsonrpc.Conn) *Server {
@@ -131,6 +167,16 @@ func New(conn *jsonrpc.Conn) *Server {
 		snapshotLRU:            newSnapshotLRU(),
 		maxCachedModules:       defaultMaxCachedModules,
 		refIndex:               NewRefIndex(),
+		pythonMethodCache:      make(map[string]pythonMethodInfo),
+		scheduleAsync: func(fn func()) {
+			go fn()
+		},
+		startup: &startupReadiness{
+			priorityModuleNames: make(map[string]struct{}),
+			priorityOpenURIs:    make(map[lsp.DocumentURI]struct{}),
+			firstDiagAtByURI:    make(map[lsp.DocumentURI]time.Time),
+			firstApplyAtByURI:   make(map[lsp.DocumentURI]time.Time),
+		},
 	}
 }
 

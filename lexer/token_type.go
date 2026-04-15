@@ -11,6 +11,7 @@ const (
 	NUMBER
 	STRING
 	FSTRING
+	BSTRING // Byte string literals (b"...", rb"...", br"...")
 
 	NEWLINE
 	INDENT

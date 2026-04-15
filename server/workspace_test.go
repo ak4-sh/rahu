@@ -121,6 +121,66 @@ func TestBuildModuleIndexMixedRepoOnlyIndexesPythonModules(t *testing.T) {
 	}
 }
 
+func TestFindPythonProjectRootsPrefersSrcImportRoot(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "__init__.py"), "")
+
+	roots := findPythonProjectRoots(root)
+	for _, got := range roots {
+		if got.ProjectRoot == requestsRoot {
+			wantImportRoot := filepath.Join(requestsRoot, "src")
+			if got.ImportRoot != wantImportRoot {
+				t.Fatalf("unexpected import root: got %q want %q", got.ImportRoot, wantImportRoot)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected nested requests project root in %+v", roots)
+}
+
+func TestModuleNameForPathNestedSrcLayout(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	structuresPath := filepath.Join(requestsRoot, "src", "requests", "structures.py")
+	writeWorkspaceSource(t, structuresPath, "value = 1\n")
+
+	roots := findPythonProjectRoots(root)
+	got, ok := moduleNameForPath(structuresPath, roots)
+	if !ok {
+		t.Fatal("expected module name for nested src path")
+	}
+	if got != "requests.structures" {
+		t.Fatalf("unexpected module name: got %q want %q", got, "requests.structures")
+	}
+}
+
+func TestBuildModuleIndexNestedSrcProjectUsesImportRootNames(t *testing.T) {
+	root := t.TempDir()
+	requestsRoot := filepath.Join(root, "pythonLibs", "requests")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "pyproject.toml"), "[project]\nname='requests'\n")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "__init__.py"), "")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "compat.py"), "value = 1\n")
+	writeWorkspaceSource(t, filepath.Join(requestsRoot, "src", "requests", "structures.py"), "from .compat import value\n")
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+
+	for _, name := range []string{"requests", "requests.compat", "requests.structures"} {
+		if _, ok := s.LookupModule(name); !ok {
+			t.Fatalf("expected indexed module %q", name)
+		}
+	}
+	for _, name := range []string{"pythonLibs.requests.src.requests", "pythonLibs.requests.src.requests.compat", "pythonLibs.requests.src.requests.structures"} {
+		if _, ok := s.LookupModule(name); ok {
+			t.Fatalf("did not expect workspace-root-style module %q", name)
+		}
+	}
+}
+
 func TestInitializeBuildsModuleIndex(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "pkg", "mod.py"))
@@ -314,6 +374,76 @@ func TestBuildWorkspaceSnapshotsWithPriorityReexportDeterministic(t *testing.T) 
 		if snapshot.ExportHash != wantHash {
 			t.Fatalf("export hash changed across runs: got %d want %d", snapshot.ExportHash, wantHash)
 		}
+	}
+}
+
+func TestBuildPriorityModuleSetTransitiveImports(t *testing.T) {
+	baseByName := map[string]*StartupModuleBase{
+		"main": {Name: "main", Imports: []string{"pkg", "ext"}},
+		"pkg":  {Name: "pkg", Imports: []string{"leaf"}},
+		"leaf": {Name: "leaf"},
+	}
+	openMods := []ModuleFile{{Name: "main"}}
+
+	priority := buildPriorityModuleSet(openMods, baseByName)
+
+	for _, name := range []string{"main", "pkg", "leaf"} {
+		if _, ok := priority[name]; !ok {
+			t.Fatalf("expected %q in priority set: %+v", name, priority)
+		}
+	}
+	if _, ok := priority["ext"]; ok {
+		t.Fatalf("did not expect unresolved external import in priority set: %+v", priority)
+	}
+}
+
+func TestBuildWorkspaceSnapshotsWithPriorityMarksOpenFilesReady(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	depPath := filepath.Join(root, "dep.py")
+	otherPath := filepath.Join(root, "other.py")
+	writeWorkspaceSource(t, depPath, "value = 1\n")
+	writeWorkspaceSource(t, mainPath, "from dep import value\nresult = value\n")
+	writeWorkspaceSource(t, otherPath, "other = 3\n")
+
+	s := New(nil)
+	s.rootPath = root
+	s.buildModuleIndex()
+	mainURI := pathToURI(mainPath)
+	s.Open(lsp.TextDocumentItem{URI: mainURI, Version: 1, Text: "from dep import value\nresult = value\n"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.buildWorkspaceSnapshotsWithPriority(ctx, cancel); err != nil {
+		t.Fatalf("workspace snapshot build failed: %v", err)
+	}
+
+	if s.startup == nil {
+		t.Fatal("expected startup readiness state")
+	}
+	if _, ok := s.startup.priorityModuleNames["main"]; !ok {
+		t.Fatalf("expected open module in priority set: %+v", s.startup.priorityModuleNames)
+	}
+	if _, ok := s.startup.priorityModuleNames["dep"]; !ok {
+		t.Fatalf("expected dependency in priority set: %+v", s.startup.priorityModuleNames)
+	}
+	if _, ok := s.startup.priorityModuleNames["other"]; ok {
+		t.Fatalf("did not expect unrelated module in priority set: %+v", s.startup.priorityModuleNames)
+	}
+	if s.startup.firstApplyAtByURI[mainURI].IsZero() {
+		t.Fatal("expected per-file apply readiness timestamp")
+	}
+	if s.startup.firstDiagAtByURI[mainURI].IsZero() {
+		t.Fatal("expected per-file diagnostic readiness timestamp")
+	}
+	if s.startup.priorityReadyAt.IsZero() {
+		t.Fatal("expected aggregate priority readiness timestamp")
+	}
+	if s.startup.allOpenFilesReadyAt.IsZero() {
+		t.Fatal("expected all-open-files readiness timestamp")
+	}
+	if s.startup.priorityModuleCount != 2 {
+		t.Fatalf("unexpected priority module count: got %d want 2", s.startup.priorityModuleCount)
 	}
 }
 

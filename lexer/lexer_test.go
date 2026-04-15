@@ -50,6 +50,42 @@ func TestSingleNumber(t *testing.T) {
 	}
 }
 
+func TestHexBinaryOctalNumbers(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantLit  string
+		wantType TokenType
+	}{
+		// Hex literals
+		{"0x023301", "<144129>", NUMBER},
+		{"0X1A", "<26>", NUMBER},
+		{"0xff", "<255>", NUMBER},
+		{"0x0", "<0>", NUMBER},
+		// Binary literals
+		{"0b1010", "<10>", NUMBER},
+		{"0B1111", "<15>", NUMBER},
+		{"0b0", "<0>", NUMBER},
+		// Octal literals
+		{"0o777", "<511>", NUMBER},
+		{"0O755", "<493>", NUMBER},
+		{"0o0", "<0>", NUMBER},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := New(tt.input)
+			tok := l.NextToken()
+
+			if tok.Type != tt.wantType {
+				t.Errorf("want %v, got %v", tt.wantType, tok.Type)
+			}
+			if tok.Literal != tt.wantLit {
+				t.Errorf("want literal %q, got %q", tt.wantLit, tok.Literal)
+			}
+		})
+	}
+}
+
 func TestFStringToken(t *testing.T) {
 	input := `f"hello {name}"`
 	l := New(input)
@@ -68,6 +104,42 @@ func TestTripleQuotedFStringToken(t *testing.T) {
 	tok := l.NextToken()
 	if tok.Type != FSTRING {
 		t.Fatalf("expected FSTRING, got %v", tok.Type)
+	}
+}
+
+func TestRawStringToken(t *testing.T) {
+	input := `r"hello\nworld"`
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != STRING {
+		t.Fatalf("expected STRING, got %v", tok.Type)
+	}
+	if tok.Literal != `hello\nworld` {
+		t.Fatalf("unexpected raw string literal: got %q", tok.Literal)
+	}
+}
+
+func TestRawFStringToken(t *testing.T) {
+	input := `rf"hello {name}\n"`
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != FSTRING {
+		t.Fatalf("expected FSTRING, got %v", tok.Type)
+	}
+	if tok.Literal != input {
+		t.Fatalf("unexpected raw f-string literal: got %q", tok.Literal)
+	}
+}
+
+func TestTripleQuotedRawStringToken(t *testing.T) {
+	input := "r'''hello\\nworld'''"
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != STRING {
+		t.Fatalf("expected STRING, got %v", tok.Type)
+	}
+	if tok.Literal != `hello\nworld` {
+		t.Fatalf("unexpected triple raw string literal: got %q", tok.Literal)
 	}
 }
 
@@ -184,4 +256,76 @@ func BenchmarkLexerIndentHeavy(b *testing.B) {
 
 func BenchmarkLexerStringHeavy(b *testing.B) {
 	benchmarkLexAll(b, strings.Repeat("msg = \"hello world\"\nlong = '''abc\ndef\nghi'''\n", 300))
+}
+
+func TestBytesStringLiterals(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantType TokenType
+		wantLit  string
+	}{
+		// Basic bytes strings
+		{`b"hello"`, BSTRING, "hello"},
+		{`b'world'`, BSTRING, "world"},
+		// Raw bytes strings (rb and br prefixes)
+		{`rb"raw bytes"`, BSTRING, "raw bytes"},
+		{`br"raw bytes"`, BSTRING, "raw bytes"},
+		{`RB"uppercase"`, BSTRING, "uppercase"},
+		{`Br"mixed"`, BSTRING, "mixed"},
+		{`bR"mixed2"`, BSTRING, "mixed2"},
+		// Triple-quoted bytes strings
+		{`b"""triple quoted"""`, BSTRING, "triple quoted"},
+		{`rb'''raw triple'''`, BSTRING, "raw triple"},
+		// Empty bytes strings
+		{`b""`, BSTRING, ""},
+		{`rb''`, BSTRING, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := New(tt.input)
+			tok := l.NextToken()
+
+			if tok.Type != tt.wantType {
+				t.Errorf("want %v, got %v", tt.wantType, tok.Type)
+			}
+			if tok.Literal != tt.wantLit {
+				t.Errorf("want literal %q, got %q", tt.wantLit, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestBytesVsStringTokenTypes(t *testing.T) {
+	// Ensure bytes and strings are tokenized differently
+	src := `s = "hello"
+b = b"world"`
+	l := New(src)
+
+	// Skip NAME, EQUAL
+	l.NextToken() // s
+	l.NextToken() // =
+
+	// Get string token
+	strTok := l.NextToken()
+	if strTok.Type != STRING {
+		t.Errorf("expected STRING, got %v", strTok.Type)
+	}
+	if strTok.Literal != "hello" {
+		t.Errorf("expected 'hello', got %q", strTok.Literal)
+	}
+
+	// Skip NEWLINE, NAME, EQUAL
+	l.NextToken() // \n
+	l.NextToken() // b
+	l.NextToken() // =
+
+	// Get bytes token
+	bytesTok := l.NextToken()
+	if bytesTok.Type != BSTRING {
+		t.Errorf("expected BSTRING, got %v", bytesTok.Type)
+	}
+	if bytesTok.Literal != "world" {
+		t.Errorf("expected 'world', got %q", bytesTok.Literal)
+	}
 }
