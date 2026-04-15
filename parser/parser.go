@@ -315,6 +315,24 @@ func (p *Parser) parseAssignmentFromFirst(start uint32, first a.NodeID) a.NodeID
 		value = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
 	}
 
+	// Handle chained assignment: a = b = c (where b = c happens first, then a = result)
+	// The "value" we just parsed is actually another target if followed by '='
+	for p.current.Type == l.EQUAL {
+		// Add the first value as another assignment target
+		p.tree.Nodes[lastTarget].NextSibling = value
+		lastTarget = value
+		targetCount++
+
+		// Parse the actual value after the second '='
+		p.advance()
+		value = p.parseExpression(LOWEST)
+		end = p.current.Start
+		if value == a.NoNode {
+			p.errorCurrent("expected expression after '='")
+			value = p.tree.NewNode(a.NodeErrExp, p.current.Start, p.current.Start)
+		}
+	}
+
 	// Handle tuple unpacking: a, b = 1, 2
 	if value != a.NoNode && p.current.Type == l.COMMA {
 		tuple := p.tree.NewNode(a.NodeTuple, p.tree.Nodes[value].Start, p.tree.Nodes[value].End)

@@ -107,6 +107,10 @@ func (p *Parser) parseFunc() a.NodeID {
 
 			if p.current.Type == l.COMMA {
 				p.advance()
+				// Handle trailing comma: if next token is RPAR, break out of loop
+				if p.current.Type == l.RPAR {
+					break
+				}
 				continue
 			}
 

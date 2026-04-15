@@ -333,6 +333,49 @@ func TestParseFuncAnnotationErrors(t *testing.T) {
 	}
 }
 
+func TestParseFuncTrailingCommaInParams(t *testing.T) {
+	src := `def f(x,):
+    pass
+`
+	p := New(src)
+	tree := p.Parse()
+	if tree.Root == a.NoNode {
+		t.Fatal("failed to parse function with trailing comma")
+	}
+	for _, err := range p.Errors() {
+		if err.Msg == "expected parameter name" {
+			t.Fatal("trailing comma should not cause 'expected parameter name' error")
+		}
+	}
+}
+
+func TestParseFuncMultipleTrailingCommas(t *testing.T) {
+	src := `def f(x, y, z,):
+    pass
+`
+	p := New(src)
+	tree := p.Parse()
+	if tree.Root == a.NoNode {
+		t.Fatal("failed to parse function with trailing comma")
+	}
+	for _, err := range p.Errors() {
+		if err.Msg == "expected parameter name" {
+			t.Fatal("trailing comma should not cause 'expected parameter name' error")
+		}
+	}
+
+	// Verify all 3 parameters were parsed
+	fn := moduleStmt(t, tree, 0)
+	requireKind(t, tree, fn, a.NodeFunctionDef)
+	_, args, _, _ := tree.FunctionPartsWithReturn(fn)
+	if args == a.NoNode {
+		t.Fatal("missing args node")
+	}
+	if tree.ChildCount(args) != 3 {
+		t.Fatalf("expected 3 parameters, got %d", tree.ChildCount(args))
+	}
+}
+
 func TestParseFuncDocstringStoredOnFunction(t *testing.T) {
 	p, tree := parseSource(t, "def f():\n    \"doc\"\n    x\n")
 	requireNoParseErrors(t, p)
@@ -995,6 +1038,102 @@ func TestParseAssignShape(t *testing.T) {
 	}
 	if got := nameText(t, tree, assignKids[2]); got != "y" {
 		t.Fatalf("unexpected second assign target: got %q", got)
+	}
+}
+
+func TestParseChainedAssignment(t *testing.T) {
+	p, tree := parseSource(t, "a = b = 1\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+
+	// Chained assignment: a = b = 1 should have:
+	// Child 0: value (1)
+	// Child 1: first target (b)
+	// Child 2: second target (a)
+	assignKids := requireChildCount(t, tree, assign, 3)
+
+	// Value should be 1
+	if tree.Node(assignKids[0]).Kind != a.NodeNumber {
+		t.Fatalf("expected number value, got %s", tree.Node(assignKids[0]).Kind)
+	}
+	// Targets should be a and b (in reverse order due to how we build)
+	if tree.Node(assignKids[1]).Kind != a.NodeName {
+		t.Fatalf("expected first target to be name, got %s", tree.Node(assignKids[1]).Kind)
+	}
+	if tree.Node(assignKids[2]).Kind != a.NodeName {
+		t.Fatalf("expected second target to be name, got %s", tree.Node(assignKids[2]).Kind)
+	}
+}
+
+func TestParseChainedAssignmentMultiple(t *testing.T) {
+	p, tree := parseSource(t, "a = b = c = d = 1\n")
+	requireNoParseErrors(t, p)
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+
+	// Should have 5 children: value + 4 targets
+	assignKids := children(tree, assign)
+	if len(assignKids) != 5 {
+		t.Fatalf("expected 5 children (1 value + 4 targets), got %d", len(assignKids))
+	}
+
+	// First child should be the value (1)
+	if tree.Node(assignKids[0]).Kind != a.NodeNumber {
+		t.Fatalf("expected number value, got %s", tree.Node(assignKids[0]).Kind)
+	}
+
+	// Rest should be names
+	for i := 1; i < len(assignKids); i++ {
+		if tree.Node(assignKids[i]).Kind != a.NodeName {
+			t.Fatalf("expected child %d to be name, got %s", i, tree.Node(assignKids[i]).Kind)
+		}
+	}
+}
+
+func TestParseChainedAssignmentComplex(t *testing.T) {
+	src := `manager = self.proxy_manager[proxy] = value
+`
+	p := New(src)
+	tree := p.Parse()
+
+	// Should parse without error
+	for _, err := range p.Errors() {
+		if err.Msg == "expected newline after assignment" {
+			t.Fatal("chained assignment should not cause 'expected newline after assignment' error")
+		}
+	}
+
+	assign := moduleStmt(t, tree, 0)
+	requireKind(t, tree, assign, a.NodeAssign)
+
+	// Should have 3 children: value + 2 targets
+	assignKids := children(tree, assign)
+	if len(assignKids) != 3 {
+		t.Fatalf("expected 3 children (1 value + 2 targets), got %d", len(assignKids))
+	}
+
+	// First child should be the value (name "value")
+	if tree.Node(assignKids[0]).Kind != a.NodeName {
+		t.Fatalf("expected value to be name, got %s", tree.Node(assignKids[0]).Kind)
+	}
+	if got := nameText(t, tree, assignKids[0]); got != "value" {
+		t.Fatalf("expected value name to be 'value', got %q", got)
+	}
+
+	// Second child should be name (manager)
+	if tree.Node(assignKids[1]).Kind != a.NodeName {
+		t.Fatalf("expected first target to be name, got %s", tree.Node(assignKids[1]).Kind)
+	}
+	if got := nameText(t, tree, assignKids[1]); got != "manager" {
+		t.Fatalf("expected first target name to be 'manager', got %q", got)
+	}
+
+	// Third child should be subscript (self.proxy_manager[proxy])
+	if tree.Node(assignKids[2]).Kind != a.NodeSubScript {
+		t.Fatalf("expected second target to be subscript, got %s", tree.Node(assignKids[2]).Kind)
 	}
 }
 
